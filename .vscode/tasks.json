@@ -5,7 +5,9 @@
       "label": "dev",
       "type": "shell",
       "command": "pnpm",
-      "args": ["dev"],
+      "args": [
+        "dev"
+      ],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -23,7 +25,9 @@
       "label": "build",
       "type": "shell",
       "command": "pnpm",
-      "args": ["build"],
+      "args": [
+        "build"
+      ],
       "group": "build",
       "presentation": {
         "echo": true,
@@ -36,7 +40,9 @@
       "label": "lint",
       "type": "shell",
       "command": "pnpm",
-      "args": ["lint"],
+      "args": [
+        "lint"
+      ],
       "group": "test",
       "presentation": {
         "echo": true,
@@ -49,7 +55,11 @@
       "label": "type-check",
       "type": "shell",
       "command": "pnpm",
-      "args": ["exec", "tsc", "--noEmit"],
+      "args": [
+        "exec",
+        "tsc",
+        "--noEmit"
+      ],
       "group": "test",
       "presentation": {
         "echo": true,
@@ -62,7 +72,9 @@
       "label": "blueprint-guard",
       "type": "shell",
       "command": "node",
-      "args": ["scripts/blueprint-guard.mjs"],
+      "args": [
+        "scripts/blueprint-guard.mjs"
+      ],
       "group": "test",
       "presentation": {
         "echo": true,
@@ -75,7 +87,9 @@
       "label": "check-bundle",
       "type": "shell",
       "command": "node",
-      "args": ["scripts/check-bundle.mjs"],
+      "args": [
+        "scripts/check-bundle.mjs"
+      ],
       "group": "test",
       "presentation": {
         "echo": true,

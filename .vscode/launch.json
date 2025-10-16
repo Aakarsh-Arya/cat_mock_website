@@ -6,7 +6,9 @@
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/node_modules/.bin/next",
-      "args": ["dev"],
+      "args": [
+        "dev"
+      ],
       "env": {
         "NODE_OPTIONS": "--inspect"
       },
@@ -24,7 +26,9 @@
       "type": "node",
       "request": "launch",
       "program": "${workspaceFolder}/node_modules/.bin/next",
-      "args": ["dev"],
+      "args": [
+        "dev"
+      ],
       "env": {
         "NODE_OPTIONS": "--inspect"
       },
