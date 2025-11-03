@@ -9,7 +9,7 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
     return (
         <main style={{ padding: 24 }}>
             <h1>Mock: {paperId}</h1>
-            <p>Paper details and a "Start exam" button will appear here.</p>
+           <p>Click the &quot;Download&quot; button to get the file</p>
             <p>TODO: Create attempt and redirect to /exam/[attemptId].</p>
         </main>
     );
