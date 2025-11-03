@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
         }
         const res = NextResponse.next();
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
-        const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+    const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
         const supabase = createServerClient(url || 'http://localhost:54321', anon || 'anon', {
             cookies: {
                 get(name: string) {
