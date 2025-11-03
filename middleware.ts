@@ -13,7 +13,7 @@ export async function middleware(req: NextRequest) {
             // Recreate a server client to read the user for gating (cookies copied on res)
             const { createServerClient } = await import('@supabase/ssr');
             const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
-            const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+            const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
             const supabase = createServerClient(url || 'http://localhost:54321', anon || 'anon', {
                 cookies: {
                     get(name: string) {

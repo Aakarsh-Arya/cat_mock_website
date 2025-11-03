@@ -3,7 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 
 export function sbServer() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+    const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
     // Generic server client without cookie persistence (use per-request client in routes for auth-sensitive flows)
     return createServerClient(url || 'http://localhost:54321', anon || 'anon', {
         cookies: {
