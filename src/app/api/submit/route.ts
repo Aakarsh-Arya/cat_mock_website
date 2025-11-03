@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
         }
         // Placeholder success response
         return NextResponse.json({ success: true, score: 0, accuracy: 0, echo: { attemptId, count: Array.isArray(responses) ? responses.length : 0, timeRemaining } });
-    } catch (e) {
+    } catch {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
 }

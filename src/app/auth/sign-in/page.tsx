@@ -1,10 +1,18 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { Suspense, useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { sb } from '../../../lib/supabase/client';
 
 export default function SignInPage() {
+    return (
+        <Suspense fallback={<main style={{ padding: 24 }}>Loading sign-in…</main>}>
+            <SignInContent />
+        </Suspense>
+    );
+}
+
+function SignInContent() {
     const [loading, setLoading] = useState(false);
     const params = useSearchParams();
     const redirectTo = useMemo(() => params.get('redirect_to') || '/dashboard', [params]);

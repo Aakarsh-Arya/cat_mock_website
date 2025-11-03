@@ -1,9 +1,5 @@
-interface Params {
-    params: { attemptId: string };
-}
-
-export default function ExamPage({ params }: Params) {
-    const { attemptId } = params;
+export default async function ExamPage({ params }: { params: Promise<Record<string, unknown>> }) {
+    const { attemptId } = (await params) as { attemptId: string };
     return (
         <main style={{ padding: 24 }}>
             <h1>Exam Attempt: {attemptId}</h1>
