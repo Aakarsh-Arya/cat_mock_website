@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 export async function POST(req: NextRequest) {
-    // Validate auth session and that user owns the attemptId; compute score server-side (stub)
     try {
-        const { attemptId, responses, timeRemaining } = await req.json();
-        if (!attemptId) {
-            return NextResponse.json({ error: 'attemptId required' }, { status: 400 });
+        const { attemptId, questionId, answer } = await req.json();
+        if (!attemptId || !questionId) {
+            return NextResponse.json({ error: 'attemptId and questionId required' }, { status: 400 });
         }
+
         const res = NextResponse.next();
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
         const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        // Verify ownership of the attempt
+        // Ensure the attempt belongs to the user
         const { data: attempt } = await supabase
             .from('attempts')
             .select('id, user_id')
@@ -40,14 +40,18 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
-        // Prefer server-side scoring via RPC if available
-        const { data: summary, error: rpcError } = await supabase.rpc('finalize_attempt', { attempt_id: attemptId });
-        if (!rpcError && summary) {
-            return NextResponse.json({ success: true, ...summary });
+        // Upsert response
+        const { data, error } = await supabase
+            .from('responses')
+            .upsert({ attempt_id: attemptId, question_id: questionId, answer }, { onConflict: 'attempt_id,question_id' })
+            .select('attempt_id, question_id, answer, updated_at')
+            .single();
+
+        if (error) {
+            return NextResponse.json({ error: error.message }, { status: 500 });
         }
 
-        // Fallback: basic echo response if RPC is missing (development only)
-        return NextResponse.json({ success: true, score: 0, accuracy: 0, echo: { attemptId, count: Array.isArray(responses) ? responses.length : 0, timeRemaining } });
+        return NextResponse.json({ success: true, data });
     } catch {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
