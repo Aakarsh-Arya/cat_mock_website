@@ -10,11 +10,11 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     // Load attempt for current user
     const { data: attempt, error } = await supabase
         .from('attempts')
-        .select('id, paper_id, status, score, accuracy, submitted_at')
+        .select('id, paper_id, status, score, accuracy, submitted_at, user_id')
         .eq('id', attemptId)
         .maybeSingle();
 
-    const forbidden = attempt && userId && (attempt as any).user_id && (attempt as any).user_id !== userId;
+    const forbidden = attempt && userId && attempt.user_id && attempt.user_id !== userId;
 
     return (
         <main style={{ padding: 24 }}>
