@@ -16,8 +16,9 @@ export default function TestLoginPage() {
             const { data, error: err } = await sb().auth.getSession();
             if (err) throw err;
             setSessionJson(JSON.stringify(data.session, null, 2));
-        } catch (e: any) {
-            setError(e?.message ?? 'Failed to load session');
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Failed to load session';
+            setError(msg);
             setSessionJson('');
         } finally {
             setLoading(false);
