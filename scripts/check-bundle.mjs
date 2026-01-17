@@ -6,10 +6,8 @@
  */
 
 import { execSync } from 'child_process';
-import { readFileSync } from 'fs';
-
 const BUDGET_MB = 1.5; // 1.5 MB budget
-const BUILD_DIR = '.next';
+
 
 function getBundleSize() {
   try {

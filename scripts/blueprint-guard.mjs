@@ -26,7 +26,6 @@ function extractAnchors(blueprintContent) {
 
 // Find anchor references in code
 function findAnchorReferences(dir, anchors) {
-  const files = [];
   const foundAnchors = new Set();
 
   function scanDirectory(currentDir) {
