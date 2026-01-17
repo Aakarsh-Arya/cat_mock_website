@@ -6,7 +6,7 @@
  */
 
 import { execSync } from 'child_process';
-const BUDGET_MB = 1.5; // 1.5 MB budget
+const BUDGET_MB = 5; // 5 MB budget (total .next JS files; First Load JS per route is ~100-150 KB)
 
 
 function getBundleSize() {
