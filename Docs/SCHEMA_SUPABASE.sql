@@ -16,11 +16,14 @@ CREATE TABLE public.users (
 -- Papers table (exam papers)
 CREATE TABLE public.papers (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  slug TEXT UNIQUE, -- URL-friendly identifier for the paper
   title TEXT NOT NULL,
+  description TEXT, -- Brief description of the paper
   year INTEGER NOT NULL,
   total_questions INTEGER NOT NULL,
   duration_minutes INTEGER NOT NULL DEFAULT 180, -- 3 hours for CAT
   sections JSONB, -- Array of section objects with name, questions count, time
+  published BOOLEAN DEFAULT FALSE, -- Whether the paper is visible to users
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
@@ -48,7 +51,7 @@ CREATE TABLE public.questions (
 -- Attempts table (user attempts at papers)
 CREATE TABLE public.attempts (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL DEFAULT auth.uid(),
   paper_id UUID REFERENCES public.papers(id) ON DELETE CASCADE NOT NULL,
   started_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   completed_at TIMESTAMP WITH TIME ZONE,
@@ -58,9 +61,8 @@ CREATE TABLE public.attempts (
   total_score DECIMAL(5,2),
   section_scores JSONB, -- Scores per section
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
-
-  UNIQUE(user_id, paper_id) -- One attempt per user per paper
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+  -- Note: UNIQUE(user_id, paper_id) removed to allow multiple attempts per paper
 );
 
 -- Responses table (user answers)
