@@ -12,18 +12,27 @@ type Paper = {
     duration_minutes: number | null;
     difficulty_level: string | null;
     is_free: boolean;
+    available_from?: string | null;
+    available_until?: string | null;
 };
 
 export default async function MocksPage() {
     const supabase = await sbSSR();
+
+    // Fetch published papers. Availability window is filtered in code for reliability.
     const { data, error } = await supabase
         .from('papers')
-        .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, difficulty_level, is_free')
+        .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, difficulty_level, is_free, available_from, available_until')
         .eq('published', true)
         .order('year', { ascending: false })
         .order('created_at', { ascending: false });
 
-    const papers: Paper[] = data ?? [];
+    const now = Date.now();
+    const papers: Paper[] = (data ?? []).filter((p: Paper) => {
+        const fromOk = !p.available_from || Date.parse(p.available_from) <= now;
+        const untilOk = !p.available_until || Date.parse(p.available_until) >= now;
+        return fromOk && untilOk;
+    });
 
     // Group papers by year
     const papersByYear = papers.reduce((acc, paper) => {

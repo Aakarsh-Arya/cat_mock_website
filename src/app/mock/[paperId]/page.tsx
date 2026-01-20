@@ -35,12 +35,33 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
 
     const supabase = await sbSSR();
 
-    // Get paper details
-    const { data: paper, error } = await supabase
-        .from('papers')
-        .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
-        .or(`id.eq.${paperId},slug.eq.${paperId}`)
-        .maybeSingle() as { data: Paper | null; error: unknown };
+    // Get paper details - try by UUID first, then by slug
+    let paper: Paper | null = null;
+    let error: unknown = null;
+
+    // Check if paperId looks like a UUID
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
+
+    if (isUUID) {
+        const result = await supabase
+            .from('papers')
+            .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
+            .eq('id', paperId)
+            .maybeSingle();
+        paper = result.data as Paper | null;
+        error = result.error;
+    }
+
+    // If not found by UUID or not a UUID, try by slug
+    if (!paper && !error) {
+        const result = await supabase
+            .from('papers')
+            .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
+            .eq('slug', paperId)
+            .maybeSingle();
+        paper = result.data as Paper | null;
+        error = result.error;
+    }
 
     // Get user's previous attempts on this paper
     const { data: { user } } = await supabase.auth.getUser();
@@ -69,11 +90,29 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             redirect(`/auth/sign-in?redirect_to=${encodeURIComponent(`/mock/${paperId}`)}`);
         }
 
-        const { data: p } = await s
-            .from('papers')
-            .select('id, published, sections, duration_minutes')
-            .or(`id.eq.${paperId},slug.eq.${paperId}`)
-            .maybeSingle();
+        // Check if paperId looks like a UUID
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
+
+        type PaperData = { id: string; published: boolean; sections: Section[]; duration_minutes: number };
+        let p: PaperData | null = null;
+
+        if (isUUID) {
+            const { data } = await s
+                .from('papers')
+                .select('id, published, sections, duration_minutes')
+                .eq('id', paperId)
+                .maybeSingle();
+            p = data as PaperData | null;
+        }
+
+        if (!p) {
+            const { data } = await s
+                .from('papers')
+                .select('id, published, sections, duration_minutes')
+                .eq('slug', paperId)
+                .maybeSingle();
+            p = data as PaperData | null;
+        }
 
         if (!p || p.published !== true) {
             throw new Error('Paper not available');

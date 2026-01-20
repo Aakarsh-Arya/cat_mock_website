@@ -73,22 +73,88 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         redirect(`/result/${attemptId}`);
     }
 
-    // Get questions for this paper (excluding correct_answer during exam)
-    const { data: questionsData, error: questionsError } = await supabase
-        .from('questions')
-        .select(`
-            id, paper_id, section, question_number,
-            question_text, question_type, options,
-            positive_marks, negative_marks,
-            difficulty, topic, subtopic, is_active,
-            created_at, updated_at
-        `)
-        .eq('paper_id', attemptData.paper_id)
-        .eq('is_active', true)
-        .order('section')
-        .order('question_number');
+    // Get questions for this paper.
+    // Prefer secure view `questions_exam` (excludes correct_answer). Fallback to `questions` if view isn't deployed yet.
+    type QuestionRow = {
+        id: string;
+        paper_id: string;
+        section: string;
+        question_number: number;
+        question_text: string;
+        question_type: string;
+        options: unknown;
+        positive_marks: number;
+        negative_marks: number;
+        difficulty: string | null;
+        topic: string | null;
+        subtopic: string | null;
+        is_active: boolean;
+        created_at: string;
+        updated_at: string;
+    };
 
-    if (questionsError || !questionsData) {
+    let questionsData: QuestionRow[] | null = null;
+
+    {
+        const { data, error } = await supabase
+            .from('questions_exam')
+            .select('*')
+            .eq('paper_id', attemptData.paper_id)
+            .eq('is_active', true)
+            .order('section')
+            .order('question_number');
+
+        if (!error && data) {
+            questionsData = data as unknown as QuestionRow[];
+        } else {
+            const { data: fallbackData, error: fallbackError } = await supabase
+                .from('questions')
+                .select(
+                    [
+                        'id',
+                        'paper_id',
+                        'section',
+                        'question_number',
+                        'question_text',
+                        'question_type',
+                        'options',
+                        'positive_marks',
+                        'negative_marks',
+                        'difficulty',
+                        'topic',
+                        'subtopic',
+                        'is_active',
+                        'created_at',
+                        'updated_at',
+                    ].join(',')
+                )
+                .eq('paper_id', attemptData.paper_id)
+                .eq('is_active', true)
+                .order('section')
+                .order('question_number');
+
+            if (fallbackError || !fallbackData) {
+                return (
+                    <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                        <div className="text-center max-w-xl px-4">
+                            <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
+                            <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
+                            <p className="text-gray-600 mb-6">
+                                If you just updated the schema, ensure the database migration for views/RLS has been applied.
+                            </p>
+                            <Link href="/dashboard" className="text-blue-600 hover:underline">
+                                Back to Dashboard
+                            </Link>
+                        </div>
+                    </main>
+                );
+            }
+
+            questionsData = fallbackData as unknown as QuestionRow[];
+        }
+    }
+
+    if (!questionsData) {
         return (
             <main className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="text-center">
@@ -171,14 +237,14 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         updated_at: attemptData.updated_at,
     };
 
-    const questions: Question[] = questionsData.map((q) => ({
+    const questions: Question[] = questionsData.map((q: QuestionRow) => ({
         id: q.id,
         paper_id: q.paper_id,
         section: q.section as Question['section'],
         question_number: q.question_number,
         question_text: q.question_text,
         question_type: q.question_type as Question['question_type'],
-        options: q.options,
+        options: q.options as Question['options'],
         positive_marks: q.positive_marks,
         negative_marks: q.negative_marks,
         difficulty: q.difficulty as Question['difficulty'],

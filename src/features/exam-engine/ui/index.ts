@@ -18,4 +18,4 @@ export { MCQRenderer } from './MCQRenderer';
 export { TITARenderer } from './TITARenderer';
 
 // Navigation
-export { NavigationButtons, SectionSubmitButton } from './NavigationButtons';
+export { NavigationButtons, ExamSubmitButton } from './NavigationButtons';

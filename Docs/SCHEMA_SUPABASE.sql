@@ -246,15 +246,36 @@ CREATE POLICY "Users can view their own profile" ON public.users
 CREATE POLICY "Users can update their own profile" ON public.users
   FOR UPDATE USING (auth.uid() = id);
 
--- Papers policies (read-only for all authenticated users)
-CREATE POLICY "Authenticated users can view published papers" ON public.papers
+-- Papers policies (read-only for authenticated users, must be published AND within availability window)
+CREATE POLICY "Authenticated users can view available papers" ON public.papers
   FOR SELECT TO authenticated 
-  USING (published = true OR auth.uid() IN (SELECT id FROM public.users WHERE email LIKE '%@admin%'));
+  USING (
+    -- Admins can see everything
+    auth.uid() IN (SELECT id FROM public.users WHERE email LIKE '%@admin%')
+    OR (
+      -- Published papers within availability window
+      published = true
+      AND (available_from IS NULL OR available_from <= NOW())
+      AND (available_until IS NULL OR available_until >= NOW())
+    )
+  );
 
--- Questions policies (read-only for all authenticated users, only active questions)
+-- Questions policies (active questions for papers that are available)
+-- SECURITY NOTE: This policy allows SELECT on all columns including correct_answer.
+-- Use the questions_exam view (defined below) for exam runtime to exclude correct_answer.
+-- For result/solution views, use questions_with_answers view (admin or post-submission only).
 CREATE POLICY "Authenticated users can view active questions" ON public.questions
   FOR SELECT TO authenticated 
-  USING (is_active = true);
+  USING (
+    is_active = true
+    AND EXISTS (
+      SELECT 1 FROM public.papers p
+      WHERE p.id = paper_id
+      AND p.published = true
+      AND (p.available_from IS NULL OR p.available_from <= NOW())
+      AND (p.available_until IS NULL OR p.available_until >= NOW())
+    )
+  );
 
 -- Attempts policies
 CREATE POLICY "Users can view their own attempts" ON public.attempts
@@ -289,6 +310,62 @@ CREATE POLICY "Authenticated users can view leaderboard" ON public.leaderboard
 -- User analytics policies
 CREATE POLICY "Users can view their own analytics" ON public.user_analytics
   FOR SELECT USING (auth.uid() = user_id);
+
+-- ============================================================================
+-- SECURE VIEWS (for column-level security)
+-- ============================================================================
+
+-- View for exam runtime: questions WITHOUT correct_answer, solution
+-- Use this view in app code when fetching questions during an active exam
+CREATE OR REPLACE VIEW public.questions_exam AS
+SELECT 
+  id,
+  paper_id,
+  section,
+  question_number,
+  question_text,
+  question_type,
+  options,
+  positive_marks,
+  negative_marks,
+  difficulty,
+  topic,
+  subtopic,
+  is_active,
+  created_at,
+  updated_at
+  -- EXCLUDED: correct_answer, solution_text, solution_image_url, video_solution_url
+FROM public.questions
+WHERE is_active = true;
+
+-- Grant access to authenticated users
+GRANT SELECT ON public.questions_exam TO authenticated;
+
+-- View for results/solutions: questions WITH answers (for post-submission review)
+-- This can be used after an attempt is completed
+CREATE OR REPLACE VIEW public.questions_with_solutions AS
+SELECT 
+  q.id,
+  q.paper_id,
+  q.section,
+  q.question_number,
+  q.question_text,
+  q.question_type,
+  q.options,
+  q.correct_answer,
+  q.positive_marks,
+  q.negative_marks,
+  q.solution_text,
+  q.solution_image_url,
+  q.video_solution_url,
+  q.difficulty,
+  q.topic,
+  q.subtopic
+FROM public.questions q
+WHERE q.is_active = true;
+
+-- Grant access to authenticated users (RLS on base table still applies)
+GRANT SELECT ON public.questions_with_solutions TO authenticated;
 
 -- ============================================================================
 -- FUNCTIONS & TRIGGERS

@@ -16,7 +16,7 @@ import { ExamTimer } from './ExamTimer';
 import { QuestionPalette } from './QuestionPalette';
 import { MCQRenderer } from './MCQRenderer';
 import { TITARenderer } from './TITARenderer';
-import { NavigationButtons, SectionSubmitButton } from './NavigationButtons';
+import { NavigationButtons, ExamSubmitButton } from './NavigationButtons';
 import type { Paper, Question, SectionName } from '@/types/exam';
 import { getQuestionsForSection } from '@/types/exam';
 
@@ -125,10 +125,10 @@ function QuestionArea({ question, questionNumber, totalQuestions }: QuestionArea
                     {question.difficulty && (
                         <span
                             className={`px-2 py-1 text-xs font-medium rounded ${question.difficulty === 'easy'
-                                    ? 'bg-green-100 text-green-700'
-                                    : question.difficulty === 'medium'
-                                        ? 'bg-yellow-100 text-yellow-700'
-                                        : 'bg-red-100 text-red-700'
+                                ? 'bg-green-100 text-green-700'
+                                : question.difficulty === 'medium'
+                                    ? 'bg-yellow-100 text-yellow-700'
+                                    : 'bg-red-100 text-red-700'
                                 }`}
                         >
                             {question.difficulty}
@@ -185,12 +185,7 @@ export function ExamLayout({
     // Current question
     const currentQuestion = sectionQuestions[currentQuestionIndex];
 
-    // Handle section submit
-    const handleSubmitSection = useCallback(() => {
-        if (currentSectionIndex < 2) {
-            moveToNextSection();
-        }
-    }, [currentSectionIndex, moveToNextSection]);
+    // NOTE: Section submit removed - sections advance only via timer expiry (SOP requirement)
 
     // Handle exam submit
     const handleSubmitExam = useCallback(async () => {
@@ -265,10 +260,10 @@ export function ExamLayout({
                             onSave={onSaveResponse}
                         />
 
-                        {/* Section/Exam Submit (shown at bottom) */}
+                        {/* Exam Submit - only active in last section (QA) */}
+                        {/* Sections advance via timer expiry only (SOP requirement) */}
                         <div className="flex justify-center pt-4 border-t border-gray-200">
-                            <SectionSubmitButton
-                                onSubmitSection={handleSubmitSection}
+                            <ExamSubmitButton
                                 onSubmitExam={handleSubmitExam}
                                 isLastSection={isLastSection}
                             />

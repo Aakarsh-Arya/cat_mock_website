@@ -1,0 +1,144 @@
+{
+    "paper": {
+        "slug": "cat-2024-mock-2",
+        "title": "CAT 2024 Mock Test 2",
+        "description": "Full-length CAT mock test following the 2024 pattern with 66 questions across VARC, DILR, and QA sections.",
+        "year": 2024,
+        "total_questions": 66,
+        "total_marks": 198,
+        "duration_minutes": 120,
+        "sections": [
+            {
+                "name": "VARC",
+                "questions": 24,
+                "time": 40,
+                "marks": 72
+            },
+            {
+                "name": "DILR",
+                "questions": 20,
+                "time": 40,
+                "marks": 60
+            },
+            {
+                "name": "QA",
+                "questions": 22,
+                "time": 40,
+                "marks": 66
+            }
+        ],
+        "default_positive_marks": 3.0,
+        "default_negative_marks": 1.0,
+        "difficulty_level": "cat-level",
+        "is_free": true,
+        "published": false,
+        "available_from": null,
+        "available_until": null
+    },
+    "questions": [
+        {
+            "section": "VARC",
+            "question_number": 1,
+            "question_text": "Read the following passage and answer the question:\n\n[Your passage text here]\n\nWhat is the main argument of the passage?",
+            "question_type": "MCQ",
+            "options": [
+                "Option A text",
+                "Option B text",
+                "Option C text",
+                "Option D text"
+            ],
+            "correct_answer": "B",
+            "positive_marks": 3.0,
+            "negative_marks": 1.0,
+            "difficulty": "medium",
+            "topic": "Reading Comprehension",
+            "subtopic": "Main Idea",
+            "solution_text": "The correct answer is B because..."
+        },
+        {
+            "section": "VARC",
+            "question_number": 2,
+            "question_text": "Choose the sentence that best completes the paragraph:\n\n[Your paragraph here] ___________",
+            "question_type": "MCQ",
+            "options": [
+                "Option A",
+                "Option B",
+                "Option C",
+                "Option D"
+            ],
+            "correct_answer": "A",
+            "positive_marks": 3.0,
+            "negative_marks": 1.0,
+            "difficulty": "easy",
+            "topic": "Para Completion",
+            "subtopic": null,
+            "solution_text": null
+        },
+        {
+            "section": "DILR",
+            "question_number": 1,
+            "question_text": "Study the following data and answer:\n\n[Your data/puzzle description here]\n\nWhat is the answer?",
+            "question_type": "MCQ",
+            "options": [
+                "Option A",
+                "Option B",
+                "Option C",
+                "Option D"
+            ],
+            "correct_answer": "C",
+            "positive_marks": 3.0,
+            "negative_marks": 1.0,
+            "difficulty": "hard",
+            "topic": "Data Interpretation",
+            "subtopic": "Tables",
+            "solution_text": null
+        },
+        {
+            "section": "DILR",
+            "question_number": 2,
+            "question_text": "How many ways can you arrange 5 people in a row?",
+            "question_type": "TITA",
+            "options": null,
+            "correct_answer": "120",
+            "positive_marks": 3.0,
+            "negative_marks": 0,
+            "difficulty": "easy",
+            "topic": "Logical Reasoning",
+            "subtopic": "Permutations",
+            "solution_text": "5! = 5 × 4 × 3 × 2 × 1 = 120"
+        },
+        {
+            "section": "QA",
+            "question_number": 1,
+            "question_text": "If 20% of a number is 50, what is the number?",
+            "question_type": "MCQ",
+            "options": [
+                "200",
+                "250",
+                "300",
+                "350"
+            ],
+            "correct_answer": "B",
+            "positive_marks": 3.0,
+            "negative_marks": 1.0,
+            "difficulty": "easy",
+            "topic": "Percentages",
+            "subtopic": null,
+            "solution_text": "Let x be the number. 20% of x = 50 → 0.2x = 50 → x = 250"
+        },
+        {
+            "section": "QA",
+            "question_number": 2,
+            "question_text": "Find the value of √(144 + 25)",
+            "question_type": "TITA",
+            "options": null,
+            "correct_answer": "13",
+            "positive_marks": 3.0,
+            "negative_marks": 0,
+            "difficulty": "easy",
+            "topic": "Numbers",
+            "subtopic": "Square Roots",
+            "solution_text": "√(144 + 25) = √169 = 13"
+        }
+    ]
+}

@@ -35,7 +35,7 @@ export {
     MCQRenderer,
     TITARenderer,
     NavigationButtons,
-    SectionSubmitButton,
+    ExamSubmitButton,
 } from './ui';
 
 // Types are re-exported from the central types module

@@ -231,12 +231,14 @@ export function NavigationButtons({
                 </NavButton>
 
                 {isLastQuestion ? (
+                    // Last question in section - no manual submit allowed
+                    // Section advances only when timer expires (per SOP)
                     <NavButton
-                        variant="primary"
-                        onClick={handleSubmitSection}
-                        disabled={isLastSection}
+                        variant="secondary"
+                        onClick={() => { }}
+                        disabled
                     >
-                        {isLastSection ? 'Last Question' : 'Submit Section →'}
+                        {isLastSection ? 'Last Question' : 'Wait for Timer'}
                     </NavButton>
                 ) : (
                     <NavButton
@@ -252,45 +254,43 @@ export function NavigationButtons({
 }
 
 // =============================================================================
-// SECTION SUBMIT BUTTON (Separate component for end-of-section)
+// EXAM SUBMIT BUTTON (Only shown in last section - QA)
+// Sections advance via timer expiry only (per SOP for full-length mocks)
 // =============================================================================
 
-interface SectionSubmitProps {
-    onSubmitSection: () => void;
+interface ExamSubmitProps {
     onSubmitExam: () => void;
     isLastSection: boolean;
     className?: string;
 }
 
-export function SectionSubmitButton({
-    onSubmitSection,
+export function ExamSubmitButton({
     onSubmitExam,
     isLastSection,
     className = '',
-}: SectionSubmitProps) {
+}: ExamSubmitProps) {
+    // Only render submit button in last section (QA)
+    if (!isLastSection) {
+        return (
+            <div className={`flex items-center gap-4 ${className}`}>
+                <p className="text-sm text-gray-500 italic">
+                    Section will auto-submit when timer expires
+                </p>
+            </div>
+        );
+    }
+
     return (
         <div className={`flex items-center gap-4 ${className}`}>
-            {isLastSection ? (
-                <button
-                    type="button"
-                    onClick={onSubmitExam}
-                    className="px-6 py-3 bg-green-600 text-white font-bold rounded-lg
+            <button
+                type="button"
+                onClick={onSubmitExam}
+                className="px-6 py-3 bg-green-600 text-white font-bold rounded-lg
             hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500
             transition-colors"
-                >
-                    Submit Exam
-                </button>
-            ) : (
-                <button
-                    type="button"
-                    onClick={onSubmitSection}
-                    className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg
-            hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500
-            transition-colors"
-                >
-                    Submit Section & Move to Next
-                </button>
-            )}
+            >
+                Submit Exam
+            </button>
         </div>
     );
 }

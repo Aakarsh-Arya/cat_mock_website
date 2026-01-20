@@ -67,33 +67,54 @@ export async function fetchPaperForExam(
             return { success: false, error: 'Paper not found' };
         }
 
-        // Fetch questions (excluding correct_answer during exam)
-        const { data: questions, error: questionsError } = await supabase
-            .from('questions')
-            .select(`
-        id,
-        paper_id,
-        section,
-        question_number,
-        question_text,
-        question_type,
-        options,
-        positive_marks,
-        negative_marks,
-        difficulty,
-        topic,
-        subtopic,
-        is_active,
-        created_at,
-        updated_at
-      `)
-            .eq('paper_id', paperId)
-            .eq('is_active', true)
-            .order('section')
-            .order('question_number');
+        // Fetch questions using the secure view (excludes correct_answer).
+        // Fallback to selecting explicit columns from `questions` if the view isn't deployed yet.
+        let questions: Question[] = [];
+        {
+            const { data, error } = await supabase
+                .from('questions_exam')
+                .select('*')
+                .eq('paper_id', paperId)
+                .eq('is_active', true)
+                .order('section')
+                .order('question_number');
 
-        if (questionsError) {
-            return { success: false, error: 'Failed to fetch questions' };
+            if (!error && data) {
+                questions = data as unknown as Question[];
+            } else {
+                const { data: fallbackData, error: fallbackError } = await supabase
+                    .from('questions')
+                    .select(
+                        [
+                            'id',
+                            'paper_id',
+                            'section',
+                            'question_number',
+                            'question_text',
+                            'question_type',
+                            'options',
+                            'positive_marks',
+                            'negative_marks',
+                            'difficulty',
+                            'topic',
+                            'subtopic',
+                            'is_active',
+                            'created_at',
+                            'updated_at',
+                        ].join(',')
+                    )
+                    .eq('paper_id', paperId)
+                    .eq('is_active', true)
+                    .order('section')
+                    .order('question_number');
+
+                if (fallbackError || !fallbackData) {
+                    console.error('Failed to fetch questions (view and fallback):', error, fallbackError);
+                    return { success: false, error: 'Failed to fetch questions' };
+                }
+
+                questions = fallbackData as unknown as Question[];
+            }
         }
 
         // Check for existing in-progress attempt
@@ -162,7 +183,7 @@ export async function fetchPaperForExam(
             success: true,
             data: {
                 paper: paper as Paper,
-                questions: questions as Question[],
+                questions,
                 attempt,
             },
         };
