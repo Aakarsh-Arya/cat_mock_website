@@ -1,36 +1,14 @@
+/**
+ * @fileoverview Exam Page (Server Component)
+ * @description Fetches exam data and renders the client-side exam interface
+ * @blueprint Milestone 4 SOP-SSOT - Exam Engine
+ */
+
 import { sbSSR } from '@/lib/supabase/server';
+import { redirect } from 'next/navigation';
 import Link from 'next/link';
-
-interface Question {
-    id: string;
-    section: string;
-    question_number: number;
-    question_text: string;
-    question_type: 'MCQ' | 'TITA';
-    options: string[] | null;
-    positive_marks: number;
-    negative_marks: number;
-    difficulty: string | null;
-}
-
-interface Paper {
-    id: string;
-    title: string;
-    duration_minutes: number;
-    sections: { name: string; questions: number; time: number }[];
-    total_marks: number;
-}
-
-interface Attempt {
-    id: string;
-    paper_id: string;
-    status: string;
-    started_at: string;
-    current_section: string | null;
-    current_question: number;
-    time_remaining: Record<string, number> | null;
-    papers: Paper;
-}
+import { ExamClient } from './ExamClient';
+import type { Paper, Question, Attempt, SectionConfig } from '@/types/exam';
 
 export default async function ExamPage({ params }: { params: Promise<Record<string, unknown>> }) {
     const { attemptId } = (await params) as { attemptId: string };
@@ -38,192 +16,178 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
+        redirect(`/auth/sign-in?redirect_to=${encodeURIComponent(`/exam/${attemptId}`)}`);
+    }
+
+    // Get attempt with paper details
+    const { data: attemptData, error: attemptError } = await supabase
+        .from('attempts')
+        .select(`
+            id, user_id, paper_id, status, started_at, submitted_at, completed_at,
+            current_section, current_question, time_remaining,
+            total_score, correct_count, incorrect_count, unanswered_count,
+            section_scores, percentile, rank, created_at, updated_at,
+            papers (
+                id, slug, title, description, year,
+                total_questions, total_marks, duration_minutes, sections,
+                default_positive_marks, default_negative_marks,
+                published, available_from, available_until,
+                difficulty_level, is_free, attempt_limit,
+                created_at, updated_at
+            )
+        `)
+        .eq('id', attemptId)
+        .single();
+
+    if (attemptError || !attemptData) {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>Exam Attempt</h1>
-                <p>Please sign in to access this attempt.</p>
-                <Link href={`/auth/sign-in?redirect_to=${encodeURIComponent(`/exam/${attemptId}`)}`}>
-                    Sign In
-                </Link>
+            <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Attempt Not Found</h1>
+                    <p className="text-gray-600 mb-6">This exam attempt does not exist or you don&apos;t have access to it.</p>
+                    <Link href="/dashboard" className="text-blue-600 hover:underline">
+                        Back to Dashboard
+                    </Link>
+                </div>
             </main>
         );
     }
 
-    // Get attempt with paper details
-    const { data: attempt } = await supabase
-        .from('attempts')
-        .select(`
-            id, paper_id, status, started_at, current_section, current_question, time_remaining,
-            papers (id, title, duration_minutes, sections, total_marks)
-        `)
-        .eq('id', attemptId)
-        .maybeSingle() as { data: Attempt | null };
-
-    if (!attempt) {
+    // Verify user owns this attempt
+    if (attemptData.user_id !== user.id) {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>Attempt Not Found</h1>
-                <p>This exam attempt does not exist or you don&apos;t have access to it.</p>
-                <Link href="/dashboard">Back to Dashboard</Link>
+            <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Unauthorized</h1>
+                    <p className="text-gray-600 mb-6">You don&apos;t have access to this exam attempt.</p>
+                    <Link href="/dashboard" className="text-blue-600 hover:underline">
+                        Back to Dashboard
+                    </Link>
+                </div>
             </main>
         );
     }
 
     // Check if attempt is already completed
-    if (attempt.status === 'completed' || attempt.status === 'submitted') {
+    if (attemptData.status === 'completed' || attemptData.status === 'submitted') {
+        redirect(`/result/${attemptId}`);
+    }
+
+    // Get questions for this paper (excluding correct_answer during exam)
+    const { data: questionsData, error: questionsError } = await supabase
+        .from('questions')
+        .select(`
+            id, paper_id, section, question_number,
+            question_text, question_type, options,
+            positive_marks, negative_marks,
+            difficulty, topic, subtopic, is_active,
+            created_at, updated_at
+        `)
+        .eq('paper_id', attemptData.paper_id)
+        .eq('is_active', true)
+        .order('section')
+        .order('question_number');
+
+    if (questionsError || !questionsData) {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>Exam Already Submitted</h1>
-                <p>This exam has already been submitted.</p>
-                <Link href={`/result/${attemptId}`}>View Results</Link>
+            <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
+                    <p className="text-gray-600 mb-6">There was an error loading the exam questions.</p>
+                    <Link href="/dashboard" className="text-blue-600 hover:underline">
+                        Back to Dashboard
+                    </Link>
+                </div>
             </main>
         );
     }
 
-    // Get questions for this paper
-    const { data: questions } = await supabase
-        .from('questions')
-        .select('id, section, question_number, question_text, question_type, options, positive_marks, negative_marks, difficulty')
-        .eq('paper_id', attempt.paper_id)
-        .eq('is_active', true)
-        .order('section')
-        .order('question_number') as { data: Question[] | null };
+    // Transform data to match our types
+    // Note: Supabase returns single relation as object, not array
+    const paperRaw = attemptData.papers as unknown;
+    const paperData = paperRaw as {
+        id: string;
+        slug: string;
+        title: string;
+        description: string | null;
+        year: number;
+        total_questions: number;
+        total_marks: number;
+        duration_minutes: number;
+        sections: SectionConfig[];
+        default_positive_marks: number;
+        default_negative_marks: number;
+        published: boolean;
+        available_from: string | null;
+        available_until: string | null;
+        difficulty_level: string | null;
+        is_free: boolean;
+        attempt_limit: number | null;
+        created_at: string;
+        updated_at: string;
+    };
 
-    // Get existing responses
-    const { data: responses } = await supabase
-        .from('responses')
-        .select('question_id, answer, status, is_marked_for_review, time_spent_seconds')
-        .eq('attempt_id', attemptId);
+    const paper: Paper = {
+        id: paperData.id,
+        slug: paperData.slug,
+        title: paperData.title,
+        description: paperData.description ?? undefined,
+        year: paperData.year,
+        total_questions: paperData.total_questions,
+        total_marks: paperData.total_marks,
+        duration_minutes: paperData.duration_minutes,
+        sections: paperData.sections,
+        default_positive_marks: paperData.default_positive_marks,
+        default_negative_marks: paperData.default_negative_marks,
+        published: paperData.published,
+        available_from: paperData.available_from ?? undefined,
+        available_until: paperData.available_until ?? undefined,
+        difficulty_level: paperData.difficulty_level as Paper['difficulty_level'],
+        is_free: paperData.is_free,
+        attempt_limit: paperData.attempt_limit ?? undefined,
+        created_at: paperData.created_at,
+        updated_at: paperData.updated_at,
+    };
 
-    const responseMap = new Map(responses?.map(r => [r.question_id, r]) || []);
+    const attempt: Attempt = {
+        id: attemptData.id,
+        user_id: attemptData.user_id,
+        paper_id: attemptData.paper_id,
+        started_at: attemptData.started_at,
+        submitted_at: attemptData.submitted_at ?? undefined,
+        completed_at: attemptData.completed_at ?? undefined,
+        status: attemptData.status as Attempt['status'],
+        current_section: attemptData.current_section as Attempt['current_section'],
+        current_question: attemptData.current_question ?? 1,
+        time_remaining: attemptData.time_remaining as Attempt['time_remaining'],
+        total_score: attemptData.total_score ?? undefined,
+        correct_count: attemptData.correct_count ?? 0,
+        incorrect_count: attemptData.incorrect_count ?? 0,
+        unanswered_count: attemptData.unanswered_count ?? 0,
+        section_scores: attemptData.section_scores as Attempt['section_scores'],
+        percentile: attemptData.percentile ?? undefined,
+        rank: attemptData.rank ?? undefined,
+        created_at: attemptData.created_at,
+        updated_at: attemptData.updated_at,
+    };
 
-    // Group questions by section
-    const questionsBySection = questions?.reduce((acc, q) => {
-        if (!acc[q.section]) acc[q.section] = [];
-        acc[q.section].push(q);
-        return acc;
-    }, {} as Record<string, Question[]>) || {};
+    const questions: Question[] = questionsData.map((q) => ({
+        id: q.id,
+        paper_id: q.paper_id,
+        section: q.section as Question['section'],
+        question_number: q.question_number,
+        question_text: q.question_text,
+        question_type: q.question_type as Question['question_type'],
+        options: q.options,
+        positive_marks: q.positive_marks,
+        negative_marks: q.negative_marks,
+        difficulty: q.difficulty as Question['difficulty'],
+        topic: q.topic ?? undefined,
+        subtopic: q.subtopic ?? undefined,
+        is_active: q.is_active,
+        created_at: q.created_at,
+        updated_at: q.updated_at,
+    }));
 
-    const paper = attempt.papers;
-    const sections = paper.sections || [];
-
-    return (
-        <main style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, borderBottom: '2px solid #333', paddingBottom: 16 }}>
-                <h1 style={{ margin: 0 }}>{paper.title}</h1>
-                <div style={{ textAlign: 'right' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Total Marks: {paper.total_marks}</p>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Duration: {paper.duration_minutes} minutes</p>
-                </div>
-            </div>
-
-            {/* Section Tabs */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-                {sections.map((section: { name: string; questions: number; time: number }) => (
-                    <div key={section.name} style={{
-                        padding: '8px 16px',
-                        background: '#f0f0f0',
-                        borderRadius: 4,
-                        cursor: 'pointer'
-                    }}>
-                        <strong>{section.name}</strong>
-                        <span style={{ marginLeft: 8, fontSize: 12, color: '#666' }}>
-                            ({section.questions} Q, {section.time} min)
-                        </span>
-                    </div>
-                ))}
-            </div>
-
-            {/* Question Palette */}
-            <div style={{ display: 'flex', gap: 24 }}>
-                {/* Left: Question Display */}
-                <div style={{ flex: 1 }}>
-                    <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 24, minHeight: 400 }}>
-                        <p style={{ color: '#666', textAlign: 'center' }}>
-                            TODO: Implement interactive question display with timer
-                        </p>
-                        <p style={{ color: '#666', textAlign: 'center' }}>
-                            Questions loaded: {questions?.length || 0}
-                        </p>
-                    </div>
-                </div>
-
-                {/* Right: Question Palette */}
-                <div style={{ width: 280 }}>
-                    <h3 style={{ marginTop: 0 }}>Question Palette</h3>
-                    {Object.entries(questionsBySection).map(([section, qs]) => (
-                        <div key={section} style={{ marginBottom: 16 }}>
-                            <h4 style={{ marginBottom: 8 }}>{section}</h4>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
-                                {qs.map((q) => {
-                                    const response = responseMap.get(q.id);
-                                    let bgColor = '#e0e0e0'; // Not visited
-                                    if (response?.answer) bgColor = '#4caf50'; // Answered
-                                    if (response?.is_marked_for_review) bgColor = '#ff9800'; // Marked
-                                    if (response?.status === 'visited' && !response?.answer) bgColor = '#f44336'; // Visited but not answered
-
-                                    return (
-                                        <div key={q.id} style={{
-                                            width: 36,
-                                            height: 36,
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            background: bgColor,
-                                            borderRadius: 4,
-                                            cursor: 'pointer',
-                                            fontSize: 12,
-                                            fontWeight: 'bold',
-                                            color: bgColor === '#e0e0e0' ? '#333' : '#fff'
-                                        }}>
-                                            {q.question_number}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ))}
-
-                    {/* Legend */}
-                    <div style={{ marginTop: 16, padding: 12, background: '#f9f9f9', borderRadius: 4, fontSize: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                            <span style={{ width: 16, height: 16, background: '#e0e0e0', borderRadius: 2 }}></span>
-                            Not Visited
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                            <span style={{ width: 16, height: 16, background: '#4caf50', borderRadius: 2 }}></span>
-                            Answered
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                            <span style={{ width: 16, height: 16, background: '#ff9800', borderRadius: 2 }}></span>
-                            Marked for Review
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ width: 16, height: 16, background: '#f44336', borderRadius: 2 }}></span>
-                            Not Answered
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Submit Button */}
-            <div style={{ marginTop: 24, textAlign: 'center' }}>
-                <form action={`/api/submit`} method="POST">
-                    <input type="hidden" name="attemptId" value={attemptId} />
-                    <button type="submit" style={{
-                        padding: '12px 48px',
-                        background: '#1976d2',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: 4,
-                        fontSize: 16,
-                        cursor: 'pointer'
-                    }}>
-                        Submit Exam
-                    </button>
-                </form>
-            </div>
-        </main>
-    );
+    return <ExamClient paper={paper} questions={questions} attempt={attempt} />;
 }
