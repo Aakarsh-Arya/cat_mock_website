@@ -226,7 +226,7 @@ export async function saveResponse(data: {
 
         const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('user_id, status')
+            .select('user_id, status, paper_id')
             .eq('id', data.attemptId)
             .single();
 
@@ -240,6 +240,20 @@ export async function saveResponse(data: {
 
         if (attempt.status !== 'in_progress') {
             return { success: false, error: 'Attempt is not in progress' };
+        }
+
+        // P0 FIX: Verify questionId belongs to the attempt's paper (integrity check)
+        const { data: question, error: questionError } = await supabase
+            .from('questions')
+            .select('id')
+            .eq('id', data.questionId)
+            .eq('paper_id', attempt.paper_id)
+            .eq('is_active', true)
+            .maybeSingle();
+
+        if (questionError || !question) {
+            console.warn(`Invalid questionId for attemptId=${data.attemptId}: ${data.questionId}`);
+            return { success: false, error: 'Invalid question' };
         }
 
         // Upsert response
@@ -330,6 +344,7 @@ export async function updateAttemptProgress(data: {
 /**
  * Submit the exam and calculate scores using TypeScript scoring engine
  * @blueprint Milestone 5 - Milestone_Change_Log.md - Change 001
+ * @blueprint Security Audit - P0 Fix - Server-side timer validation
  * @param attemptId - UUID of the attempt to submit
  */
 export async function submitExam(
@@ -350,10 +365,10 @@ export async function submitExam(
             return { success: false, error: 'Authentication required' };
         }
 
-        // Fetch attempt with paper_id and started_at
+        // Fetch attempt with paper_id, started_at, and session_token
         const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('user_id, status, paper_id, started_at')
+            .select('user_id, status, paper_id, started_at, session_token')
             .eq('id', attemptId)
             .single();
 
@@ -365,21 +380,59 @@ export async function submitExam(
             return { success: false, error: 'Unauthorized' };
         }
 
-        if (attempt.status !== 'in_progress') {
+        // P0 FIX: Prevent double submission with strict status check
+        if (attempt.status === 'completed' || attempt.status === 'submitted') {
             return { success: false, error: 'Attempt already submitted' };
+        }
+
+        if (attempt.status !== 'in_progress') {
+            return { success: false, error: 'Attempt is not in progress' };
+        }
+
+        // P0 FIX: Server-side timer validation
+        // CAT exam: 3 sections × 40 minutes = 120 minutes total
+        const MAX_EXAM_DURATION_SECONDS = 3 * 40 * 60; // 7200 seconds
+        const GRACE_PERIOD_SECONDS = 120; // 2 minutes grace for network latency
+
+        const startedAt = new Date(attempt.started_at).getTime();
+        const now = Date.now();
+        const elapsedSeconds = Math.floor((now - startedAt) / 1000);
+
+        if (elapsedSeconds > MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS) {
+            console.warn(`Late submission rejected: attemptId=${attemptId}, elapsed=${elapsedSeconds}s, max=${MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS}s`);
+
+            // Still mark as completed but flag it
+            await supabase
+                .from('attempts')
+                .update({
+                    status: 'completed',
+                    completed_at: new Date().toISOString(),
+                    // Could add a 'late_submission' flag column if needed
+                })
+                .eq('id', attemptId);
+
+            return { success: false, error: 'Exam time exceeded. Late submissions are not accepted.' };
         }
 
         const submittedAt = new Date().toISOString();
 
-        // Mark as submitted immediately to prevent double submission
-        const { error: updateStatusError } = await supabase
+        // P0 FIX: Use atomic status transition to prevent race conditions
+        const { data: updatedAttempt, error: updateStatusError } = await supabase
             .from('attempts')
             .update({ status: 'submitted', submitted_at: submittedAt })
-            .eq('id', attemptId);
+            .eq('id', attemptId)
+            .eq('status', 'in_progress') // Only update if still in_progress
+            .select('id')
+            .maybeSingle();
 
         if (updateStatusError) {
             console.error('Failed to mark attempt as submitted:', updateStatusError);
             return { success: false, error: 'Failed to submit exam' };
+        }
+
+        if (!updatedAttempt) {
+            // Another request already submitted this attempt
+            return { success: false, error: 'Attempt already submitted by another request' };
         }
 
         // Fetch all questions WITH correct_answer (server-side only, secure)
@@ -407,13 +460,27 @@ export async function submitExam(
             return { success: false, error: 'Failed to fetch responses' };
         }
 
+        // P0 FIX: Submission integrity check - verify all responses belong to valid questions
+        const validQuestionIds = new Set(questions.map(q => q.id));
+        const invalidResponses = (responses || []).filter(r => !validQuestionIds.has(r.question_id));
+
+        if (invalidResponses.length > 0) {
+            console.warn(`Invalid responses detected for attemptId=${attemptId}:`,
+                invalidResponses.map(r => r.question_id));
+            // Log but don't block - filter them out for scoring
+            // This could indicate a bug or tampering
+        }
+
+        // Only score valid responses
+        const validResponses = (responses || []).filter(r => validQuestionIds.has(r.question_id));
+
         // Import scoring function dynamically to avoid circular deps
         const { calculateScore, calculateTimeTaken } = await import('./scoring');
 
-        // Calculate scores using TypeScript scoring engine
+        // Calculate scores using TypeScript scoring engine (only valid responses)
         const scoringResult = calculateScore(
             questions as Array<Question & { correct_answer: string }>,
-            responses || []
+            validResponses
         );
 
         // Calculate time taken

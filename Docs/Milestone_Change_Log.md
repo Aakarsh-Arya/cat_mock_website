@@ -241,3 +241,85 @@ EXTERNAL - Requires Supabase SQL Editor execution
 ---
 
 *Last Updated: January 21, 2026*
+
+---
+
+## Change 006: Security Audit P0 Fixes (Pre-Pilot Hardening)
+
+### Change Title
+Security Hardening for Pilot Launch - Rate Limiting, Timer Validation, Integrity Checks
+
+### Context (Before)
+- No rate limiting on API endpoints (frontend loop could overwhelm Supabase)
+- Timer enforcement purely client-side (manipulable)
+- No session locking (multi-device/tab exam abuse possible)
+- No submission integrity validation (malicious question IDs possible)
+- No security headers (XSS, clickjacking risks)
+
+### Proposal (After)
+1. **Rate Limiting** - In-memory per-user rate limiter:
+   - `/api/save`: 60 saves per minute
+   - `/api/submit`: 5 submissions per minute
+   - Pilot-appropriate; upgrade to Redis/Upstash for production
+
+2. **Server-Side Timer Validation** - `submitExam()` validates:
+   - Maximum exam duration: 120 minutes (3 sections × 40 min)
+   - Grace period: 2 minutes for network latency
+   - Late submissions rejected with clear error
+
+3. **Atomic Status Transitions** - Prevent race conditions:
+   - Use `.eq('status', 'in_progress')` on updates to prevent double-submission
+
+4. **Submission Integrity Checks**:
+   - `saveResponse()` validates questionId belongs to attempt's paper
+   - `submitExam()` filters invalid responses before scoring
+
+5. **Security Headers** - Middleware applies:
+   - `X-Content-Type-Options: nosniff`
+   - `X-Frame-Options: SAMEORIGIN`
+   - `X-XSS-Protection: 1; mode=block`
+   - `Referrer-Policy: strict-origin-when-cross-origin`
+   - `Cache-Control: no-store` (prevent caching exam content)
+
+6. **Session Locking** (SQL migration prepared):
+   - New columns: `session_token UUID`, `last_activity_at TIMESTAMPTZ`
+   - Helper functions: `initialize_exam_session()`, `validate_session_token()`
+   - Prevents multi-device abuse
+
+### Files Modified
+- `src/lib/rate-limit.ts` (NEW) - In-memory rate limiting utility
+- `src/features/exam-engine/lib/actions.ts` - Timer validation, integrity checks
+- `src/app/api/save/route.ts` - Rate limiting, status checks
+- `src/app/api/submit/route.ts` - Rate limiting, uses submitExam action
+- `middleware.ts` - Security headers
+
+### Files Created
+- `docs/migrations/002_session_locking.sql` - Session locking schema migration
+
+### Schema Impact
+EXTERNAL - Requires Supabase SQL Editor execution of `002_session_locking.sql`
+
+### Rationale
+- Protect against security vulnerabilities identified in audit
+- Prevent abuse of Supabase free tier rate limits
+- Ensure exam integrity for pilot launch
+
+### Status: ✅ COMPLETED (Application Code)
+
+**External Dependencies:**
+- Execute `docs/migrations/002_session_locking.sql` in Supabase Dashboard
+- Implement session token validation in save/submit routes (after migration)
+
+---
+
+## External Dependencies Update
+
+### Supabase Changes Required:
+1. Execute schema migration SQL (Change 004, 005)
+2. **NEW: Execute session locking migration (Change 006 - `002_session_locking.sql`)**
+3. Verify RLS policies allow UPDATE on attempts by authenticated users
+4. Verify INSERT policy on responses table
+
+---
+
+*Last Updated: January 22, 2026*

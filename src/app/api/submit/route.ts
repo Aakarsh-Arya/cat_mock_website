@@ -1,13 +1,21 @@
+/**
+ * @fileoverview Submit Exam API Route
+ * @description Submits exam attempt and triggers scoring
+ * @blueprint Security Audit - P0 Fix - Rate Limiting & Integrity
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { checkRateLimit, RATE_LIMITS, userRateLimitKey, getRateLimitHeaders } from '@/lib/rate-limit';
+import { submitExam } from '@/features/exam-engine/lib/actions';
 
 export async function POST(req: NextRequest) {
-    // Validate auth session and that user owns the attemptId; compute score server-side (stub)
     try {
-        const { attemptId, responses, timeRemaining } = await req.json();
+        const { attemptId } = await req.json();
         if (!attemptId) {
             return NextResponse.json({ error: 'attemptId required' }, { status: 400 });
         }
+
         const res = NextResponse.next();
         const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
         const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
@@ -30,24 +38,31 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        // Verify ownership of the attempt
-        const { data: attempt } = await supabase
-            .from('attempts')
-            .select('id, user_id')
-            .eq('id', attemptId)
-            .maybeSingle();
-        if (!attempt || attempt.user_id !== session.user.id) {
-            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        // P0 FIX: Rate limiting for submissions (strict - 5 per minute)
+        const rateLimitKey = userRateLimitKey('submit', session.user.id);
+        const rateLimitResult = checkRateLimit(rateLimitKey, RATE_LIMITS.SUBMIT_EXAM);
+
+        if (!rateLimitResult.allowed) {
+            const headers = getRateLimitHeaders(rateLimitResult, RATE_LIMITS.SUBMIT_EXAM.limit);
+            return NextResponse.json(
+                {
+                    error: 'Too many submission attempts. Please wait before trying again.',
+                    retryAfterSeconds: Math.ceil(rateLimitResult.retryAfterMs / 1000),
+                },
+                { status: 429, headers }
+            );
         }
 
-        // Prefer server-side scoring via RPC if available
-        const { data: summary, error: rpcError } = await supabase.rpc('finalize_attempt', { attempt_id: attemptId });
-        if (!rpcError && summary) {
-            return NextResponse.json({ success: true, ...summary });
+        // Use the server action which has full validation, timer checks, and scoring
+        const result = await submitExam(attemptId);
+
+        if (!result.success) {
+            return NextResponse.json({ error: result.error }, { status: 400 });
         }
 
-        // Fallback: basic echo response if RPC is missing (development only)
-        return NextResponse.json({ success: true, score: 0, accuracy: 0, echo: { attemptId, count: Array.isArray(responses) ? responses.length : 0, timeRemaining } });
+        // Add rate limit headers to successful response
+        const successHeaders = getRateLimitHeaders(rateLimitResult, RATE_LIMITS.SUBMIT_EXAM.limit);
+        return NextResponse.json({ success: true, ...result.data }, { headers: successHeaders });
     } catch {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }

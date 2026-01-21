@@ -1,9 +1,43 @@
+/**
+ * @fileoverview Next.js Middleware
+ * @description Auth session management and security headers
+ * @blueprint Security Audit - P0 Fix - Security Headers
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { updateSession } from './src/utils/update-session';
 import type { CookieOptions } from '@supabase/ssr';
 
+/**
+ * Apply security headers to response
+ * @blueprint Security Audit - P0 Fix - Prevent clickjacking, XSS, MIME sniffing
+ */
+function applySecurityHeaders(res: NextResponse): NextResponse {
+    // Prevent MIME type sniffing
+    res.headers.set('X-Content-Type-Options', 'nosniff');
+
+    // Prevent clickjacking - only allow same origin framing
+    res.headers.set('X-Frame-Options', 'SAMEORIGIN');
+
+    // Legacy XSS protection for older browsers
+    res.headers.set('X-XSS-Protection', '1; mode=block');
+
+    // Control referrer information sent with requests
+    res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+    // Prevent caching of sensitive pages (exam content)
+    res.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.headers.set('Pragma', 'no-cache');
+    res.headers.set('Expires', '0');
+
+    return res;
+}
+
 export async function middleware(req: NextRequest) {
     const res = await updateSession(req);
+
+    // Apply security headers to all matched routes
+    applySecurityHeaders(res);
 
     try {
         const pathname = req.nextUrl.pathname;

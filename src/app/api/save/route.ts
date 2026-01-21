@@ -1,5 +1,12 @@
+/**
+ * @fileoverview Save Response API Route
+ * @description Saves user's answer to a question during exam
+ * @blueprint Security Audit - P0 Fix - Rate Limiting
+ */
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { checkRateLimit, RATE_LIMITS, userRateLimitKey, getRateLimitHeaders } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
     try {
@@ -30,14 +37,35 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
+        // P0 FIX: Rate limiting per user
+        const rateLimitKey = userRateLimitKey('save', session.user.id);
+        const rateLimitResult = checkRateLimit(rateLimitKey, RATE_LIMITS.SAVE_RESPONSE);
+
+        if (!rateLimitResult.allowed) {
+            const headers = getRateLimitHeaders(rateLimitResult, RATE_LIMITS.SAVE_RESPONSE.limit);
+            return NextResponse.json(
+                {
+                    error: 'Rate limit exceeded. Please slow down.',
+                    retryAfterSeconds: Math.ceil(rateLimitResult.retryAfterMs / 1000),
+                },
+                { status: 429, headers }
+            );
+        }
+
         // Ensure the attempt belongs to the user
         const { data: attempt } = await supabase
             .from('attempts')
-            .select('id, user_id')
+            .select('id, user_id, status')
             .eq('id', attemptId)
             .maybeSingle();
+
         if (!attempt || attempt.user_id !== session.user.id) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        // P0 FIX: Don't allow saves on completed/submitted attempts
+        if (attempt.status !== 'in_progress') {
+            return NextResponse.json({ error: 'Attempt is not in progress' }, { status: 400 });
         }
 
         // Upsert response
@@ -51,7 +79,9 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: error.message }, { status: 500 });
         }
 
-        return NextResponse.json({ success: true, data });
+        // Add rate limit headers to successful response
+        const successHeaders = getRateLimitHeaders(rateLimitResult, RATE_LIMITS.SAVE_RESPONSE.limit);
+        return NextResponse.json({ success: true, data }, { headers: successHeaders });
     } catch {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }
