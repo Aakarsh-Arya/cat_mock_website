@@ -41,38 +41,39 @@ interface QuestionButtonProps {
  * Colors match standard CAT exam palette
  */
 function getStatusStyles(status: QuestionStatus, isCurrent: boolean) {
-    const baseStyles = 'w-10 h-10 rounded-md flex items-center justify-center text-sm font-medium transition-all';
-    const currentRing = isCurrent ? 'ring-2 ring-offset-1 ring-blue-500' : '';
+    const baseStyles = 'w-10 h-10 rounded-md flex items-center justify-center text-sm font-semibold transition-all border';
+    const currentRing = isCurrent ? 'ring-2 ring-offset-1 ring-[#1565c0]' : '';
 
+    // TCS iON-inspired palette
     switch (status) {
         case 'answered':
             return {
-                className: `${baseStyles} ${currentRing} bg-green-500 text-white hover:bg-green-600`,
+                className: `${baseStyles} ${currentRing} bg-[#4caf50] text-white hover:bg-[#43a047] border-[#388e3c]`,
                 label: 'Answered',
                 icon: '✓',
             };
         case 'answered_marked':
             return {
-                className: `${baseStyles} ${currentRing} bg-purple-500 text-white hover:bg-purple-600`,
+                className: `${baseStyles} ${currentRing} bg-[#5c6bc0] text-white hover:bg-[#4652a3] border-[#3949ab]`,
                 label: 'Answered & Marked for Review',
                 icon: '✓?',
             };
         case 'marked':
             return {
-                className: `${baseStyles} ${currentRing} bg-purple-400 text-white hover:bg-purple-500`,
+                className: `${baseStyles} ${currentRing} bg-[#7e57c2] text-white hover:bg-[#6a46ae] border-[#5e35b1]`,
                 label: 'Marked for Review',
                 icon: '?',
             };
         case 'visited':
             return {
-                className: `${baseStyles} ${currentRing} bg-red-500 text-white hover:bg-red-600`,
+                className: `${baseStyles} ${currentRing} bg-[#e53935] text-white hover:bg-[#d32f2f] border-[#c62828]`,
                 label: 'Not Answered',
                 icon: '',
             };
         case 'not_visited':
         default:
             return {
-                className: `${baseStyles} ${currentRing} bg-gray-200 text-gray-700 hover:bg-gray-300`,
+                className: `${baseStyles} ${currentRing} bg-[#eceff1] text-[#37474f] hover:bg-[#e0e6e9] border-[#cfd8dc]`,
                 label: 'Not Visited',
                 icon: '',
             };
@@ -106,11 +107,11 @@ function QuestionButton({ question, index, status, isCurrent, onClick }: Questio
 
 function PaletteLegend() {
     const legends = [
-        { status: 'answered' as const, label: 'Answered', color: 'bg-green-500' },
-        { status: 'visited' as const, label: 'Not Answered', color: 'bg-red-500' },
-        { status: 'not_visited' as const, label: 'Not Visited', color: 'bg-gray-200' },
-        { status: 'marked' as const, label: 'Marked for Review', color: 'bg-purple-400' },
-        { status: 'answered_marked' as const, label: 'Answered & Marked', color: 'bg-purple-500' },
+        { status: 'answered' as const, label: 'Answered', color: 'bg-[#4caf50]' },
+        { status: 'visited' as const, label: 'Not Answered', color: 'bg-[#e53935]' },
+        { status: 'not_visited' as const, label: 'Not Visited', color: 'bg-[#eceff1] border border-[#cfd8dc]' },
+        { status: 'marked' as const, label: 'Marked for Review', color: 'bg-[#7e57c2]' },
+        { status: 'answered_marked' as const, label: 'Answered & Marked', color: 'bg-[#5c6bc0]' },
     ];
 
     return (
@@ -170,19 +171,19 @@ function SectionCounts({ questions }: SectionCountsProps) {
     return (
         <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
             <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-green-500" />
+                <span className="w-3 h-3 rounded bg-[#4caf50]" />
                 <span className="text-gray-600">{counts.answered} Answered</span>
             </div>
             <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-red-500" />
+                <span className="w-3 h-3 rounded bg-[#e53935]" />
                 <span className="text-gray-600">{counts.notAnswered} Not Answered</span>
             </div>
             <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-gray-200 border border-gray-300" />
+                <span className="w-3 h-3 rounded bg-[#eceff1] border border-[#cfd8dc]" />
                 <span className="text-gray-600">{counts.notVisited} Not Visited</span>
             </div>
             <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-purple-500" />
+                <span className="w-3 h-3 rounded bg-[#7e57c2]" />
                 <span className="text-gray-600">{counts.markedForReview} Marked</span>
             </div>
         </div>

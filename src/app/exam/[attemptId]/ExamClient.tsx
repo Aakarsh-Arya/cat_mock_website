@@ -16,6 +16,7 @@ import {
     saveResponse,
     updateAttemptProgress,
     submitExam,
+    pauseExam,
 } from '@/features/exam-engine/lib/actions';
 import type { Paper, Question, Attempt, SectionName, TimeRemaining } from '@/types/exam';
 import { getSectionByIndex } from '@/types/exam';
@@ -75,16 +76,23 @@ export function ExamClient({ paper, questions, attempt }: ExamClientProps) {
     const sectionTimers = useExamStore((s) => s.sectionTimers);
     const responses = useExamStore((s) => s.responses);
 
-    // Initialize exam on mount
+    // Track if we've already attempted initialization
+    const initAttemptedRef = useRef(false);
+
+    // Initialize exam on mount - but only once per session
+    // The initializeExam function now handles the case where state is already loaded
     useEffect(() => {
-        if (!hasHydrated || attemptId !== attempt.id) {
+        // Always call initializeExam - it will internally check if state should be preserved
+        // This handles both fresh starts and page refreshes correctly
+        if (!initAttemptedRef.current) {
+            initAttemptedRef.current = true;
             initializeExam({
                 paper,
                 questions,
                 attempt,
             });
         }
-    }, [paper, questions, attempt, initializeExam, hasHydrated, attemptId]);
+    }, [paper, questions, attempt, initializeExam]);
 
     // Debounced save to server
     const debouncedSaveProgress = useDebouncedCallback(
@@ -202,6 +210,61 @@ export function ExamClient({ paper, questions, attempt }: ExamClientProps) {
         }
     }, [attemptId, responses, router]);
 
+    // Handle pause exam
+    const handlePauseExam = useCallback(async () => {
+        if (!attemptId) return;
+
+        const confirmed = window.confirm(
+            'Are you sure you want to pause the exam? You can resume it later from the dashboard.'
+        );
+
+        if (!confirmed) return;
+
+        // Save all current responses
+        await Promise.all(
+            Object.entries(responses).map(async ([questionId, response]) => {
+                if (response.answer !== null || response.status !== 'not_visited') {
+                    await saveResponse({
+                        attemptId: attemptId!,
+                        questionId,
+                        answer: response.answer,
+                        status: response.status,
+                        isMarkedForReview: response.isMarkedForReview,
+                        timeSpentSeconds: response.timeSpentSeconds,
+                    });
+                }
+            })
+        );
+
+        // Build time remaining from current section timers
+        const timeRemaining: TimeRemaining = {
+            VARC: sectionTimers.VARC.remainingSeconds,
+            DILR: sectionTimers.DILR.remainingSeconds,
+            QA: sectionTimers.QA.remainingSeconds,
+        };
+
+        const currentSection = getSectionByIndex(currentSectionIndex);
+
+        // Pause the exam
+        const result = await pauseExam({
+            attemptId,
+            timeRemaining,
+            currentSection,
+            currentQuestion: currentQuestionIndex + 1,
+        });
+
+        if (result.success) {
+            // Clear local storage
+            localStorage.removeItem(`cat-exam-state-${attemptId}`);
+
+            // Redirect to dashboard
+            router.push('/dashboard');
+        } else {
+            console.error('Failed to pause exam:', result.error);
+            alert('Failed to pause exam. Please try again.');
+        }
+    }, [attemptId, responses, sectionTimers, currentSectionIndex, currentQuestionIndex, router]);
+
     // Show loading while initializing
     if (!hasHydrated) {
         return (
@@ -221,6 +284,7 @@ export function ExamClient({ paper, questions, attempt }: ExamClientProps) {
             onSaveResponse={handleSaveResponse}
             onSubmitExam={handleSubmitExam}
             onSectionExpire={handleSectionExpire}
+            onPauseExam={handlePauseExam}
         />
     );
 }

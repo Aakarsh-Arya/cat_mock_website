@@ -1,7 +1,7 @@
 /**
  * @fileoverview Submit Exam API Route
  * @description Submits exam attempt and triggers scoring
- * @blueprint Security Audit - P0 Fix - Rate Limiting & Integrity
+ * @blueprint Security Audit - P0 Fix - Rate Limiting, Integrity & Session Locking
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -11,7 +11,7 @@ import { submitExam } from '@/features/exam-engine/lib/actions';
 
 export async function POST(req: NextRequest) {
     try {
-        const { attemptId } = await req.json();
+        const { attemptId, sessionToken } = await req.json();
         if (!attemptId) {
             return NextResponse.json({ error: 'attemptId required' }, { status: 400 });
         }
@@ -51,6 +51,24 @@ export async function POST(req: NextRequest) {
                 },
                 { status: 429, headers }
             );
+        }
+
+        // P0 FIX: Pre-validate session token before calling submitExam
+        // This catches multi-device/tab attacks at the API layer
+        if (sessionToken) {
+            const { data: attempt } = await supabase
+                .from('attempts')
+                .select('session_token')
+                .eq('id', attemptId)
+                .maybeSingle();
+
+            if (attempt?.session_token && attempt.session_token !== sessionToken) {
+                console.warn(`Submit session mismatch for attempt ${attemptId}`);
+                return NextResponse.json({
+                    error: 'Session conflict detected. This exam may be open in another tab or device.',
+                    code: 'SESSION_CONFLICT'
+                }, { status: 409 });
+            }
         }
 
         // Use the server action which has full validation, timer checks, and scoring

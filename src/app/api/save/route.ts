@@ -1,7 +1,7 @@
 /**
  * @fileoverview Save Response API Route
  * @description Saves user's answer to a question during exam
- * @blueprint Security Audit - P0 Fix - Rate Limiting
+ * @blueprint Security Audit - P0 Fix - Rate Limiting, Session Locking
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -10,7 +10,7 @@ import { checkRateLimit, RATE_LIMITS, userRateLimitKey, getRateLimitHeaders } fr
 
 export async function POST(req: NextRequest) {
     try {
-        const { attemptId, questionId, answer } = await req.json();
+        const { attemptId, questionId, answer, sessionToken } = await req.json();
         if (!attemptId || !questionId) {
             return NextResponse.json({ error: 'attemptId and questionId required' }, { status: 400 });
         }
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         // Ensure the attempt belongs to the user
         const { data: attempt } = await supabase
             .from('attempts')
-            .select('id, user_id, status')
+            .select('id, user_id, status, session_token, started_at')
             .eq('id', attemptId)
             .maybeSingle();
 
@@ -67,6 +67,38 @@ export async function POST(req: NextRequest) {
         if (attempt.status !== 'in_progress') {
             return NextResponse.json({ error: 'Attempt is not in progress' }, { status: 400 });
         }
+
+        // P0 FIX: Session token validation (multi-device/tab prevention)
+        // If session token is provided and attempt has one, validate they match
+        if (attempt.session_token && sessionToken && attempt.session_token !== sessionToken) {
+            console.warn(`Session token mismatch for attempt ${attemptId}: expected ${attempt.session_token}, got ${sessionToken}`);
+            return NextResponse.json({
+                error: 'Session conflict detected. This exam may be open in another tab or device.',
+                code: 'SESSION_CONFLICT'
+            }, { status: 409 });
+        }
+
+        // P0 FIX: Server-side section timer validation
+        // Check if too much time has elapsed since exam started
+        if (attempt.started_at) {
+            const MAX_EXAM_DURATION_MS = 3 * 40 * 60 * 1000; // 120 minutes
+            const GRACE_PERIOD_MS = 2 * 60 * 1000; // 2 minutes grace
+            const startedAt = new Date(attempt.started_at).getTime();
+            const elapsed = Date.now() - startedAt;
+
+            if (elapsed > MAX_EXAM_DURATION_MS + GRACE_PERIOD_MS) {
+                return NextResponse.json({
+                    error: 'Exam time has expired. Saves are no longer accepted.',
+                    code: 'TIME_EXPIRED'
+                }, { status: 400 });
+            }
+        }
+
+        // Update last_activity_at for session tracking
+        await supabase
+            .from('attempts')
+            .update({ last_activity_at: new Date().toISOString() })
+            .eq('id', attemptId);
 
         // Upsert response
         const { data, error } = await supabase

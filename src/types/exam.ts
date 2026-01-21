@@ -53,6 +53,14 @@ export interface MCQOptions {
 /** Difficulty levels for questions */
 export type DifficultyLevel = 'easy' | 'medium' | 'hard';
 
+/** Context/Passage for shared questions */
+export interface QuestionContext {
+    id: string;
+    title: string;
+    section: SectionName;
+    text: string;
+}
+
 /** Question entity from database */
 export interface Question {
     id: string;
@@ -64,6 +72,8 @@ export interface Question {
     question_text: string;
     question_type: QuestionType;
     options: string[] | null;  // For MCQ: ["Option A", "Option B", "Option C", "Option D"]
+    context_id?: string;       // Reference to shared passage/context
+    context?: QuestionContext; // Populated context (joined from contexts table)
     // NOTE: correct_answer is EXCLUDED during exam, only available in results
 
     // Marking
@@ -288,6 +298,7 @@ export interface ExamEngineState {
     // Exam metadata
     attemptId: string | null;
     paperId: string | null;
+    sessionToken: string | null;  // P0 FIX: Session token for multi-device/tab prevention
 
     // Navigation
     currentSectionIndex: number;  // 0=VARC, 1=DILR, 2=QA

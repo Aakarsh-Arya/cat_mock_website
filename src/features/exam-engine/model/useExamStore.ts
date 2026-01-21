@@ -43,6 +43,7 @@ const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActio
     // Exam metadata
     attemptId: null,
     paperId: null,
+    sessionToken: null,  // P0 FIX: Session token for multi-device/tab prevention
 
     // Navigation
     currentSectionIndex: 0,
@@ -92,6 +93,16 @@ export const createExamStore = (attemptId?: string) => {
 
                 initializeExam: (data: ExamData) => {
                     const { paper, questions, attempt } = data;
+                    const currentState = get();
+
+                    // P0 FIX: Check if we're resuming the same attempt with persisted state
+                    // If so, preserve the existing timer and response state
+                    if (currentState.attemptId === attempt.id && currentState.hasHydrated) {
+                        // Same attempt, already initialized - just update hydration flag
+                        // This prevents timer reset on page refresh
+                        console.log('[ExamStore] Resuming existing attempt, preserving timer state');
+                        return;
+                    }
 
                     // Create initial response states for all questions
                     const responses: Record<string, ResponseState> = {};
@@ -105,12 +116,21 @@ export const createExamStore = (attemptId?: string) => {
                         };
                     });
 
-                    // Initialize section timers with server-synced start time
+                    // Initialize section timers
+                    // Use server-synced time_remaining from attempt if available (resuming)
+                    // Otherwise start fresh with delta-time based calculation
                     const now = Date.now();
+
+                    // Calculate startedAt from attempt.started_at for accurate delta-time
+                    const attemptStartedAt = attempt.started_at
+                        ? new Date(attempt.started_at).getTime()
+                        : now;
+
                     const sectionTimers: Record<SectionName, SectionTimerState> = {
                         VARC: {
                             sectionName: 'VARC',
-                            startedAt: now,
+                            // Use the original attempt start time for delta calculation
+                            startedAt: attemptStartedAt,
                             durationSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
                             remainingSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
                             isExpired: false,
@@ -131,11 +151,16 @@ export const createExamStore = (attemptId?: string) => {
                         },
                     };
 
-                    // Parse existing time_remaining if resuming
+                    // Parse existing time_remaining from server if resuming
                     if (attempt.time_remaining) {
                         const timeRemaining = attempt.time_remaining;
                         if (timeRemaining.VARC !== undefined) {
                             sectionTimers.VARC.remainingSeconds = timeRemaining.VARC;
+                            // If VARC has less than full time, calculate proper startedAt
+                            if (timeRemaining.VARC < CAT_CONSTANTS.SECTION_DURATION_SECONDS) {
+                                const elapsedSeconds = CAT_CONSTANTS.SECTION_DURATION_SECONDS - timeRemaining.VARC;
+                                sectionTimers.VARC.startedAt = now - (elapsedSeconds * 1000);
+                            }
                         }
                         if (timeRemaining.DILR !== undefined) {
                             sectionTimers.DILR.remainingSeconds = timeRemaining.DILR;
@@ -149,10 +174,29 @@ export const createExamStore = (attemptId?: string) => {
                     const currentSection = attempt.current_section || 'VARC';
                     const currentSectionIndex = SECTION_ORDER[currentSection];
 
+                    // If we're on a later section, set its startedAt to now (or calculate from remaining)
+                    if (currentSectionIndex > 0 && sectionTimers[currentSection].startedAt === 0) {
+                        const sectionTimer = sectionTimers[currentSection];
+                        if (sectionTimer.remainingSeconds < CAT_CONSTANTS.SECTION_DURATION_SECONDS) {
+                            // Calculate startedAt based on remaining time
+                            const elapsedSeconds = CAT_CONSTANTS.SECTION_DURATION_SECONDS - sectionTimer.remainingSeconds;
+                            sectionTimer.startedAt = now - (elapsedSeconds * 1000);
+                        } else {
+                            sectionTimer.startedAt = now;
+                        }
+                    }
+
+                    // P0 FIX: Generate session token for multi-device/tab prevention
+                    // Use crypto.randomUUID for secure random UUID generation
+                    const sessionToken = typeof crypto !== 'undefined' && crypto.randomUUID
+                        ? crypto.randomUUID()
+                        : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
                     set({
                         hasHydrated: true,
                         attemptId: attempt.id,
                         paperId: paper.id,
+                        sessionToken,
                         currentSectionIndex,
                         currentQuestionIndex: 0,
                         lockedSections: [],
@@ -496,6 +540,7 @@ export const createExamStore = (attemptId?: string) => {
                 partialize: (state) => ({
                     attemptId: state.attemptId,
                     paperId: state.paperId,
+                    sessionToken: state.sessionToken, // P0 FIX: Persist session token
                     currentSectionIndex: state.currentSectionIndex,
                     currentQuestionIndex: state.currentQuestionIndex,
                     lockedSections: state.lockedSections,

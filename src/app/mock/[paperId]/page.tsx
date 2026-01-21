@@ -118,6 +118,22 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             throw new Error('Paper not available');
         }
 
+        // FIX: Check for existing in_progress attempt - reuse instead of creating new
+        const { data: existingAttempt } = await s
+            .from('attempts')
+            .select('id')
+            .eq('paper_id', p.id)
+            .eq('user_id', currentUser.id)
+            .eq('status', 'in_progress')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (existingAttempt) {
+            // Resume existing attempt instead of creating new one
+            redirect(`/exam/${existingAttempt.id}`);
+        }
+
         // Initialize time remaining for each section
         const sections = p.sections as Section[] || [];
         const timeRemaining: Record<string, number> = {};

@@ -43,11 +43,19 @@ interface ButtonProps {
 // =============================================================================
 
 function NavButton({ onClick, disabled, variant, children, className = '' }: ButtonProps) {
+    // TCS iON-inspired palette
     const variantStyles = {
-        primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
-        secondary: 'bg-gray-100 text-gray-700 hover:bg-gray-200 focus:ring-gray-500',
-        warning: 'bg-purple-500 text-white hover:bg-purple-600 focus:ring-purple-500',
-        danger: 'bg-red-100 text-red-700 hover:bg-red-200 focus:ring-red-500',
+        // Primary action: Save & Next (yellow with dark text)
+        primary: 'bg-[#f7c600] text-[#1a1a1a] hover:bg-[#f0b800] focus:ring-[#f7c600] border border-[#d9a400] shadow-sm',
+
+        // Secondary: Previous (cool gray)
+        secondary: 'bg-[#eceff1] text-[#37474f] hover:bg-[#e0e6e9] focus:ring-[#cfd8dc] border border-[#cfd8dc] shadow-sm',
+
+        // Warning: Mark for Review (indigo/purple)
+        warning: 'bg-[#5c6bc0] text-white hover:bg-[#4652a3] focus:ring-[#5c6bc0] border border-[#4652a3] shadow-sm',
+
+        // Danger: Clear Response (red)
+        danger: 'bg-[#e53935] text-white hover:bg-[#d32f2f] focus:ring-[#e53935] border border-[#c62828] shadow-sm',
     };
 
     return (
@@ -56,7 +64,7 @@ function NavButton({ onClick, disabled, variant, children, className = '' }: But
             onClick={onClick}
             disabled={disabled}
             className={`
-        px-4 py-2.5 rounded-lg font-medium transition-all
+                px-4 py-2.5 rounded-md font-medium transition-all
         focus:outline-none focus:ring-2 focus:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed
         ${variantStyles[variant]}

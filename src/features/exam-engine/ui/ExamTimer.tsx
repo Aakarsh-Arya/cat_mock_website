@@ -25,20 +25,21 @@ interface ExamTimerProps {
  * Get color classes based on timer state
  */
 function getTimerStyles(state: TimerDisplayData['state']) {
+    // TCS iON-inspired colors
     switch (state) {
         case 'critical':
             return {
-                text: 'text-red-600 animate-pulse',
-                bg: 'bg-red-500',
-                border: 'border-red-500',
+                text: 'text-[#d32f2f] animate-pulse',
+                bg: 'bg-[#d32f2f]',
+                border: 'border-[#c62828]',
                 progressBg: 'bg-red-100',
             };
         case 'warning':
             return {
-                text: 'text-orange-500',
-                bg: 'bg-orange-500',
-                border: 'border-orange-500',
-                progressBg: 'bg-orange-100',
+                text: 'text-[#f9a825]',
+                bg: 'bg-[#f9a825]',
+                border: 'border-[#f57f17]',
+                progressBg: 'bg-yellow-100',
             };
         case 'expired':
             return {
@@ -49,9 +50,9 @@ function getTimerStyles(state: TimerDisplayData['state']) {
             };
         default:
             return {
-                text: 'text-green-600',
-                bg: 'bg-green-500',
-                border: 'border-green-500',
+                text: 'text-[#2e7d32]',
+                bg: 'bg-[#388e3c]',
+                border: 'border-[#2e7d32]',
                 progressBg: 'bg-green-100',
             };
     }
@@ -66,10 +67,16 @@ export function ExamTimer({
     const styles = getTimerStyles(timerData.state);
 
     if (compact) {
+        // Compact mode for dark header - use white text with state-based background
+        const compactBg = timerData.state === 'critical'
+            ? 'bg-red-600/20'
+            : timerData.state === 'warning'
+                ? 'bg-yellow-500/20'
+                : '';
         return (
             <div className={`flex items-center gap-2 ${className}`}>
-                <span className="text-sm text-gray-500">{timerData.sectionName}</span>
-                <span className={`font-mono text-lg font-bold ${styles.text}`}>
+                <span className="text-sm text-white/80">{timerData.sectionName}</span>
+                <span className={`font-mono text-lg font-bold text-white ${compactBg} px-1 rounded ${timerData.state === 'critical' ? 'animate-pulse' : ''}`}>
                     {timerData.displayTime}
                 </span>
             </div>
@@ -79,7 +86,7 @@ export function ExamTimer({
     return (
         <div className={`flex flex-col items-center ${className}`}>
             {/* Section Name */}
-            <div className="text-sm font-medium text-gray-600 mb-1">
+            <div className="text-sm font-semibold text-[#0b3d91] mb-1">
                 {timerData.sectionName} Section
             </div>
 
@@ -90,7 +97,7 @@ export function ExamTimer({
 
             {/* Progress Bar */}
             {showProgressBar && (
-                <div className={`w-full mt-2 h-2 rounded-full ${styles.progressBg}`}>
+                <div className={`w-full mt-2 h-2 rounded-full border ${styles.progressBg}`}>
                     <div
                         className={`h-full rounded-full transition-all duration-1000 ${styles.bg}`}
                         style={{ width: `${timerData.progressPercent}%` }}

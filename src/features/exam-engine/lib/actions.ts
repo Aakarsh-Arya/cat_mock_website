@@ -628,3 +628,73 @@ export async function fetchExamResults(attemptId: string): Promise<ActionResult<
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
+
+// =============================================================================
+// PAUSE EXAM (Save progress and allow resume later)
+// =============================================================================
+
+/**
+ * Pause the exam - saves all progress and allows resuming later
+ * @param attemptId - UUID of the attempt to pause
+ * @param timeRemaining - Current section timers
+ * @param currentSection - Current section name
+ * @param currentQuestion - Current question number
+ */
+export async function pauseExam(data: {
+    attemptId: string;
+    timeRemaining: TimeRemaining;
+    currentSection: SectionName;
+    currentQuestion: number;
+}): Promise<ActionResult<void>> {
+    try {
+        const supabase = await sbSSR();
+
+        // Verify user owns this attempt
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+            return { success: false, error: 'Authentication required' };
+        }
+
+        // Get attempt to verify ownership
+        const { data: attempt, error: attemptError } = await supabase
+            .from('attempts')
+            .select('user_id, status')
+            .eq('id', data.attemptId)
+            .single();
+
+        if (attemptError || !attempt) {
+            return { success: false, error: 'Attempt not found' };
+        }
+
+        if (attempt.user_id !== user.id) {
+            return { success: false, error: 'Unauthorized' };
+        }
+
+        if (attempt.status !== 'in_progress') {
+            return { success: false, error: 'Attempt is not in progress' };
+        }
+
+        // Update attempt with paused state (save progress)
+        const { error: updateError } = await supabase
+            .from('attempts')
+            .update({
+                time_remaining: data.timeRemaining,
+                current_section: data.currentSection,
+                current_question: data.currentQuestion,
+                // Note: status stays 'in_progress' to allow resume
+                // We just save the progress
+            })
+            .eq('id', data.attemptId)
+            .eq('user_id', user.id);
+
+        if (updateError) {
+            console.error('pauseExam update error:', updateError);
+            return { success: false, error: 'Failed to pause exam' };
+        }
+
+        return { success: true };
+    } catch (error) {
+        console.error('pauseExam error:', error);
+        return { success: false, error: 'An unexpected error occurred' };
+    }
+}

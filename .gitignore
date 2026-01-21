@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Question data files (keep only sample)
+data/cat-2024-*.json
+!data/sample-paper-template.json

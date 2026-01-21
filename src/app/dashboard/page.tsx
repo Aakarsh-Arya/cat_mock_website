@@ -110,14 +110,33 @@ export default async function DashboardPage() {
                         Welcome back, {profile?.name || user.email}
                     </p>
                 </div>
-                <Link href="/mocks" style={{
-                    padding: '12px 24px',
-                    background: '#1976d2',
-                    color: 'white',
-                    textDecoration: 'none',
-                    borderRadius: 6,
-                    fontWeight: 'bold'
-                }}>Take New Mock</Link>
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <Link href="/admin" style={{
+                        padding: '12px 24px',
+                        background: '#0b3d91',
+                        color: 'white',
+                        textDecoration: 'none',
+                        borderRadius: 6,
+                        fontWeight: 'bold'
+                    }}>Admin Panel</Link>
+                    <Link href="/mocks" style={{
+                        padding: '12px 24px',
+                        background: '#1976d2',
+                        color: 'white',
+                        textDecoration: 'none',
+                        borderRadius: 6,
+                        fontWeight: 'bold'
+                    }}>Take New Mock</Link>
+                    <a href="/auth/logout" style={{
+                        padding: '12px 24px',
+                        background: '#f5f5f5',
+                        color: '#666',
+                        textDecoration: 'none',
+                        borderRadius: 6,
+                        fontWeight: 'bold',
+                        border: '1px solid #ddd'
+                    }}>Logout</a>
+                </div>
             </div>
 
             {/* Stats Cards */}
