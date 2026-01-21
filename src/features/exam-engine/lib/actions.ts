@@ -328,7 +328,8 @@ export async function updateAttemptProgress(data: {
 // =============================================================================
 
 /**
- * Submit the exam and trigger scoring via finalize_attempt() RPC
+ * Submit the exam and calculate scores using TypeScript scoring engine
+ * @blueprint Milestone 5 - Milestone_Change_Log.md - Change 001
  * @param attemptId - UUID of the attempt to submit
  */
 export async function submitExam(
@@ -349,9 +350,10 @@ export async function submitExam(
             return { success: false, error: 'Authentication required' };
         }
 
+        // Fetch attempt with paper_id and started_at
         const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('user_id, status')
+            .select('user_id, status, paper_id, started_at')
             .eq('id', attemptId)
             .single();
 
@@ -367,53 +369,103 @@ export async function submitExam(
             return { success: false, error: 'Attempt already submitted' };
         }
 
-        // Mark as submitted before calling RPC
-        await supabase
+        const submittedAt = new Date().toISOString();
+
+        // Mark as submitted immediately to prevent double submission
+        const { error: updateStatusError } = await supabase
             .from('attempts')
-            .update({ status: 'submitted', submitted_at: new Date().toISOString() })
+            .update({ status: 'submitted', submitted_at: submittedAt })
             .eq('id', attemptId);
 
-        // Call finalize_attempt RPC
-        const { data: result, error: rpcError } = await supabase.rpc(
-            'finalize_attempt',
-            { attempt_id: attemptId }
-        );
-
-        if (rpcError) {
-            console.error('finalize_attempt RPC error:', rpcError);
-            return { success: false, error: 'Failed to finalize exam' };
+        if (updateStatusError) {
+            console.error('Failed to mark attempt as submitted:', updateStatusError);
+            return { success: false, error: 'Failed to submit exam' };
         }
 
-        // Parse RPC result
-        const rpcResult = result as {
-            success: boolean;
-            total_score: number;
-            max_score: number;
-            correct: number;
-            incorrect: number;
-            unanswered: number;
-            accuracy: number;
-            attempt_rate: number;
-            section_scores: Record<string, { score: number; correct: number; incorrect: number; unanswered: number }>;
-            error?: string;
-        };
+        // Fetch all questions WITH correct_answer (server-side only, secure)
+        const { data: questions, error: questionsError } = await supabase
+            .from('questions')
+            .select('*')
+            .eq('paper_id', attempt.paper_id)
+            .eq('is_active', true)
+            .order('section')
+            .order('question_number');
 
-        if (!rpcResult.success) {
-            return { success: false, error: rpcResult.error || 'Scoring failed' };
+        if (questionsError || !questions) {
+            console.error('Failed to fetch questions for scoring:', questionsError);
+            return { success: false, error: 'Failed to fetch questions for scoring' };
+        }
+
+        // Fetch user responses
+        const { data: responses, error: responsesError } = await supabase
+            .from('responses')
+            .select('question_id, answer, time_spent_seconds')
+            .eq('attempt_id', attemptId);
+
+        if (responsesError) {
+            console.error('Failed to fetch responses for scoring:', responsesError);
+            return { success: false, error: 'Failed to fetch responses' };
+        }
+
+        // Import scoring function dynamically to avoid circular deps
+        const { calculateScore, calculateTimeTaken } = await import('./scoring');
+
+        // Calculate scores using TypeScript scoring engine
+        const scoringResult = calculateScore(
+            questions as Array<Question & { correct_answer: string }>,
+            responses || []
+        );
+
+        // Calculate time taken
+        const timeTakenSeconds = calculateTimeTaken(attempt.started_at, submittedAt);
+
+        // Update attempt with scores
+        const { error: scoreUpdateError } = await supabase
+            .from('attempts')
+            .update({
+                status: 'completed',
+                completed_at: submittedAt,
+                total_score: scoringResult.total_score,
+                max_possible_score: scoringResult.max_possible_score,
+                correct_count: scoringResult.correct_count,
+                incorrect_count: scoringResult.incorrect_count,
+                unanswered_count: scoringResult.unanswered_count,
+                accuracy: scoringResult.accuracy,
+                attempt_rate: scoringResult.attempt_rate,
+                section_scores: scoringResult.section_scores,
+                time_taken_seconds: timeTakenSeconds,
+            })
+            .eq('id', attemptId);
+
+        if (scoreUpdateError) {
+            console.error('Failed to update attempt with scores:', scoreUpdateError);
+            // Continue anyway - attempt is submitted, scores may be incomplete
+        }
+
+        // Update individual responses with is_correct and marks_obtained
+        for (const questionResult of scoringResult.question_results) {
+            await supabase
+                .from('responses')
+                .update({
+                    is_correct: questionResult.is_correct,
+                    marks_obtained: questionResult.marks_obtained,
+                })
+                .eq('attempt_id', attemptId)
+                .eq('question_id', questionResult.question_id);
         }
 
         return {
             success: true,
             data: {
                 success: true,
-                total_score: rpcResult.total_score,
-                max_score: rpcResult.max_score,
-                correct: rpcResult.correct,
-                incorrect: rpcResult.incorrect,
-                unanswered: rpcResult.unanswered,
-                accuracy: rpcResult.accuracy,
-                attempt_rate: rpcResult.attempt_rate,
-                section_scores: rpcResult.section_scores as SubmitExamResponse['section_scores'],
+                total_score: scoringResult.total_score,
+                max_score: scoringResult.max_possible_score,
+                correct: scoringResult.correct_count,
+                incorrect: scoringResult.incorrect_count,
+                unanswered: scoringResult.unanswered_count,
+                accuracy: scoringResult.accuracy,
+                attempt_rate: scoringResult.attempt_rate,
+                section_scores: scoringResult.section_scores,
             },
         };
     } catch (error) {

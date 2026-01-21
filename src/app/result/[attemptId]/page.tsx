@@ -1,5 +1,14 @@
+/**
+ * @fileoverview Exam Result Page
+ * @description Displays detailed exam results with sectional analysis
+ * @blueprint Milestone 5 - Milestone_Change_Log.md - Change 002
+ */
+
 import Link from 'next/link';
 import { sbSSR } from '@/lib/supabase/server';
+import { ResultHeader } from '@/features/exam-engine/ui/ResultHeader';
+import { SectionalPerformance } from '@/features/exam-engine/ui/SectionalPerformance';
+import { QuestionAnalysis } from '@/features/exam-engine/ui/QuestionAnalysis';
 
 interface SectionScore {
     score: number;
@@ -32,6 +41,26 @@ interface Attempt {
     };
 }
 
+interface Question {
+    id: string;
+    section: 'VARC' | 'DILR' | 'QA';
+    question_number: number;
+    question_text: string;
+    question_type: 'MCQ' | 'TITA';
+    options: string[] | null;
+    correct_answer: string;
+    solution_text: string | null;
+    topic: string | null;
+    difficulty: string | null;
+}
+
+interface Response {
+    question_id: string;
+    answer: string | null;
+    is_correct: boolean | null;
+    marks_obtained: number | null;
+}
+
 export default async function ResultPage({ params }: { params: Promise<Record<string, unknown>> }) {
     const { attemptId } = (await params) as { attemptId: string };
     const supabase = await sbSSR();
@@ -52,183 +81,185 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
 
     const forbidden = attempt && userId && attempt.user_id && attempt.user_id !== userId;
 
+    // Error state
     if (error) {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>Error Loading Result</h1>
-                <p style={{ color: 'crimson' }}>Failed to load result. Please try again later.</p>
-                <Link href="/dashboard">Back to Dashboard</Link>
+            <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+                <div className="text-center max-w-md">
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-2">Error Loading Result</h1>
+                    <p className="text-gray-600 mb-6">Failed to load result. Please try again later.</p>
+                    <Link
+                        href="/dashboard"
+                        className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        Back to Dashboard
+                    </Link>
+                </div>
             </main>
         );
     }
 
+    // Access denied state
     if (forbidden) {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>Access Denied</h1>
-                <p style={{ color: 'crimson' }}>You do not have access to this attempt.</p>
-                <Link href="/dashboard">Back to Dashboard</Link>
+            <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+                <div className="text-center max-w-md">
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                        </svg>
+                    </div>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
+                    <p className="text-gray-600 mb-6">You do not have permission to view this result.</p>
+                    <Link
+                        href="/dashboard"
+                        className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        Back to Dashboard
+                    </Link>
+                </div>
             </main>
         );
     }
 
+    // Not found state
     if (!attempt) {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>Result Not Found</h1>
-                <p>No attempt found with this ID.</p>
-                <Link href="/dashboard">Back to Dashboard</Link>
+            <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+                <div className="text-center max-w-md">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-2">Result Not Found</h1>
+                    <p className="text-gray-600 mb-6">No attempt found with this ID.</p>
+                    <Link
+                        href="/dashboard"
+                        className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        Back to Dashboard
+                    </Link>
+                </div>
             </main>
         );
     }
 
+    // Exam not completed state
     if (attempt.status !== 'completed') {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>Exam Not Completed</h1>
-                <p>This exam has not been submitted yet.</p>
-                <Link href={`/exam/${attemptId}`}>Continue Exam</Link>
+            <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+                <div className="text-center max-w-md">
+                    <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h1 className="text-2xl font-bold text-gray-900 mb-2">Exam Not Completed</h1>
+                    <p className="text-gray-600 mb-6">This exam has not been submitted yet.</p>
+                    <Link
+                        href={`/exam/${attemptId}`}
+                        className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        Continue Exam
+                    </Link>
+                </div>
             </main>
         );
     }
 
-    const formatTime = (seconds: number | null) => {
-        if (!seconds) return '—';
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}m ${secs}s`;
-    };
+    // Fetch questions for this paper
+    const { data: questions } = await supabase
+        .from('questions')
+        .select('id, question_number, section, question_type, question_text, options, correct_answer, solution_text, topic, difficulty')
+        .eq('paper_id', attempt.paper_id)
+        .order('question_number', { ascending: true }) as { data: Question[] | null };
+
+    // Fetch responses for this attempt
+    const { data: responses } = await supabase
+        .from('responses')
+        .select('question_id, answer, is_correct, marks_obtained')
+        .eq('attempt_id', attemptId) as { data: Response[] | null };
 
     const paper = attempt.papers;
     const sectionScores = attempt.section_scores || {};
 
     return (
-        <main style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
-            {/* Header */}
-            <div style={{ textAlign: 'center', marginBottom: 32 }}>
-                <h1 style={{ marginBottom: 8 }}>{paper.title}</h1>
-                <p style={{ color: '#666', margin: 0 }}>
-                    Submitted: {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : '—'}
-                </p>
-            </div>
-
-            {/* Score Card */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
-                gap: 16,
-                marginBottom: 32,
-                padding: 24,
-                background: '#f5f5f5',
-                borderRadius: 12
-            }}>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Score</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#1976d2' }}>
-                        {attempt.total_score ?? 0}/{attempt.max_possible_score ?? paper.total_marks}
-                    </p>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Percentile</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#4caf50' }}>
-                        {attempt.percentile?.toFixed(2) ?? '—'}
-                    </p>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Accuracy</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#ff9800' }}>
-                        {attempt.accuracy?.toFixed(1) ?? '—'}%
-                    </p>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Time Taken</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#9c27b0' }}>
-                        {formatTime(attempt.time_taken_seconds)}
+        <main className="min-h-screen bg-gray-50">
+            {/* Header with paper title and submission info */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-8 px-6">
+                <div className="max-w-5xl mx-auto">
+                    <h1 className="text-3xl font-bold mb-2">{paper.title}</h1>
+                    <p className="text-blue-100">
+                        Submitted: {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : '—'}
                     </p>
                 </div>
             </div>
 
-            {/* Question Stats */}
-            <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                gap: 32,
-                marginBottom: 32,
-                padding: 16,
-                background: '#fff',
-                border: '1px solid #ddd',
-                borderRadius: 8
-            }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 24, height: 24, background: '#4caf50', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 12, fontWeight: 'bold' }}>✓</span>
-                    <span>Correct: <strong>{attempt.correct_count ?? 0}</strong></span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 24, height: 24, background: '#f44336', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 12, fontWeight: 'bold' }}>✗</span>
-                    <span>Incorrect: <strong>{attempt.incorrect_count ?? 0}</strong></span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ width: 24, height: 24, background: '#9e9e9e', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 12, fontWeight: 'bold' }}>–</span>
-                    <span>Unanswered: <strong>{attempt.unanswered_count ?? 0}</strong></span>
-                </div>
-            </div>
+            {/* Main content */}
+            <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+                {/* Result Header - Summary card */}
+                <ResultHeader
+                    paperTitle={paper.title}
+                    totalScore={attempt.total_score ?? 0}
+                    maxScore={attempt.max_possible_score ?? paper.total_marks}
+                    accuracy={attempt.accuracy}
+                    attemptRate={attempt.attempt_rate}
+                    correctCount={attempt.correct_count ?? 0}
+                    incorrectCount={attempt.incorrect_count ?? 0}
+                    unansweredCount={attempt.unanswered_count ?? 0}
+                    timeTakenSeconds={attempt.time_taken_seconds}
+                    percentile={attempt.percentile}
+                    rank={attempt.rank}
+                    submittedAt={attempt.submitted_at}
+                />
 
-            {/* Section-wise Breakdown */}
-            <h2 style={{ marginBottom: 16 }}>Section-wise Performance</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 32 }}>
-                {Object.entries(sectionScores).map(([section, scores]) => (
-                    <div key={section} style={{
-                        padding: 16,
-                        background: '#fff',
-                        border: '1px solid #ddd',
-                        borderRadius: 8
-                    }}>
-                        <h3 style={{ margin: '0 0 12px', color: '#1976d2' }}>{section}</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 14 }}>
-                            <span>Score:</span><strong>{scores.score}</strong>
-                            <span>Correct:</span><strong style={{ color: '#4caf50' }}>{scores.correct}</strong>
-                            <span>Incorrect:</span><strong style={{ color: '#f44336' }}>{scores.incorrect}</strong>
-                            <span>Unanswered:</span><strong style={{ color: '#9e9e9e' }}>{scores.unanswered}</strong>
-                        </div>
-                    </div>
-                ))}
-            </div>
+                {/* Sectional Performance */}
+                <SectionalPerformance
+                    sectionScores={sectionScores as Record<string, {
+                        score: number;
+                        maxScore: number;
+                        correct: number;
+                        incorrect: number;
+                        unanswered: number;
+                        timeTakenSeconds?: number;
+                    }>}
+                />
 
-            {/* Rank Info */}
-            {attempt.rank && (
-                <div style={{
-                    textAlign: 'center',
-                    padding: 16,
-                    background: '#e3f2fd',
-                    borderRadius: 8,
-                    marginBottom: 32
-                }}>
-                    <p style={{ margin: 0, fontSize: 18 }}>
-                        Your Rank: <strong>#{attempt.rank}</strong>
-                    </p>
+                {/* Question Analysis (Client Component) */}
+                {questions && questions.length > 0 && (
+                    <QuestionAnalysis
+                        questions={questions}
+                        responses={responses || []}
+                    />
+                )}
+
+                {/* Action buttons */}
+                <div className="flex flex-wrap justify-center gap-4 pt-4">
+                    <Link
+                        href="/dashboard"
+                        className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                    >
+                        <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                        </svg>
+                        Back to Dashboard
+                    </Link>
+                    <Link
+                        href="/mocks"
+                        className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                    >
+                        <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </svg>
+                        Take Another Mock
+                    </Link>
                 </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
-                <Link href="/dashboard" style={{
-                    padding: '12px 24px',
-                    background: '#1976d2',
-                    color: 'white',
-                    textDecoration: 'none',
-                    borderRadius: 4
-                }}>
-                    Back to Dashboard
-                </Link>
-                <Link href="/mocks" style={{
-                    padding: '12px 24px',
-                    background: '#4caf50',
-                    color: 'white',
-                    textDecoration: 'none',
-                    borderRadius: 4
-                }}>
-                    Take Another Mock
-                </Link>
             </div>
         </main>
     );

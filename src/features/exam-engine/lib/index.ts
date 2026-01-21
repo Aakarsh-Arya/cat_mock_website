@@ -61,3 +61,16 @@ export {
     type FetchPaperResponse,
     type SubmitExamResponse,
 } from './validation';
+
+// Scoring Engine (Milestone 5)
+export {
+    calculateScore,
+    calculateQuestionMarks,
+    calculateTimeTaken,
+    compareAnswers,
+    normalizeString,
+    parseAsNumber,
+    type ResponseForScoring,
+    type QuestionScoringResult,
+    type ScoringResult,
+} from './scoring';

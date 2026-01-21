@@ -19,3 +19,8 @@ export { TITARenderer } from './TITARenderer';
 
 // Navigation
 export { NavigationButtons, ExamSubmitButton } from './NavigationButtons';
+
+// Result Components (Milestone 5)
+export { ResultHeader } from './ResultHeader';
+export { SectionalPerformance } from './SectionalPerformance';
+export { QuestionAnalysis } from './QuestionAnalysis';
