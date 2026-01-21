@@ -124,7 +124,7 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
                                 <div className="h-2 bg-gray-200 rounded-full mt-2 overflow-hidden">
                                     <div
                                         className={`h-full transition-all duration-500 ${scorePercentage >= 50 ? 'bg-green-500' :
-                                                scorePercentage >= 25 ? 'bg-yellow-500' : 'bg-red-500'
+                                            scorePercentage >= 25 ? 'bg-yellow-500' : 'bg-red-500'
                                             }`}
                                         style={{ width: `${Math.max(0, Math.min(100, scorePercentage))}%` }}
                                     />

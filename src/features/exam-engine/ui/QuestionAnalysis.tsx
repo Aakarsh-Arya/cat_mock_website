@@ -149,8 +149,8 @@ export function QuestionAnalysis({ questions, responses }: QuestionAnalysisProps
                             key={section}
                             onClick={() => setActiveSection(section)}
                             className={`px-3 py-1.5 text-sm rounded-md transition-colors ${activeSection === section
-                                    ? 'bg-white shadow text-blue-600 font-medium'
-                                    : 'text-gray-600 hover:bg-gray-50'
+                                ? 'bg-white shadow text-blue-600 font-medium'
+                                : 'text-gray-600 hover:bg-gray-50'
                                 }`}
                         >
                             {section === 'all' ? 'All' : section}
@@ -163,8 +163,8 @@ export function QuestionAnalysis({ questions, responses }: QuestionAnalysisProps
                     <button
                         onClick={() => setFilter('all')}
                         className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'all'
-                                ? 'bg-white shadow text-gray-800 font-medium'
-                                : 'text-gray-600 hover:bg-gray-50'
+                            ? 'bg-white shadow text-gray-800 font-medium'
+                            : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         All ({questions.length})
@@ -172,8 +172,8 @@ export function QuestionAnalysis({ questions, responses }: QuestionAnalysisProps
                     <button
                         onClick={() => setFilter('correct')}
                         className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'correct'
-                                ? 'bg-green-100 text-green-700 font-medium'
-                                : 'text-gray-600 hover:bg-gray-50'
+                            ? 'bg-green-100 text-green-700 font-medium'
+                            : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         ✓ Correct ({stats.correct})
@@ -181,8 +181,8 @@ export function QuestionAnalysis({ questions, responses }: QuestionAnalysisProps
                     <button
                         onClick={() => setFilter('incorrect')}
                         className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'incorrect'
-                                ? 'bg-red-100 text-red-700 font-medium'
-                                : 'text-gray-600 hover:bg-gray-50'
+                            ? 'bg-red-100 text-red-700 font-medium'
+                            : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         ✗ Wrong ({stats.incorrect})
@@ -190,8 +190,8 @@ export function QuestionAnalysis({ questions, responses }: QuestionAnalysisProps
                     <button
                         onClick={() => setFilter('unanswered')}
                         className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'unanswered'
-                                ? 'bg-gray-300 text-gray-700 font-medium'
-                                : 'text-gray-600 hover:bg-gray-50'
+                            ? 'bg-gray-300 text-gray-700 font-medium'
+                            : 'text-gray-600 hover:bg-gray-50'
                             }`}
                     >
                         – Skipped ({stats.unanswered})
@@ -297,17 +297,17 @@ export function QuestionAnalysis({ questions, responses }: QuestionAnalysisProps
                                                             <div
                                                                 key={idx}
                                                                 className={`flex items-start gap-3 p-2 rounded-lg ${isCorrectAnswer
-                                                                        ? 'bg-green-100 border border-green-300'
-                                                                        : isUserAnswer
-                                                                            ? 'bg-red-100 border border-red-300'
-                                                                            : 'bg-gray-50'
+                                                                    ? 'bg-green-100 border border-green-300'
+                                                                    : isUserAnswer
+                                                                        ? 'bg-red-100 border border-red-300'
+                                                                        : 'bg-gray-50'
                                                                     }`}
                                                             >
                                                                 <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isCorrectAnswer
-                                                                        ? 'bg-green-500 text-white'
-                                                                        : isUserAnswer
-                                                                            ? 'bg-red-500 text-white'
-                                                                            : 'bg-gray-200 text-gray-600'
+                                                                    ? 'bg-green-500 text-white'
+                                                                    : isUserAnswer
+                                                                        ? 'bg-red-500 text-white'
+                                                                        : 'bg-gray-200 text-gray-600'
                                                                     }`}>
                                                                     {optionLabel}
                                                                 </span>
