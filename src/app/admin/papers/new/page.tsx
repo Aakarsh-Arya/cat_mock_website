@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { sb } from '@/lib/supabase/client';
+import { adminLogger } from '@/lib/logger';
 
 export default function NewPaperPage() {
     const router = useRouter();
@@ -49,7 +50,33 @@ export default function NewPaperPage() {
             const supabase = sb();
 
             // Generate slug from title if not provided
-            const slug = formData.slug || formData.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+            const rawSlug = formData.slug || formData.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+            const slug = rawSlug.trim();
+            const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+            if (!slugRegex.test(slug)) {
+                setError('Invalid slug. Use lowercase letters, numbers, and hyphens only (no spaces).');
+                setLoading(false);
+                return;
+            }
+
+            if (slug.length > 64) {
+                setError('Slug is too long. Maximum length is 64 characters.');
+                setLoading(false);
+                return;
+            }
+
+            const { data: existingSlug } = await supabase
+                .from('papers')
+                .select('id')
+                .eq('slug', slug)
+                .maybeSingle();
+
+            if (existingSlug) {
+                setError('Slug already exists. Please choose a unique slug.');
+                setLoading(false);
+                return;
+            }
 
             // Default CAT sections configuration
             const sections = [
@@ -70,9 +97,9 @@ export default function NewPaperPage() {
 
             if (insertError) throw insertError;
 
-            router.push(`/admin/papers/${data.id}`);
+            router.push(`/admin/papers/${data.id}/edit`);
         } catch (err: unknown) {
-            console.error('Error creating paper:', err);
+            adminLogger.dataModified('papers', 'create_error', { error: err });
             setError(err instanceof Error ? err.message : 'Failed to create paper');
         } finally {
             setLoading(false);

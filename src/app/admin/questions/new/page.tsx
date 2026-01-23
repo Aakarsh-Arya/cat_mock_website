@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { sb } from '@/lib/supabase/client';
+import { adminLogger } from '@/lib/logger';
 
 interface Paper {
     id: string;
@@ -125,7 +126,7 @@ export default function NewQuestionPage() {
             // Redirect to edit page or questions list
             router.push(`/admin/questions/${data.id}`);
         } catch (err: unknown) {
-            console.error('Error creating question:', err);
+            adminLogger.dataModified('questions', 'create_error', { error: err });
             setError(err instanceof Error ? err.message : 'Failed to create question');
         } finally {
             setLoading(false);

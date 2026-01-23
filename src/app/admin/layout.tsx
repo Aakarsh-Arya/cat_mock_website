@@ -1,11 +1,20 @@
 /**
  * @fileoverview Admin Layout
  * @description Layout wrapper for admin pages with navigation
+ * @blueprint M6+ - Hybrid RBAC enforcement via JWT claims
  */
 
 import { redirect } from 'next/navigation';
 import { sbSSR } from '@/lib/supabase/server';
 import Link from 'next/link';
+import { jwtDecode } from 'jwt-decode';
+
+interface JWTClaims {
+    user_role?: string;
+    app_metadata?: {
+        user_role?: string;
+    };
+}
 
 export default async function AdminLayout({
     children,
@@ -19,10 +28,40 @@ export default async function AdminLayout({
         redirect('/auth/sign-in');
     }
 
-    // For now, allow any authenticated user to access admin
-    // In production, you'd check for admin role:
-    // const { data: profile } = await supabase.from('users').select('role').eq('id', user.id).single();
-    // if (profile?.role !== 'admin') redirect('/dashboard');
+    // DEV MODE: Skip RBAC check if SKIP_ADMIN_CHECK is set (for development before DB migration)
+    const skipAdminCheck = process.env.SKIP_ADMIN_CHECK === 'true';
+
+    let isAdmin = skipAdminCheck; // Default to true if skip is enabled
+
+    if (!skipAdminCheck) {
+        // M6+ RBAC: Check JWT claims for admin role
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (session?.access_token) {
+            try {
+                const decoded = jwtDecode<JWTClaims>(session.access_token);
+                isAdmin = decoded?.user_role === 'admin' || decoded?.app_metadata?.user_role === 'admin';
+            } catch {
+                // JWT decode failed - not admin
+                isAdmin = false;
+            }
+        }
+
+        // Fallback: Check database if JWT claims not available (during migration period)
+        if (!isAdmin) {
+            const { data: userRole } = await supabase
+                .from('user_roles')
+                .select('role')
+                .eq('user_id', user.id)
+                .single();
+
+            isAdmin = userRole?.role === 'admin';
+        }
+    }
+
+    if (!isAdmin) {
+        redirect('/dashboard?error=unauthorized');
+    }
 
     return (
         <div className="min-h-screen bg-gray-100">
@@ -31,6 +70,16 @@ export default async function AdminLayout({
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex items-center justify-between h-16">
                         <div className="flex items-center gap-8">
+                            {/* Back to Dashboard */}
+                            <Link
+                                href="/dashboard"
+                                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                                title="Back to Dashboard"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                                </svg>
+                            </Link>
                             <Link href="/admin" className="font-bold text-xl">
                                 CAT Mocks Admin
                             </Link>
@@ -40,6 +89,12 @@ export default async function AdminLayout({
                                     className="text-gray-200 hover:text-white transition-colors"
                                 >
                                     Papers
+                                </Link>
+                                <Link
+                                    href="/admin/question-sets"
+                                    className="text-gray-200 hover:text-white transition-colors"
+                                >
+                                    Question Sets
                                 </Link>
                                 <Link
                                     href="/admin/questions"
@@ -56,6 +111,7 @@ export default async function AdminLayout({
                             </nav>
                         </div>
                         <div className="flex items-center gap-4">
+                            <span className="text-xs bg-green-500 px-2 py-0.5 rounded">Admin</span>
                             <span className="text-sm text-gray-300">{user.email}</span>
                             <Link
                                 href="/dashboard"

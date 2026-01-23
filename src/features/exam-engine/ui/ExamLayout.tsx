@@ -1,23 +1,21 @@
 /**
- * @fileoverview Exam Layout Component
- * @description Main exam page layout with header, question area, and palette sidebar
- * @blueprint Milestone 4 SOP-SSOT - Phase 3.1
+ * @fileoverview TCS iON CAT Exam Layout Component
+ * @description Pixel-perfect recreation of the CAT exam interface
+ * @blueprint TCS iON CAT 2025 Interface Specification
  */
 
 'use client';
 
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useCallback } from 'react';
 import {
     useExamStore,
     useExamTimer,
     selectCurrentSection,
 } from '@/features/exam-engine';
-import { ExamTimer } from './ExamTimer';
-import { QuestionPalette } from './QuestionPalette';
 import { MCQRenderer } from './MCQRenderer';
 import { TITARenderer } from './TITARenderer';
-import { NavigationButtons, ExamSubmitButton } from './NavigationButtons';
-import type { Paper, Question, SectionName } from '@/types/exam';
+import { MathText } from './MathText';
+import type { Paper, Question, SectionName, QuestionStatus } from '@/types/exam';
 import { getQuestionsForSection } from '@/types/exam';
 
 // =============================================================================
@@ -25,91 +23,43 @@ import { getQuestionsForSection } from '@/types/exam';
 // =============================================================================
 
 interface ExamLayoutProps {
-    /** Paper data */
     paper: Paper;
-    /** All questions */
     questions: Question[];
-    /** Callback when saving a response */
     onSaveResponse?: (questionId: string, answer: string | null) => Promise<void>;
-    /** Callback when submitting the entire exam */
     onSubmitExam?: () => Promise<void>;
-    /** Callback when a section expires */
     onSectionExpire?: (sectionName: SectionName) => void;
-    /** Callback when pausing the exam */
     onPauseExam?: () => Promise<void>;
 }
 
 // =============================================================================
-// HEADER COMPONENT
+// TCS iON HEADER (60px height, gradient background)
 // =============================================================================
 
 interface ExamHeaderProps {
     paper: Paper;
-    onPauseExam?: () => Promise<void>;
+    candidateName?: string;
 }
 
-function ExamHeader({ paper, onPauseExam }: ExamHeaderProps) {
-    const currentSection = useExamStore(selectCurrentSection);
-    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
+function ExamHeader({ paper, candidateName = 'Candidate' }: ExamHeaderProps) {
+    const { timerData } = useExamTimer();
 
-    // TCS iON-inspired header styling
     return (
-        <header className="bg-[#0b3d91] text-white shadow-md">
-            <div className="max-w-screen-2xl mx-auto px-4 py-3">
-                <div className="flex items-center justify-between">
-                    {/* Left - Paper Info */}
-                    <div className="flex items-center gap-4">
-                        <h1 className="text-xl font-bold">{paper.title}</h1>
-                        <div className="hidden sm:flex items-center gap-2 text-sm text-blue-100">
-                            <span className="px-2 py-1 bg-white/10 rounded border border-white/20">
-                                {paper.total_questions} Questions
-                            </span>
-                            <span className="px-2 py-1 bg-white/10 rounded border border-white/20">
-                                {paper.total_marks} Marks
-                            </span>
-                        </div>
-                    </div>
+        <header className="sticky top-0 z-50 h-header flex items-center justify-between px-5 bg-gradient-to-r from-exam-header-from to-exam-header-to border-b-2 border-exam-header-border">
+            {/* Left: Exam Title */}
+            <h1 className="text-lg font-semibold text-white">
+                {paper.title}
+            </h1>
 
-                    {/* Center - Section Indicator */}
-                    <div className="hidden md:flex items-center gap-2">
-                        {['VARC', 'DILR', 'QA'].map((section, index) => (
-                            <div
-                                key={section}
-                                className={`
-                  px-4 py-2 rounded-md text-sm font-semibold transition-colors border
-                  ${index === currentSectionIndex
-                                        ? 'bg-white text-[#0b3d91] border-white'
-                                        : index < currentSectionIndex
-                                            ? 'bg-[#43a047] text-white border-[#2e7d32]'
-                                            : 'bg-white/10 text-blue-100 border-white/20'
-                                    }
-                `}
-                            >
-                                {section}
-                                {index < currentSectionIndex && (
-                                    <span className="ml-1">✓</span>
-                                )}
-                            </div>
-                        ))}
-                    </div>
+            {/* Right: Candidate + Timer */}
+            <div className="flex items-center gap-7.5">
+                {/* Candidate Name */}
+                <div className="px-4 py-2 rounded text-white text-base bg-white/10">
+                    {candidateName}
+                </div>
 
-                    {/* Right - Timer and Pause */}
-                    <div className="flex items-center gap-3">
-                        <ExamTimer compact className="bg-white/10 px-3 py-2 rounded-md border border-white/20" />
-                        {onPauseExam && (
-                            <button
-                                type="button"
-                                onClick={onPauseExam}
-                                className="px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-md text-sm transition-colors flex items-center gap-1"
-                                title="Save progress and continue later"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <span className="hidden sm:inline">Pause</span>
-                            </button>
-                        )}
-                    </div>
+                {/* Timer */}
+                <div className="text-base font-bold text-timer font-mono">
+                    Time Left: {timerData.displayTime}
                 </div>
             </div>
         </header>
@@ -117,61 +67,306 @@ function ExamHeader({ paper, onPauseExam }: ExamHeaderProps) {
 }
 
 // =============================================================================
-// QUESTION AREA
+// SECTION INDICATOR BAR (48px height)
 // =============================================================================
 
-interface QuestionAreaProps {
-    question: Question;
-    questionNumber: number;
-    totalQuestions: number;
-}
+function SectionIndicatorBar() {
+    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
+    const sections = ['VARC', 'DILR', 'QA'] as const;
 
-function QuestionArea({ question, questionNumber, totalQuestions }: QuestionAreaProps) {
-    const currentSection = useExamStore(selectCurrentSection);
+    // Dynamic Tailwind classes for section colors
+    const getSectionClasses = (section: typeof sections[number], isActive: boolean) => {
+        const baseClasses = 'flex-1 flex items-center justify-center text-base font-semibold cursor-pointer transition-colors duration-300';
+        if (!isActive) {
+            return `${baseClasses} bg-section-inactive text-exam-text-muted hover:bg-gray-200`;
+        }
+        switch (section) {
+            case 'VARC': return `${baseClasses} bg-section-varc text-white`;
+            case 'DILR': return `${baseClasses} bg-section-dilr text-white`;
+            case 'QA': return `${baseClasses} bg-section-qa text-white`;
+            default: return baseClasses;
+        }
+    };
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            {/* Question Header - Clean UI without difficulty/topic tags */}
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-                <div>
-                    <span className="text-sm text-gray-500">{currentSection}</span>
-                    <h2 className="text-lg font-semibold text-gray-800">
-                        Question {questionNumber} of {totalQuestions}
-                    </h2>
-                </div>
+        <div className="sticky top-header z-40 h-section-bar flex bg-white border-b border-gray-300">
+            {sections.map((section, index) => {
+                const isActive = index === currentSectionIndex;
 
-                {/* Marks indicator */}
-                <div className="flex items-center gap-2 text-sm">
-                    <span className="px-2 py-1 bg-green-50 text-green-700 rounded border border-green-200">
-                        +{question.positive_marks}
-                    </span>
-                    {question.negative_marks > 0 && (
-                        <span className="px-2 py-1 bg-red-50 text-red-700 rounded border border-red-200">
-                            -{question.negative_marks}
-                        </span>
-                    )}
-                </div>
-            </div>
+                return (
+                    <div
+                        key={section}
+                        className={getSectionClasses(section, isActive)}
+                    >
+                        {section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
 
-            {/* Context/Passage Display */}
+// =============================================================================
+// QUESTION METADATA BAR (40px height)
+// =============================================================================
+
+interface QuestionMetadataBarProps {
+    question: Question;
+    questionNumber: number;
+}
+
+function QuestionMetadataBar({ question, questionNumber }: QuestionMetadataBarProps) {
+    const marks = question.negative_marks > 0
+        ? `+${question.positive_marks} -${question.negative_marks}`
+        : `+${question.positive_marks} -0`;
+
+    return (
+        <div className="h-metadata-bar flex items-center justify-between px-5 bg-exam-bg-pane border-y border-exam-bg-border-light">
+            <span className="text-sm text-exam-text-secondary">
+                Type: {question.question_type} | Marks: {marks}
+            </span>
+            <span className="text-[15px] font-semibold text-exam-text-primary">
+                Question No. {questionNumber}
+            </span>
+        </div>
+    );
+}
+
+// =============================================================================
+// QUESTION PANE (Left Column - 65%)
+// =============================================================================
+
+interface QuestionPaneProps {
+    question: Question;
+}
+
+function QuestionPane({ question }: QuestionPaneProps) {
+    return (
+        <div className="w-2/3 overflow-y-auto bg-exam-bg-white px-10 py-8 border-r border-exam-bg-border">
+            {/* Context/Passage if exists */}
             {question.context && (
-                <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg max-h-80 overflow-y-auto">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2 sticky top-0 bg-gray-50">
-                        {question.context.title || 'Passage'}
-                    </h3>
-                    <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                        {question.context.text}
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                    {question.context.title && (
+                        <h3 className="text-[15px] font-semibold text-exam-header-from mb-3">
+                            {question.context.title}
+                        </h3>
+                    )}
+                    {question.context.image_url && (
+                        <div className="mb-4">
+                            <img
+                                src={question.context.image_url}
+                                alt="Context diagram"
+                                className="max-w-full h-auto rounded border border-gray-200"
+                            />
+                        </div>
+                    )}
+                    <div className="text-[15px] leading-exam text-exam-text-body whitespace-pre-wrap mb-5">
+                        <MathText text={question.context.content} />
                     </div>
                 </div>
             )}
 
-            {/* Question Content */}
+            {/* Question Image */}
+            {question.question_image_url && (
+                <div className="mb-5">
+                    <img
+                        src={question.question_image_url}
+                        alt="Question diagram"
+                        className="max-w-full h-auto rounded border border-gray-200"
+                    />
+                </div>
+            )}
+
+            {/* Question Text */}
+            <div className="text-[15px] leading-exam text-exam-text-body mb-5">
+                <MathText text={question.question_text} />
+            </div>
+
+            {/* Answer Options */}
             {question.question_type === 'MCQ' ? (
                 <MCQRenderer question={question} />
             ) : (
                 <TITARenderer question={question} />
             )}
         </div>
+    );
+}
+
+// =============================================================================
+// NAVIGATION PANE (Right Column - 35%)
+// =============================================================================
+
+interface NavigationPaneProps {
+    questions: Question[];
+    sectionQuestions: Question[];
+    currentQuestionIndex: number;
+    onSaveResponse?: (questionId: string, answer: string | null) => Promise<void>;
+}
+
+function NavigationPane({
+    questions,
+    sectionQuestions,
+    currentQuestionIndex,
+    onSaveResponse,
+}: NavigationPaneProps) {
+    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
+    const responses = useExamStore((s) => s.responses);
+    const goToQuestion = useExamStore((s) => s.goToQuestion);
+    const toggleMarkForReview = useExamStore((s) => s.toggleMarkForReview);
+    const clearAnswer = useExamStore((s) => s.clearAnswer);
+    const setAnswer = useExamStore((s) => s.setAnswer);
+
+    const currentQuestion = sectionQuestions[currentQuestionIndex];
+
+    // Handle question grid click
+    const handleQuestionClick = useCallback((question: Question, index: number) => {
+        goToQuestion(question.id, currentSectionIndex, index);
+    }, [goToQuestion, currentSectionIndex]);
+
+    // Handle Mark for Review & Next
+    const handleMarkForReview = useCallback(() => {
+        if (!currentQuestion) return;
+        toggleMarkForReview(currentQuestion.id);
+        // Move to next question
+        if (currentQuestionIndex < sectionQuestions.length - 1) {
+            const nextQ = sectionQuestions[currentQuestionIndex + 1];
+            goToQuestion(nextQ.id, currentSectionIndex, currentQuestionIndex + 1);
+        }
+    }, [currentQuestion, currentQuestionIndex, sectionQuestions, toggleMarkForReview, goToQuestion, currentSectionIndex]);
+
+    // Handle Clear Response
+    const handleClearResponse = useCallback(() => {
+        if (!currentQuestion) return;
+        clearAnswer(currentQuestion.id);
+    }, [currentQuestion, clearAnswer]);
+
+    // Handle Save & Next
+    const handleSaveNext = useCallback(async () => {
+        if (!currentQuestion) return;
+
+        const response = responses[currentQuestion.id];
+        if (response?.answer) {
+            // Mark as answered
+            setAnswer(currentQuestion.id, response.answer);
+            // Persist to server
+            await onSaveResponse?.(currentQuestion.id, response.answer);
+        }
+
+        // Move to next question
+        if (currentQuestionIndex < sectionQuestions.length - 1) {
+            const nextQ = sectionQuestions[currentQuestionIndex + 1];
+            goToQuestion(nextQ.id, currentSectionIndex, currentQuestionIndex + 1);
+        }
+    }, [currentQuestion, currentQuestionIndex, sectionQuestions, responses, setAnswer, goToQuestion, currentSectionIndex, onSaveResponse]);
+
+    return (
+        <div className="w-1/3 flex flex-col h-full bg-exam-bg-pane p-6">
+            {/* Title */}
+            <h3 className="text-base font-semibold text-exam-header-from text-center mb-5">
+                Choose a Question
+            </h3>
+
+            {/* Question Grid - 6 columns */}
+            <div className="grid grid-cols-6 gap-2 mb-auto">
+                {sectionQuestions.map((question, index) => {
+                    const response = responses[question.id];
+                    const status: QuestionStatus = response?.status ?? 'not_visited';
+                    const isCurrent = index === currentQuestionIndex;
+
+                    // Determine button classes based on status using Tailwind
+                    const getButtonClasses = () => {
+                        const baseClasses = 'w-q-btn h-q-btn flex items-center justify-center text-base font-medium cursor-pointer transition-all duration-200 hover:opacity-80 rounded';
+                        if (isCurrent) {
+                            return `${baseClasses} bg-status-current text-white border-2 border-status-current-dark`;
+                        }
+                        if (status === 'answered' || status === 'answered_marked') {
+                            return `${baseClasses} bg-status-answered text-white border border-status-answered-dark`;
+                        }
+                        if (status === 'marked') {
+                            return `${baseClasses} bg-status-marked text-white border border-status-marked-dark`;
+                        }
+                        if (status === 'visited') {
+                            return `${baseClasses} bg-status-visited text-white border border-status-visited-dark`;
+                        }
+                        // Not visited - default white
+                        return `${baseClasses} bg-status-not-visited text-exam-header-from border border-status-border`;
+                    };
+
+                    return (
+                        <button
+                            key={question.id}
+                            type="button"
+                            onClick={() => handleQuestionClick(question, index)}
+                            className={getButtonClasses()}
+                            title={`Question ${index + 1}`}
+                        >
+                            {index + 1}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* Legend */}
+            <div className="mt-4 pt-4 border-t border-gray-300">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-status-answered" />
+                        <span className="text-gray-600">Answered</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-status-visited" />
+                        <span className="text-gray-600">Not Answered</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-white border border-status-border" />
+                        <span className="text-gray-600">Not Visited</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-4 h-4 rounded bg-status-marked" />
+                        <span className="text-gray-600">Marked</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Bottom Buttons */}
+            <div className="flex justify-between gap-2 mt-8 pt-4 border-t border-gray-300">
+                <button
+                    type="button"
+                    onClick={handleMarkForReview}
+                    className="flex-1 h-btn text-sm font-semibold text-white rounded cursor-pointer transition-colors duration-200 hover:opacity-90 bg-section-varc border-none"
+                >
+                    Mark for Review & Next
+                </button>
+                <button
+                    type="button"
+                    onClick={handleClearResponse}
+                    className="flex-1 h-btn text-sm font-semibold text-white rounded cursor-pointer transition-colors duration-200 hover:opacity-90 bg-gray-400 border-none"
+                >
+                    Clear Response
+                </button>
+                <button
+                    type="button"
+                    onClick={handleSaveNext}
+                    className="flex-1 h-btn text-sm font-semibold text-white rounded cursor-pointer transition-colors duration-200 hover:opacity-90 bg-emerald-600 border-none"
+                >
+                    Save & Next
+                </button>
+            </div>
+        </div>
+    );
+}
+
+// =============================================================================
+// FOOTER (50px height)
+// =============================================================================
+
+function ExamFooter() {
+    return (
+        <footer className="h-footer flex items-center px-8 bg-exam-header-from border-t border-exam-header-border">
+            <span className="text-sm text-section-inactive">
+                © CAT 2025 - Mock Exam Platform
+            </span>
+        </footer>
     );
 }
 
@@ -189,14 +384,11 @@ export function ExamLayout({
 }: ExamLayoutProps) {
     const currentSection = useExamStore(selectCurrentSection);
     const currentQuestionIndex = useExamStore((s) => s.currentQuestionIndex);
-    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
     const hasHydrated = useExamStore((s) => s.hasHydrated);
     const isSubmitting = useExamStore((s) => s.isSubmitting);
-    const moveToNextSection = useExamStore((s) => s.moveToNextSection);
-    const setSubmitting = useExamStore((s) => s.setSubmitting);
 
     // Initialize timer with callbacks
-    const { timerData, isAutoSubmitting } = useExamTimer({
+    const { isAutoSubmitting } = useExamTimer({
         onSectionExpire: onSectionExpire,
         onExamComplete: onSubmitExam,
     });
@@ -209,27 +401,13 @@ export function ExamLayout({
     // Current question
     const currentQuestion = sectionQuestions[currentQuestionIndex];
 
-    // NOTE: Section submit removed - sections advance only via timer expiry (SOP requirement)
-
-    // Handle exam submit
-    const handleSubmitExam = useCallback(async () => {
-        if (isSubmitting) return;
-
-        setSubmitting(true);
-        try {
-            await onSubmitExam?.();
-        } finally {
-            setSubmitting(false);
-        }
-    }, [isSubmitting, onSubmitExam, setSubmitting]);
-
     // Show loading state while hydrating
     if (!hasHydrated) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="min-h-screen bg-exam-bg-page flex items-center justify-center">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-                    <p className="text-gray-600">Loading exam...</p>
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-section-varc mx-auto mb-4" />
+                    <p className="text-exam-text-muted">Loading exam...</p>
                 </div>
             </div>
         );
@@ -238,10 +416,10 @@ export function ExamLayout({
     // Show submitting state
     if (isSubmitting || isAutoSubmitting) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="min-h-screen bg-exam-bg-page flex items-center justify-center">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4" />
-                    <p className="text-gray-600">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4" />
+                    <p className="text-exam-text-muted">
                         {isAutoSubmitting ? 'Auto-submitting section...' : 'Submitting exam...'}
                     </p>
                 </div>
@@ -251,78 +429,46 @@ export function ExamLayout({
 
     if (!currentQuestion) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+            <div className="min-h-screen bg-exam-bg-page flex items-center justify-center">
                 <div className="text-center">
-                    <p className="text-gray-600">No questions found for this section.</p>
+                    <p className="text-exam-text-muted">No questions found for this section.</p>
                 </div>
             </div>
         );
     }
 
-    const isLastSection = currentSectionIndex === 2;
-
     return (
-        <div className="min-h-screen bg-[#f5f7fa] flex flex-col">
-            {/* Header */}
-            <ExamHeader paper={paper} onPauseExam={onPauseExam} />
+        <div className="min-h-screen flex flex-col w-full font-exam text-sm leading-normal bg-exam-bg-page">
+            {/* Full width container - no margins */}
+            <div className="flex flex-col min-h-screen w-full overflow-hidden">
+                {/* Header - 60px (sticky) */}
+                <ExamHeader paper={paper} />
 
-            {/* Main Content */}
-            <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 py-6">
-                <div className="flex gap-6">
-                    {/* Question Area */}
-                    <div className="flex-1 space-y-6">
-                        <QuestionArea
-                            question={currentQuestion}
-                            questionNumber={currentQuestionIndex + 1}
-                            totalQuestions={sectionQuestions.length}
-                        />
+                {/* Section Indicator Bar - 48px (sticky) */}
+                <SectionIndicatorBar />
 
-                        {/* Navigation Buttons */}
-                        <NavigationButtons
-                            question={currentQuestion}
-                            questions={questions}
-                            onSave={onSaveResponse}
-                        />
+                {/* Question Metadata Bar - 40px */}
+                <QuestionMetadataBar
+                    question={currentQuestion}
+                    questionNumber={currentQuestionIndex + 1}
+                />
 
-                        {/* Exam Submit - only active in last section (QA) */}
-                        {/* Sections advance via timer expiry only (SOP requirement) */}
-                        <div className="flex justify-center pt-4 border-t border-gray-200">
-                            <ExamSubmitButton
-                                onSubmitExam={handleSubmitExam}
-                                isLastSection={isLastSection}
-                            />
-                        </div>
-                    </div>
+                {/* Main Content Area - Two Column Layout */}
+                <main className="flex flex-1 h-[calc(100vh-60px-48px-40px-50px)]">
+                    {/* Left Column: Question Pane (65%) */}
+                    <QuestionPane question={currentQuestion} />
 
-                    {/* Sidebar - Question Palette */}
-                    <aside className="hidden lg:block w-80 flex-shrink-0">
-                        <div className="sticky top-6 space-y-4">
-                            {/* Timer Card */}
-                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                                <ExamTimer showProgressBar />
-                            </div>
+                    {/* Right Column: Navigation Pane (35%) */}
+                    <NavigationPane
+                        questions={questions}
+                        sectionQuestions={sectionQuestions}
+                        currentQuestionIndex={currentQuestionIndex}
+                        onSaveResponse={onSaveResponse}
+                    />
+                </main>
 
-                            {/* Question Palette */}
-                            <QuestionPalette questions={questions} />
-                        </div>
-                    </aside>
-                </div>
-            </main>
-
-            {/* Mobile Bottom Bar (for timer and palette toggle) */}
-            <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg">
-                <div className="flex items-center justify-between max-w-screen-lg mx-auto">
-                    <ExamTimer compact />
-                    <button
-                        type="button"
-                        className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium"
-                        onClick={() => {
-                            // TODO: Toggle mobile palette drawer
-                        }}
-                    >
-                        Question Palette
-                    </button>
-                </div>
+                {/* Footer - 50px */}
+                <ExamFooter />
             </div>
         </div>
     );

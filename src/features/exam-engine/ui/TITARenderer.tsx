@@ -10,6 +10,7 @@
 import { useCallback, useState, useEffect } from 'react';
 import { useExamStore, selectResponse } from '@/features/exam-engine';
 import type { Question } from '@/types/exam';
+import { MathText } from './MathText';
 
 // =============================================================================
 // TYPES
@@ -92,7 +93,7 @@ export function TITARenderer({
         <div className={`space-y-6 ${className}`}>
             {/* Question Text */}
             <div className="prose prose-lg max-w-none">
-                <p className="text-gray-800 whitespace-pre-wrap">{question.question_text}</p>
+                <MathText text={question.question_text} className="text-gray-800" />
             </div>
 
             {/* Answer Input */}

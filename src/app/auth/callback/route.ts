@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { logger } from '@/lib/logger';
 
 export async function GET(req: NextRequest) {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
     if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
-            console.error('Auth callback error:', error.message);
+            logger.error('Auth callback error', error.message, { redirectTo });
             const errorUrl = new URL('/auth/sign-in', req.nextUrl.origin);
             errorUrl.searchParams.set('error', 'auth_failed');
             return NextResponse.redirect(errorUrl);

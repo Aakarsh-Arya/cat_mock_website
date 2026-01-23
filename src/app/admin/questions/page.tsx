@@ -4,6 +4,7 @@
  */
 
 import { sbSSR } from '@/lib/supabase/server';
+import { adminLogger } from '@/lib/logger';
 import Link from 'next/link';
 
 export default async function QuestionsPage() {
@@ -20,14 +21,12 @@ export default async function QuestionsPage() {
         .limit(100);
 
     if (error) {
-        console.error('Error fetching questions:', error);
+        adminLogger.dataModified('questions', 'fetch_error', { error });
     }
 
-    // Fetch papers for filter
-    const { data: papers } = await supabase
-        .from('papers')
-        .select('id, title')
-        .order('title');
+    // TODO: Implement paper filter dropdown
+    // Future: Fetch papers for filter
+    // const { data: papers } = await supabase.from('papers').select('id, title').order('title');
 
     return (
         <div className="space-y-6">
@@ -85,16 +84,16 @@ export default async function QuestionsPage() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${question.section === 'VARC' ? 'bg-blue-100 text-blue-800' :
-                                                question.section === 'DILR' ? 'bg-purple-100 text-purple-800' :
-                                                    'bg-green-100 text-green-800'
+                                            question.section === 'DILR' ? 'bg-purple-100 text-purple-800' :
+                                                'bg-green-100 text-green-800'
                                             }`}>
                                             {question.section}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${question.question_type === 'MCQ'
-                                                ? 'bg-gray-100 text-gray-800'
-                                                : 'bg-yellow-100 text-yellow-800'
+                                            ? 'bg-gray-100 text-gray-800'
+                                            : 'bg-yellow-100 text-yellow-800'
                                             }`}>
                                             {question.question_type}
                                         </span>

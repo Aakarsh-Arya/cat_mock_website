@@ -53,12 +53,179 @@ export interface MCQOptions {
 /** Difficulty levels for questions */
 export type DifficultyLevel = 'easy' | 'medium' | 'hard';
 
-/** Context/Passage for shared questions */
+// =============================================================================
+// QUESTION CONTAINER ARCHITECTURE (Parent-Child Model)
+// =============================================================================
+
+/**
+ * Question Set Types
+ * - VARC: Reading Comprehension passages with 4-6 linked questions
+ * - DILR: Data Interpretation / Logical Reasoning with charts/tables
+ * - CASELET: Case-based questions with shared scenario
+ * - ATOMIC: Single standalone question (Quant, standalone Logic)
+ * 
+ * Note: Atomic questions create a set with exactly 1 child question.
+ * This normalizes rendering logic across all question types.
+ */
+export type QuestionSetType = 'VARC' | 'DILR' | 'CASELET' | 'ATOMIC';
+
+/**
+ * Content Layout Types - determines how to render the context
+ * - split_passage: Left pane = scrollable text passage, Right pane = questions
+ * - split_chart: Left pane = sticky chart/diagram, Right pane = questions
+ * - split_table: Left pane = data table, Right pane = questions
+ * - single_focus: No split, centered single question layout
+ * - image_top: Image above, question below (for diagrams in Quant)
+ */
+export type ContentLayoutType =
+    | 'split_passage'
+    | 'split_chart'
+    | 'split_table'
+    | 'single_focus'
+    | 'image_top';
+
+/**
+ * Question Set Metadata - stored as JSON in the database
+ */
+export interface QuestionSetMetadata {
+    difficulty?: DifficultyLevel;
+    topic?: string;
+    subtopic?: string;
+    tags?: string[];
+    source?: string;              // e.g., "CAT 2024 Slot 1"
+    estimated_time_minutes?: number;
+}
+
+/**
+ * Question Set Entity (Parent Container)
+ * Contains the context/passage for composite questions
+ */
+export interface QuestionSet {
+    id: string;
+    paper_id: string;
+    section: SectionName;
+
+    // Set classification
+    set_type: QuestionSetType;
+    content_layout: ContentLayoutType;
+
+    // Context content (The passage, chart, data table)
+    context_title?: string;        // e.g., "Passage 1", "Data Set A"
+    context_body?: string;         // Rich text / HTML / Markdown
+    context_image_url?: string;    // Primary image (chart, diagram)
+    context_additional_images?: Array<{
+        url: string;
+        caption?: string;
+    }>;
+
+    // Display configuration
+    display_order: number;
+    question_count: number;        // Denormalized count of child questions
+
+    // Metadata
+    metadata: QuestionSetMetadata;
+
+    // Publishing state
+    is_active: boolean;
+    is_published: boolean;
+
+    // Child questions (populated when fetched with JOIN)
+    questions?: QuestionInSet[];
+
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * Question within a Set (Child entity)
+ * Extends base question with set relationship
+ */
+export interface QuestionInSet {
+    id: string;
+    set_id: string;
+    paper_id: string;
+    section: SectionName;
+
+    // Position within the set
+    sequence_order: number;        // 1, 2, 3... within the set
+    question_number: number;       // Global number in the paper
+
+    // Content
+    question_text: string;
+    question_type: QuestionType;
+    options: string[] | null;
+
+    // Marking
+    positive_marks: number;
+    negative_marks: number;
+
+    // Categorization
+    difficulty?: DifficultyLevel;
+    topic?: string;
+    subtopic?: string;
+
+    // Media
+    question_image_url?: string;
+
+    // Management
+    is_active: boolean;
+}
+
+/**
+ * Question in Set with correct answer (for results/admin)
+ */
+export interface QuestionInSetWithAnswer extends QuestionInSet {
+    correct_answer: string;
+    solution_text?: string;
+    solution_image_url?: string;
+    video_solution_url?: string;
+}
+
+/**
+ * Complete Question Set with all questions (for exam rendering)
+ */
+export interface QuestionSetComplete extends QuestionSet {
+    questions: QuestionInSet[];
+}
+
+/**
+ * Complete Question Set with answers (for admin/results)
+ */
+export interface QuestionSetWithAnswers extends QuestionSet {
+    questions: QuestionInSetWithAnswer[];
+}
+
+/**
+ * Helper type: Check if set is composite (has context)
+ */
+export function isCompositeSet(setType: QuestionSetType): boolean {
+    return setType === 'VARC' || setType === 'DILR' || setType === 'CASELET';
+}
+
+/**
+ * Helper type: Check if layout should be split pane
+ */
+export function isSplitLayout(layout: ContentLayoutType): boolean {
+    return layout.startsWith('split_');
+}
+
+// =============================================================================
+// LEGACY: Context/Passage for shared questions (deprecated, use QuestionSet)
+// =============================================================================
+
+/** @deprecated Use QuestionSet instead */
 export interface QuestionContext {
     id: string;
-    title: string;
+    paper_id: string;
     section: SectionName;
-    text: string;
+    title?: string;
+    content: string;
+    context_type: 'passage' | 'data_set' | 'image' | 'table';
+    image_url?: string;
+    display_order: number;
+    is_active: boolean;
+    created_at?: string;
+    updated_at?: string;
 }
 
 /** Question entity from database */
@@ -85,6 +252,9 @@ export interface Question {
     solution_image_url?: string;
     video_solution_url?: string;
 
+    // Question media
+    question_image_url?: string;
+
     // Categorization
     difficulty?: DifficultyLevel;
     topic?: string;
@@ -101,6 +271,19 @@ export interface Question {
 export interface QuestionWithAnswer extends Question {
     correct_answer: string;
 }
+
+// =============================================================================
+// STATISTICS TYPES
+// =============================================================================
+
+/** Peer statistics for a single question */
+export interface QuestionStats {
+    total: number;
+    options: Record<string, number>;
+}
+
+/** Peer statistics for an entire paper (keyed by question ID) */
+export type PaperStats = Record<string, QuestionStats>;
 
 // =============================================================================
 // PAPER TYPES
@@ -223,6 +406,7 @@ export interface Attempt {
     submitted_at?: string;
     completed_at?: string;
     time_taken_seconds?: number;
+    submission_id?: string;
 
     // Status
     status: AttemptStatus;
@@ -406,3 +590,83 @@ export const CAT_CONSTANTS = {
     NEGATIVE_MARKS_TITA: 0,
     SECTIONS: ['VARC', 'DILR', 'QA'] as const,
 } as const;
+
+// =============================================================================
+// DYNAMIC TIMING HELPERS
+// =============================================================================
+
+/** Build a section duration map (seconds) from paper sections with CAT defaults as fallback. */
+export function getSectionDurationSecondsMap(
+    sections?: SectionConfig[] | null
+): Record<SectionName, number> {
+    const defaults: Record<SectionName, number> = {
+        VARC: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+        DILR: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+        QA: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+    };
+
+    if (!sections || sections.length === 0) {
+        return defaults;
+    }
+
+    const map = { ...defaults };
+    for (const section of sections) {
+        const seconds = Math.max(0, section.time) * 60;
+        map[section.name] = seconds || defaults[section.name];
+    }
+
+    return map;
+}
+
+/** Calculate total exam duration in seconds from paper sections. */
+export function getPaperTotalDurationSeconds(sections?: SectionConfig[] | null): number {
+    if (!sections || sections.length === 0) {
+        return CAT_CONSTANTS.TOTAL_DURATION_MINUTES * 60;
+    }
+
+    const totalMinutes = sections.reduce((sum, s) => sum + (s.time || 0), 0);
+    return Math.max(1, totalMinutes) * 60;
+}
+
+// =============================================================================
+// RBAC TYPES (Milestone 6+)
+// =============================================================================
+
+/** Application roles for RBAC */
+export type AppRole = 'user' | 'admin' | 'editor';
+
+/** User role entity from database */
+export interface UserRole {
+    id: string;
+    user_id: string;
+    role: AppRole;
+    granted_by?: string;
+    granted_at: string;
+    created_at: string;
+    updated_at: string;
+}
+
+/** JWT claims structure (injected by Auth Hook) */
+export interface JWTClaims {
+    user_role?: AppRole;
+    app_metadata?: {
+        user_role?: AppRole;
+    };
+    sub: string;
+    email?: string;
+    exp: number;
+    iat: number;
+}
+
+/** Admin audit log entry */
+export interface AdminAuditLog {
+    id: string;
+    admin_id: string;
+    action: 'create' | 'update' | 'delete' | 'publish' | 'unpublish';
+    entity_type: 'paper' | 'question' | 'context' | 'user_role';
+    entity_id: string;
+    changes?: Record<string, { before: unknown; after: unknown }>;
+    ip_address?: string;
+    user_agent?: string;
+    created_at: string;
+}

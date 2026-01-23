@@ -8,7 +8,7 @@
 
 import { useCallback } from 'react';
 import { useExamStore, selectResponse, selectCurrentSection } from '@/features/exam-engine';
-import type { Question, SectionName } from '@/types/exam';
+import type { Question } from '@/types/exam';
 import { getQuestionsForSection } from '@/types/exam';
 
 // =============================================================================
@@ -96,7 +96,7 @@ export function NavigationButtons({
     const goToQuestion = useExamStore((s) => s.goToQuestion);
     const clearAnswer = useExamStore((s) => s.clearAnswer);
     const toggleMarkForReview = useExamStore((s) => s.toggleMarkForReview);
-    const moveToNextSection = useExamStore((s) => s.moveToNextSection);
+    // NOTE: moveToNextSection removed - sections advance only via timer expiry (SOP requirement)
 
     // Get questions for current section
     const sectionQuestions = getQuestionsForSection(questions, currentSection);
@@ -201,12 +201,7 @@ export function NavigationButtons({
         sectionQuestions,
     ]);
 
-    // Handle Submit Section
-    const handleSubmitSection = useCallback(() => {
-        if (!isLastSection) {
-            moveToNextSection();
-        }
-    }, [isLastSection, moveToNextSection]);
+    // NOTE: Section submit removed - sections advance only via timer expiry (SOP requirement)
 
     return (
         <div className={`flex flex-wrap items-center justify-between gap-4 ${className}`}>

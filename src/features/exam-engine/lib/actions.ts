@@ -2,11 +2,13 @@
  * @fileoverview Exam Engine Server Actions
  * @description Server-side actions for fetching, saving, and submitting exams
  * @blueprint Milestone 4 SOP-SSOT - Phase 4.1, 4.2, 4.4
+ * @blueprint M6+ Architecture - Structured Logging
  */
 
 'use server';
 
 import { sbSSR } from '@/lib/supabase/server';
+import { logger, examLogger } from '@/lib/logger';
 import {
     FetchPaperRequestSchema,
     SaveResponseRequestSchema,
@@ -15,8 +17,8 @@ import {
     type FetchPaperResponse,
     type SubmitExamResponse,
 } from './validation';
-import type { Paper, Question, Attempt, SectionName, TimeRemaining } from '@/types/exam';
-import { CAT_CONSTANTS } from '@/types/exam';
+import type { Paper, Question, Attempt, SectionName, TimeRemaining, QuestionContext } from '@/types/exam';
+import { getSectionDurationSecondsMap, getPaperTotalDurationSeconds } from '@/types/exam';
 
 // =============================================================================
 // ERROR TYPES
@@ -68,52 +70,51 @@ export async function fetchPaperForExam(
         }
 
         // Fetch questions using the secure view (excludes correct_answer).
-        // Fallback to selecting explicit columns from `questions` if the view isn't deployed yet.
-        let questions: Question[] = [];
-        {
-            const { data, error } = await supabase
-                .from('questions_exam')
-                .select('*')
-                .eq('paper_id', paperId)
-                .eq('is_active', true)
-                .order('section')
-                .order('question_number');
+        // Fail fast if the view isn't deployed to avoid leaking correct answers.
+        const { data: questionsData, error: questionsError } = await supabase
+            .from('questions_exam')
+            .select('*')
+            .eq('paper_id', paperId)
+            .eq('is_active', true)
+            .order('section')
+            .order('question_number');
 
-            if (!error && data) {
-                questions = data as unknown as Question[];
+        if (questionsError || !questionsData) {
+            logger.error('Failed to fetch questions from questions_exam', questionsError, { paperId });
+            return { success: false, error: 'Failed to fetch questions' };
+        }
+
+        let questions: Question[] = questionsData as unknown as Question[];
+
+        // Fetch question contexts for questions that have context_id
+        const contextIds = [...new Set(
+            questions
+                .map(q => (q as { context_id?: string }).context_id)
+                .filter((id): id is string => Boolean(id))
+        )];
+
+        if (contextIds.length > 0) {
+            const { data: contexts, error: contextsError } = await supabase
+                .from('question_contexts')
+                .select('id, title, section, content, context_type, paper_id, display_order, is_active')
+                .in('id', contextIds);
+
+            if (!contextsError && contexts) {
+                // Create a map for quick lookup
+                const contextMap = new Map(
+                    contexts.map(c => [c.id, c as QuestionContext])
+                );
+
+                // Attach contexts to questions
+                questions = questions.map(q => {
+                    const ctxId = (q as { context_id?: string }).context_id;
+                    if (ctxId && contextMap.has(ctxId)) {
+                        return { ...q, context: contextMap.get(ctxId) } as Question;
+                    }
+                    return q;
+                });
             } else {
-                const { data: fallbackData, error: fallbackError } = await supabase
-                    .from('questions')
-                    .select(
-                        [
-                            'id',
-                            'paper_id',
-                            'section',
-                            'question_number',
-                            'question_text',
-                            'question_type',
-                            'options',
-                            'positive_marks',
-                            'negative_marks',
-                            'difficulty',
-                            'topic',
-                            'subtopic',
-                            'is_active',
-                            'created_at',
-                            'updated_at',
-                        ].join(',')
-                    )
-                    .eq('paper_id', paperId)
-                    .eq('is_active', true)
-                    .order('section')
-                    .order('question_number');
-
-                if (fallbackError || !fallbackData) {
-                    console.error('Failed to fetch questions (view and fallback):', error, fallbackError);
-                    return { success: false, error: 'Failed to fetch questions' };
-                }
-
-                questions = fallbackData as unknown as Question[];
+                logger.warn('Failed to fetch question contexts', contextsError, { contextIds });
             }
         }
 
@@ -133,10 +134,11 @@ export async function fetchPaperForExam(
             attempt = existingAttempt as Attempt;
         } else {
             // Create new attempt
+            const durations = getSectionDurationSecondsMap(paper.sections);
             const initialTimeRemaining: TimeRemaining = {
-                VARC: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
-                DILR: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
-                QA: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+                VARC: durations.VARC,
+                DILR: durations.DILR,
+                QA: durations.QA,
             };
 
             const { data: newAttempt, error: attemptError } = await supabase
@@ -174,7 +176,7 @@ export async function fetchPaperForExam(
                 .insert(responseInserts);
 
             if (responsesError) {
-                console.error('Failed to create initial responses:', responsesError);
+                logger.warn('Failed to create initial responses', responsesError, { attemptId: attempt.id });
                 // Non-fatal - continue without initial responses
             }
         }
@@ -188,7 +190,7 @@ export async function fetchPaperForExam(
             },
         };
     } catch (error) {
-        console.error('fetchPaperForExam error:', error);
+        logger.error('fetchPaperForExam error', error, { paperId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
@@ -208,6 +210,8 @@ export async function saveResponse(data: {
     status: string;
     isMarkedForReview: boolean;
     timeSpentSeconds: number;
+    sessionToken?: string | null;
+    force_resume?: boolean;
 }): Promise<ActionResult<void>> {
     try {
         // Validate input
@@ -226,7 +230,7 @@ export async function saveResponse(data: {
 
         const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('user_id, status, paper_id')
+            .select('user_id, status, paper_id, session_token, last_activity_at')
             .eq('id', data.attemptId)
             .single();
 
@@ -242,6 +246,32 @@ export async function saveResponse(data: {
             return { success: false, error: 'Attempt is not in progress' };
         }
 
+        // Session conflict check (multi-device/tab prevention)
+        if (attempt.session_token && data.sessionToken && attempt.session_token !== data.sessionToken) {
+            if (data.force_resume === true) {
+                const lastActivityAt = attempt.last_activity_at ? new Date(attempt.last_activity_at).getTime() : null;
+                const isStale = !lastActivityAt || (Date.now() - lastActivityAt) > 5 * 60 * 1000;
+
+                if (isStale) {
+                    examLogger.securityEvent('Force resume rejected (stale) (saveResponse)', {
+                        attemptId: data.attemptId,
+                        oldToken: attempt.session_token,
+                        lastActivityAt: attempt.last_activity_at,
+                    });
+                    return { success: false, error: 'FORCE_RESUME_STALE' };
+                }
+
+                examLogger.securityEvent('Force resume (saveResponse)', { attemptId: data.attemptId, oldToken: attempt.session_token });
+                await supabase
+                    .from('attempts')
+                    .update({ session_token: data.sessionToken })
+                    .eq('id', data.attemptId);
+            } else {
+                examLogger.securityEvent('Session conflict (saveResponse)', { attemptId: data.attemptId });
+                return { success: false, error: 'SESSION_CONFLICT' };
+            }
+        }
+
         // P0 FIX: Verify questionId belongs to the attempt's paper (integrity check)
         const { data: question, error: questionError } = await supabase
             .from('questions')
@@ -252,7 +282,7 @@ export async function saveResponse(data: {
             .maybeSingle();
 
         if (questionError || !question) {
-            console.warn(`Invalid questionId for attemptId=${data.attemptId}: ${data.questionId}`);
+            examLogger.validationError('Invalid questionId for attempt', { attemptId: data.attemptId, questionId: data.questionId });
             return { success: false, error: 'Invalid question' };
         }
 
@@ -274,13 +304,13 @@ export async function saveResponse(data: {
             );
 
         if (upsertError) {
-            console.error('saveResponse upsert error:', upsertError);
+            logger.error('saveResponse upsert error', upsertError, { attemptId: data.attemptId, questionId: data.questionId });
             return { success: false, error: 'Failed to save response' };
         }
 
         return { success: true };
     } catch (error) {
-        console.error('saveResponse error:', error);
+        logger.error('saveResponse error', error, { attemptId: data.attemptId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
@@ -326,13 +356,13 @@ export async function updateAttemptProgress(data: {
             .eq('status', 'in_progress');
 
         if (updateError) {
-            console.error('updateAttemptProgress error:', updateError);
+            logger.error('updateAttemptProgress error', updateError, { attemptId: data.attemptId });
             return { success: false, error: 'Failed to update progress' };
         }
 
         return { success: true };
     } catch (error) {
-        console.error('updateAttemptProgress error:', error);
+        logger.error('updateAttemptProgress error', error, { attemptId: data.attemptId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
@@ -348,11 +378,17 @@ export async function updateAttemptProgress(data: {
  * @param attemptId - UUID of the attempt to submit
  */
 export async function submitExam(
-    attemptId: string
+    attemptId: string,
+    options?: { sessionToken?: string | null; force_resume?: boolean; submissionId?: string }
 ): Promise<ActionResult<SubmitExamResponse>> {
     try {
         // Validate input
-        const parsed = SubmitExamRequestSchema.safeParse({ attemptId });
+        const parsed = SubmitExamRequestSchema.safeParse({
+            attemptId,
+            sessionToken: options?.sessionToken,
+            force_resume: options?.force_resume,
+            submissionId: options?.submissionId,
+        });
         if (!parsed.success) {
             return { success: false, error: 'Invalid attempt ID' };
         }
@@ -368,7 +404,7 @@ export async function submitExam(
         // Fetch attempt with paper_id, started_at, and session_token
         const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('user_id, status, paper_id, started_at, session_token')
+            .select('user_id, status, paper_id, started_at, session_token, last_activity_at, submission_id')
             .eq('id', attemptId)
             .single();
 
@@ -389,9 +425,40 @@ export async function submitExam(
             return { success: false, error: 'Attempt is not in progress' };
         }
 
-        // P0 FIX: Server-side timer validation
-        // CAT exam: 3 sections × 40 minutes = 120 minutes total
-        const MAX_EXAM_DURATION_SECONDS = 3 * 40 * 60; // 7200 seconds
+        // Session conflict check (multi-device/tab prevention)
+        if (attempt.session_token && options?.sessionToken && attempt.session_token !== options.sessionToken) {
+            if (options.force_resume === true) {
+                const lastActivityAt = attempt.last_activity_at ? new Date(attempt.last_activity_at).getTime() : null;
+                const isStale = !lastActivityAt || (Date.now() - lastActivityAt) > 5 * 60 * 1000;
+
+                if (isStale) {
+                    examLogger.securityEvent('Force resume rejected (stale) (submitExam)', {
+                        attemptId,
+                        oldToken: attempt.session_token,
+                        lastActivityAt: attempt.last_activity_at,
+                    });
+                    return { success: false, error: 'FORCE_RESUME_STALE' };
+                }
+
+                examLogger.securityEvent('Force resume (submitExam)', { attemptId, oldToken: attempt.session_token });
+                await supabase
+                    .from('attempts')
+                    .update({ session_token: options.sessionToken })
+                    .eq('id', attemptId);
+            } else {
+                examLogger.securityEvent('Session conflict (submitExam)', { attemptId });
+                return { success: false, error: 'SESSION_CONFLICT' };
+            }
+        }
+
+        // P0 FIX: Server-side timer validation (dynamic per paper)
+        const { data: paperTiming } = await supabase
+            .from('papers')
+            .select('sections')
+            .eq('id', attempt.paper_id)
+            .maybeSingle();
+
+        const MAX_EXAM_DURATION_SECONDS = getPaperTotalDurationSeconds(paperTiming?.sections);
         const GRACE_PERIOD_SECONDS = 120; // 2 minutes grace for network latency
 
         const startedAt = new Date(attempt.started_at).getTime();
@@ -399,7 +466,7 @@ export async function submitExam(
         const elapsedSeconds = Math.floor((now - startedAt) / 1000);
 
         if (elapsedSeconds > MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS) {
-            console.warn(`Late submission rejected: attemptId=${attemptId}, elapsed=${elapsedSeconds}s, max=${MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS}s`);
+            examLogger.securityEvent('Late submission rejected', { attemptId, elapsedSeconds, maxAllowed: MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS });
 
             // Still mark as completed but flag it
             await supabase
@@ -415,18 +482,25 @@ export async function submitExam(
         }
 
         const submittedAt = new Date().toISOString();
+        const submissionId = options?.submissionId ?? null;
 
         // P0 FIX: Use atomic status transition to prevent race conditions
-        const { data: updatedAttempt, error: updateStatusError } = await supabase
+        let updateQuery = supabase
             .from('attempts')
-            .update({ status: 'submitted', submitted_at: submittedAt })
+            .update({ status: 'submitted', submitted_at: submittedAt, submission_id: submissionId })
             .eq('id', attemptId)
-            .eq('status', 'in_progress') // Only update if still in_progress
+            .eq('status', 'in_progress');
+
+        if (submissionId) {
+            updateQuery = updateQuery.or(`submission_id.is.null,submission_id.eq.${submissionId}`);
+        }
+
+        const { data: updatedAttempt, error: updateStatusError } = await updateQuery
             .select('id')
             .maybeSingle();
 
         if (updateStatusError) {
-            console.error('Failed to mark attempt as submitted:', updateStatusError);
+            logger.error('Failed to mark attempt as submitted', updateStatusError, { attemptId });
             return { success: false, error: 'Failed to submit exam' };
         }
 
@@ -445,7 +519,7 @@ export async function submitExam(
             .order('question_number');
 
         if (questionsError || !questions) {
-            console.error('Failed to fetch questions for scoring:', questionsError);
+            logger.error('Failed to fetch questions for scoring', questionsError, { attemptId, paperId: attempt.paper_id });
             return { success: false, error: 'Failed to fetch questions for scoring' };
         }
 
@@ -456,7 +530,7 @@ export async function submitExam(
             .eq('attempt_id', attemptId);
 
         if (responsesError) {
-            console.error('Failed to fetch responses for scoring:', responsesError);
+            logger.error('Failed to fetch responses for scoring', responsesError, { attemptId });
             return { success: false, error: 'Failed to fetch responses' };
         }
 
@@ -465,8 +539,10 @@ export async function submitExam(
         const invalidResponses = (responses || []).filter(r => !validQuestionIds.has(r.question_id));
 
         if (invalidResponses.length > 0) {
-            console.warn(`Invalid responses detected for attemptId=${attemptId}:`,
-                invalidResponses.map(r => r.question_id));
+            examLogger.securityEvent('Invalid responses detected', {
+                attemptId,
+                invalidQuestionIds: invalidResponses.map(r => r.question_id)
+            });
             // Log but don't block - filter them out for scoring
             // This could indicate a bug or tampering
         }
@@ -505,7 +581,7 @@ export async function submitExam(
             .eq('id', attemptId);
 
         if (scoreUpdateError) {
-            console.error('Failed to update attempt with scores:', scoreUpdateError);
+            logger.error('Failed to update attempt with scores', scoreUpdateError, { attemptId });
             // Continue anyway - attempt is submitted, scores may be incomplete
         }
 
@@ -536,7 +612,7 @@ export async function submitExam(
             },
         };
     } catch (error) {
-        console.error('submitExam error:', error);
+        logger.error('submitExam error', error, { attemptId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
@@ -624,7 +700,7 @@ export async function fetchExamResults(attemptId: string): Promise<ActionResult<
             },
         };
     } catch (error) {
-        console.error('fetchExamResults error:', error);
+        logger.error('fetchExamResults error', error, { attemptId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
@@ -688,13 +764,13 @@ export async function pauseExam(data: {
             .eq('user_id', user.id);
 
         if (updateError) {
-            console.error('pauseExam update error:', updateError);
+            logger.error('pauseExam update error', updateError, { attemptId: data.attemptId });
             return { success: false, error: 'Failed to pause exam' };
         }
 
         return { success: true };
     } catch (error) {
-        console.error('pauseExam error:', error);
+        logger.error('pauseExam error', error, { attemptId: data.attemptId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }

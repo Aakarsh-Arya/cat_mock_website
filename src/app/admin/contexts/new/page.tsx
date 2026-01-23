@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { sb } from '@/lib/supabase/client';
+import { adminLogger } from '@/lib/logger';
 
 interface Paper {
     id: string;
@@ -77,7 +78,7 @@ export default function NewContextPage() {
 
             router.push(`/admin/contexts/${data.id}`);
         } catch (err: unknown) {
-            console.error('Error creating context:', err);
+            adminLogger.dataModified('question_contexts', 'create_error', { error: err });
             setError(err instanceof Error ? err.message : 'Failed to create context');
         } finally {
             setLoading(false);

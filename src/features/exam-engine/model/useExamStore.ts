@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { logger } from '@/lib/logger';
 import type {
     ExamStore,
     ExamData,
@@ -17,22 +18,21 @@ import type {
     Question,
 } from '@/types/exam';
 import {
-    CAT_CONSTANTS,
     SECTION_ORDER,
     getSectionByIndex,
-    getQuestionsForSection,
     calculateQuestionStatus,
+    getSectionDurationSecondsMap,
 } from '@/types/exam';
 
 // =============================================================================
 // INITIAL STATE
 // =============================================================================
 
-const createInitialTimerState = (sectionName: SectionName): SectionTimerState => ({
+const createInitialTimerState = (sectionName: SectionName, durationSeconds: number): SectionTimerState => ({
     sectionName,
     startedAt: 0,
-    durationSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
-    remainingSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+    durationSeconds,
+    remainingSeconds: durationSeconds,
     isExpired: false,
 });
 
@@ -56,11 +56,14 @@ const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActio
     responses: {},
 
     // Timer state per section
-    sectionTimers: {
-        VARC: createInitialTimerState('VARC'),
-        DILR: createInitialTimerState('DILR'),
-        QA: createInitialTimerState('QA'),
-    },
+    sectionTimers: (() => {
+        const defaults = getSectionDurationSecondsMap();
+        return {
+            VARC: createInitialTimerState('VARC', defaults.VARC),
+            DILR: createInitialTimerState('DILR', defaults.DILR),
+            QA: createInitialTimerState('QA', defaults.QA),
+        };
+    })(),
 
     // Question tracking - converted to arrays for JSON serialization
     visitedQuestions: new Set<string>(),
@@ -100,7 +103,7 @@ export const createExamStore = (attemptId?: string) => {
                     if (currentState.attemptId === attempt.id && currentState.hasHydrated) {
                         // Same attempt, already initialized - just update hydration flag
                         // This prevents timer reset on page refresh
-                        console.log('[ExamStore] Resuming existing attempt, preserving timer state');
+                        logger.debug('Resuming existing attempt, preserving timer state', { attemptId: attempt.id });
                         return;
                     }
 
@@ -126,27 +129,28 @@ export const createExamStore = (attemptId?: string) => {
                         ? new Date(attempt.started_at).getTime()
                         : now;
 
+                    const sectionDurations = getSectionDurationSecondsMap(paper.sections);
                     const sectionTimers: Record<SectionName, SectionTimerState> = {
                         VARC: {
                             sectionName: 'VARC',
                             // Use the original attempt start time for delta calculation
                             startedAt: attemptStartedAt,
-                            durationSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
-                            remainingSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+                            durationSeconds: sectionDurations.VARC,
+                            remainingSeconds: sectionDurations.VARC,
                             isExpired: false,
                         },
                         DILR: {
                             sectionName: 'DILR',
                             startedAt: 0, // Will be set when section starts
-                            durationSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
-                            remainingSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+                            durationSeconds: sectionDurations.DILR,
+                            remainingSeconds: sectionDurations.DILR,
                             isExpired: false,
                         },
                         QA: {
                             sectionName: 'QA',
                             startedAt: 0, // Will be set when section starts
-                            durationSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
-                            remainingSeconds: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
+                            durationSeconds: sectionDurations.QA,
+                            remainingSeconds: sectionDurations.QA,
                             isExpired: false,
                         },
                     };
@@ -157,8 +161,8 @@ export const createExamStore = (attemptId?: string) => {
                         if (timeRemaining.VARC !== undefined) {
                             sectionTimers.VARC.remainingSeconds = timeRemaining.VARC;
                             // If VARC has less than full time, calculate proper startedAt
-                            if (timeRemaining.VARC < CAT_CONSTANTS.SECTION_DURATION_SECONDS) {
-                                const elapsedSeconds = CAT_CONSTANTS.SECTION_DURATION_SECONDS - timeRemaining.VARC;
+                            if (timeRemaining.VARC < sectionDurations.VARC) {
+                                const elapsedSeconds = sectionDurations.VARC - timeRemaining.VARC;
                                 sectionTimers.VARC.startedAt = now - (elapsedSeconds * 1000);
                             }
                         }
@@ -177,9 +181,9 @@ export const createExamStore = (attemptId?: string) => {
                     // If we're on a later section, set its startedAt to now (or calculate from remaining)
                     if (currentSectionIndex > 0 && sectionTimers[currentSection].startedAt === 0) {
                         const sectionTimer = sectionTimers[currentSection];
-                        if (sectionTimer.remainingSeconds < CAT_CONSTANTS.SECTION_DURATION_SECONDS) {
+                        if (sectionTimer.remainingSeconds < sectionDurations[currentSection]) {
                             // Calculate startedAt based on remaining time
-                            const elapsedSeconds = CAT_CONSTANTS.SECTION_DURATION_SECONDS - sectionTimer.remainingSeconds;
+                            const elapsedSeconds = sectionDurations[currentSection] - sectionTimer.remainingSeconds;
                             sectionTimer.startedAt = now - (elapsedSeconds * 1000);
                         } else {
                             sectionTimer.startedAt = now;
@@ -222,7 +226,7 @@ export const createExamStore = (attemptId?: string) => {
 
                     // Validate section access (no backward navigation between sections)
                     if (sectionIndex < state.currentSectionIndex) {
-                        console.warn('Cannot navigate to locked section');
+                        logger.warn('Cannot navigate to locked section', { attemptId: state.attemptId, targetSection: sectionIndex, currentSection: state.currentSectionIndex });
                         return;
                     }
 
@@ -295,7 +299,7 @@ export const createExamStore = (attemptId?: string) => {
                     const response = state.responses[questionId];
 
                     if (!response) {
-                        console.warn(`Response not found for question ${questionId}`);
+                        logger.warn('Response not found for question', { questionId, attemptId: state.attemptId });
                         return;
                     }
 

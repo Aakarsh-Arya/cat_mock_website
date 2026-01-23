@@ -28,7 +28,12 @@ type UserProfile = {
     target_percentile: number | null;
 };
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ error?: string }>;
+}) {
+    const params = await searchParams;
     const supabase = await sbSSR();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -102,6 +107,24 @@ export default async function DashboardPage() {
 
     return (
         <main style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
+            {/* Unauthorized Error Banner */}
+            {params.error === 'unauthorized' && (
+                <div style={{
+                    padding: '12px 16px',
+                    background: '#ffebee',
+                    border: '1px solid #ef5350',
+                    borderRadius: 8,
+                    marginBottom: 24,
+                    color: '#c62828',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12
+                }}>
+                    <span style={{ fontSize: 20 }}>⚠️</span>
+                    <span>You don&apos;t have admin access. Contact the administrator to request access.</span>
+                </div>
+            )}
+
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
                 <div>

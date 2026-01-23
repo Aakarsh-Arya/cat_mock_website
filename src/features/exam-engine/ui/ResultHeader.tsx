@@ -4,15 +4,6 @@
  * @blueprint Milestone 5 - Milestone_Change_Log.md - Change 002
  */
 
-import { type SectionName } from '@/types/exam';
-
-interface SectionScore {
-    score: number;
-    correct: number;
-    incorrect: number;
-    unanswered: number;
-}
-
 interface ResultHeaderProps {
     paperTitle: string;
     totalScore: number;

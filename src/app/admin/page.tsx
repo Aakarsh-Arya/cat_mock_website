@@ -97,7 +97,23 @@ export default async function AdminPage() {
             {/* Quick Actions */}
             <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Link
+                        href="/admin/papers"
+                        className="flex items-center gap-3 p-4 border-2 border-indigo-500 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+                    >
+                        <div className="w-10 h-10 bg-indigo-500 rounded-lg flex items-center justify-center">
+                            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p className="font-semibold text-indigo-900">Live Edit Papers</p>
+                            <p className="text-sm text-indigo-600">Edit papers in mock exam view</p>
+                        </div>
+                    </Link>
+
                     <Link
                         href="/admin/papers/new"
                         className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"

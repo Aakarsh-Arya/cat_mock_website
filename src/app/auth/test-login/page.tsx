@@ -44,7 +44,6 @@ export default function TestLoginPage() {
         setLoading(true);
         try {
             await sb().auth.signOut();
-            await refreshSession();
         } finally {
             setLoading(false);
         }

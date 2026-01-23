@@ -8,10 +8,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { checkRateLimit, RATE_LIMITS, userRateLimitKey, getRateLimitHeaders } from '@/lib/rate-limit';
 import { submitExam } from '@/features/exam-engine/lib/actions';
+import { examLogger } from '@/lib/logger';
 
 export async function POST(req: NextRequest) {
     try {
-        const { attemptId, sessionToken } = await req.json();
+        const { attemptId, sessionToken, force_resume, submissionId } = await req.json();
         if (!attemptId) {
             return NextResponse.json({ error: 'attemptId required' }, { status: 400 });
         }
@@ -58,21 +59,54 @@ export async function POST(req: NextRequest) {
         if (sessionToken) {
             const { data: attempt } = await supabase
                 .from('attempts')
-                .select('session_token')
+                .select('session_token, last_activity_at')
                 .eq('id', attemptId)
                 .maybeSingle();
 
             if (attempt?.session_token && attempt.session_token !== sessionToken) {
-                console.warn(`Submit session mismatch for attempt ${attemptId}`);
-                return NextResponse.json({
-                    error: 'Session conflict detected. This exam may be open in another tab or device.',
-                    code: 'SESSION_CONFLICT'
-                }, { status: 409 });
+                if (force_resume === true) {
+                    const lastActivityAt = attempt.last_activity_at ? new Date(attempt.last_activity_at).getTime() : null;
+                    const isStale = !lastActivityAt || (Date.now() - lastActivityAt) > 5 * 60 * 1000;
+                    const ip = req.headers.get('x-forwarded-for') ?? 'unknown';
+                    const userAgent = req.headers.get('user-agent') ?? 'unknown';
+
+                    if (isStale) {
+                        examLogger.securityEvent('Force resume rejected (stale) (submit)', {
+                            attemptId,
+                            oldToken: attempt.session_token,
+                            lastActivityAt: attempt.last_activity_at,
+                            ip,
+                            userAgent,
+                        });
+                        return NextResponse.json({
+                            error: 'Force resume denied. Session is too old.',
+                            code: 'FORCE_RESUME_STALE',
+                        }, { status: 409 });
+                    }
+
+                    examLogger.securityEvent('Force resume: updating session token (submit)', {
+                        attemptId,
+                        oldToken: attempt.session_token,
+                        ip,
+                        userAgent,
+                    });
+                    await supabase
+                        .from('attempts')
+                        .update({ session_token: sessionToken })
+                        .eq('id', attemptId);
+                } else {
+                    examLogger.securityEvent('Submit session mismatch', { attemptId });
+                    return NextResponse.json({
+                        error: 'Session conflict detected. This exam may be open in another tab or device.',
+                        code: 'SESSION_CONFLICT',
+                        canForceResume: true
+                    }, { status: 409 });
+                }
             }
         }
 
         // Use the server action which has full validation, timer checks, and scoring
-        const result = await submitExam(attemptId);
+        const result = await submitExam(attemptId, { sessionToken, force_resume, submissionId });
 
         if (!result.success) {
             return NextResponse.json({ error: result.error }, { status: 400 });

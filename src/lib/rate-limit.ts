@@ -71,27 +71,27 @@ startCleanup();
  * Tuned for pilot phase with ~100 concurrent users
  */
 export const RATE_LIMITS = {
-    // Exam save operations - allow frequent autosaves but cap at reasonable level
+    // Exam save operations - generous for pilot (serverless cold starts reset state)
     SAVE_RESPONSE: {
-        limit: 60,           // 60 requests
+        limit: 200,          // 200 requests (up from 60)
         windowMs: 60_000,    // per minute
     },
 
-    // Exam submissions - very limited
+    // Exam submissions - slightly more generous for edge cases
     SUBMIT_EXAM: {
-        limit: 5,            // 5 submissions
+        limit: 10,           // 10 submissions (up from 5)
         windowMs: 60_000,    // per minute
     },
 
-    // Authentication operations
+    // Authentication operations - more generous for pilot
     AUTH: {
-        limit: 10,           // 10 attempts
+        limit: 30,           // 30 attempts (up from 10)
         windowMs: 60_000,    // per minute
     },
 
-    // General API endpoints
+    // General API endpoints - generous for pilot
     GENERAL_API: {
-        limit: 100,          // 100 requests
+        limit: 300,          // 300 requests (up from 100)
         windowMs: 60_000,    // per minute
     },
 

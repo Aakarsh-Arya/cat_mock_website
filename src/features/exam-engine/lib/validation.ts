@@ -67,6 +67,7 @@ export const QuestionSchema = z.object({
     solution_text: z.string().optional().nullable(),
     solution_image_url: z.string().url().optional().nullable(),
     video_solution_url: z.string().url().optional().nullable(),
+    question_image_url: z.string().url().optional().nullable(),
     difficulty: DifficultySchema.optional().nullable(),
     topic: z.string().optional().nullable(),
     subtopic: z.string().optional().nullable(),
@@ -138,6 +139,7 @@ export const AttemptSchema = z.object({
     started_at: z.string(),
     submitted_at: z.string().optional().nullable(),
     completed_at: z.string().optional().nullable(),
+    submission_id: z.string().uuid().optional().nullable(),
     time_taken_seconds: z.number().int().optional().nullable(),
     status: AttemptStatusSchema,
     current_section: SectionNameSchema.optional().nullable(),
@@ -198,6 +200,8 @@ export const SaveResponseRequestSchema = z.object({
     status: QuestionStatusSchema,
     isMarkedForReview: z.boolean(),
     timeSpentSeconds: z.number().int().min(0),
+    sessionToken: z.string().nullable().optional(),
+    force_resume: z.boolean().optional(),
 });
 
 /** Update section timer request */
@@ -211,6 +215,9 @@ export const UpdateTimerRequestSchema = z.object({
 /** Submit exam request */
 export const SubmitExamRequestSchema = z.object({
     attemptId: z.string().uuid(),
+    sessionToken: z.string().nullable().optional(),
+    force_resume: z.boolean().optional(),
+    submissionId: z.string().uuid().optional(),
 });
 
 // =============================================================================

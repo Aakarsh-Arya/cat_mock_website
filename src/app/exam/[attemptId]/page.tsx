@@ -8,7 +8,7 @@ import { sbSSR } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ExamClient } from './ExamClient';
-import type { Paper, Question, Attempt, SectionConfig } from '@/types/exam';
+import type { Paper, Question, Attempt, SectionConfig, QuestionContext } from '@/types/exam';
 
 export default async function ExamPage({ params }: { params: Promise<Record<string, unknown>> }) {
     const { attemptId } = (await params) as { attemptId: string };
@@ -73,8 +73,8 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         redirect(`/result/${attemptId}`);
     }
 
-    // Get questions for this paper.
-    // Prefer secure view `questions_exam` (excludes correct_answer). Fallback to `questions` if view isn't deployed yet.
+    // Get questions for this paper using secure view `questions_exam` (excludes correct_answer).
+    // Fail fast if the view isn't deployed to avoid leaking answers.
     type QuestionRow = {
         id: string;
         paper_id: string;
@@ -85,6 +85,8 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         options: unknown;
         positive_marks: number;
         negative_marks: number;
+        question_image_url?: string | null;
+        context_id?: string | null;
         difficulty: string | null;
         topic: string | null;
         subtopic: string | null;
@@ -107,50 +109,20 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         if (!error && data) {
             questionsData = data as unknown as QuestionRow[];
         } else {
-            const { data: fallbackData, error: fallbackError } = await supabase
-                .from('questions')
-                .select(
-                    [
-                        'id',
-                        'paper_id',
-                        'section',
-                        'question_number',
-                        'question_text',
-                        'question_type',
-                        'options',
-                        'positive_marks',
-                        'negative_marks',
-                        'difficulty',
-                        'topic',
-                        'subtopic',
-                        'is_active',
-                        'created_at',
-                        'updated_at',
-                    ].join(',')
-                )
-                .eq('paper_id', attemptData.paper_id)
-                .eq('is_active', true)
-                .order('section')
-                .order('question_number');
-
-            if (fallbackError || !fallbackData) {
-                return (
-                    <main className="min-h-screen flex items-center justify-center bg-gray-50">
-                        <div className="text-center max-w-xl px-4">
-                            <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
-                            <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
-                            <p className="text-gray-600 mb-6">
-                                If you just updated the schema, ensure the database migration for views/RLS has been applied.
-                            </p>
-                            <Link href="/dashboard" className="text-blue-600 hover:underline">
-                                Back to Dashboard
-                            </Link>
-                        </div>
-                    </main>
-                );
-            }
-
-            questionsData = fallbackData as unknown as QuestionRow[];
+            return (
+                <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                    <div className="text-center max-w-xl px-4">
+                        <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
+                        <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
+                        <p className="text-gray-600 mb-6">
+                            Ensure the secure questions_exam view and its RLS policies are deployed.
+                        </p>
+                        <Link href="/dashboard" className="text-blue-600 hover:underline">
+                            Back to Dashboard
+                        </Link>
+                    </div>
+                </main>
+            );
         }
     }
 
@@ -237,6 +209,25 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         updated_at: attemptData.updated_at,
     };
 
+    // Fetch question contexts for questions that have context_id
+    const contextIds = [...new Set(
+        questionsData
+            .map(q => q.context_id)
+            .filter((id): id is string => Boolean(id))
+    )];
+
+    let contextMap = new Map<string, QuestionContext>();
+    if (contextIds.length > 0) {
+        const { data: contexts } = await supabase
+            .from('question_contexts')
+            .select('id, title, section, content, context_type, paper_id, display_order, is_active, image_url')
+            .in('id', contextIds);
+
+        if (contexts) {
+            contextMap = new Map(contexts.map(c => [c.id, c as QuestionContext]));
+        }
+    }
+
     const questions: Question[] = questionsData.map((q: QuestionRow) => ({
         id: q.id,
         paper_id: q.paper_id,
@@ -247,6 +238,9 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         options: q.options as Question['options'],
         positive_marks: q.positive_marks,
         negative_marks: q.negative_marks,
+        question_image_url: q.question_image_url ?? undefined,
+        context_id: q.context_id ?? undefined,
+        context: q.context_id ? contextMap.get(q.context_id) : undefined,
         difficulty: q.difficulty as Question['difficulty'],
         topic: q.topic ?? undefined,
         subtopic: q.subtopic ?? undefined,

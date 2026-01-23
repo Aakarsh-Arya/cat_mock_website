@@ -16,6 +16,7 @@ export { QuestionPalette } from './QuestionPalette';
 // Question Renderers
 export { MCQRenderer } from './MCQRenderer';
 export { TITARenderer } from './TITARenderer';
+export { QuestionRenderer } from './QuestionRenderer';  // Question Container Architecture
 
 // Navigation
 export { NavigationButtons, ExamSubmitButton } from './NavigationButtons';

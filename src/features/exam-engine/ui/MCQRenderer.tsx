@@ -9,6 +9,7 @@
 import { useCallback } from 'react';
 import { useExamStore, selectResponse } from '@/features/exam-engine';
 import type { Question } from '@/types/exam';
+import { MathText } from './MathText';
 
 // =============================================================================
 // TYPES
@@ -112,7 +113,7 @@ function MCQOption({
 
             {/* Option Text */}
             <span className={`flex-1 text-left ${textColor}`}>
-                {text}
+                <MathText text={text} />
             </span>
 
             {/* Selected/Correct Indicator */}
@@ -186,7 +187,7 @@ export function MCQRenderer({
         <div className={`space-y-4 ${className}`}>
             {/* Question Text */}
             <div className="prose prose-lg max-w-none">
-                <p className="text-gray-800 whitespace-pre-wrap">{question.question_text}</p>
+                <MathText text={question.question_text} className="text-gray-800" />
             </div>
 
             {/* Options */}

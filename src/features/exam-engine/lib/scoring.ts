@@ -5,7 +5,7 @@
  * @deviation Uses TypeScript scoring instead of SQL RPC for better testability
  */
 
-import type { Question, QuestionWithAnswer, SectionName, SectionScore, SectionScores } from '@/types/exam';
+import type { QuestionWithAnswer, SectionName, SectionScores } from '@/types/exam';
 import { CAT_CONSTANTS } from '@/types/exam';
 
 // =============================================================================

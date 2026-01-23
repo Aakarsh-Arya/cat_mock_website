@@ -9,7 +9,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useExamStore, selectCurrentSection, selectCurrentTimer } from '../index';
 import type { SectionName, SectionTimerState } from '@/types/exam';
-import { getSectionByIndex, CAT_CONSTANTS } from '@/types/exam';
 
 // =============================================================================
 // TYPES

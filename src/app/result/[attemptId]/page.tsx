@@ -50,6 +50,7 @@ interface Question {
     options: string[] | null;
     correct_answer: string;
     solution_text: string | null;
+    question_image_url: string | null;
     topic: string | null;
     difficulty: string | null;
 }
@@ -176,7 +177,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     // Fetch questions for this paper
     const { data: questions } = await supabase
         .from('questions')
-        .select('id, question_number, section, question_type, question_text, options, correct_answer, solution_text, topic, difficulty')
+        .select('id, question_number, section, question_type, question_text, options, correct_answer, solution_text, question_image_url, topic, difficulty')
         .eq('paper_id', attempt.paper_id)
         .order('question_number', { ascending: true }) as { data: Question[] | null };
 
@@ -185,6 +186,17 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
         .from('responses')
         .select('question_id, answer, is_correct, marks_obtained')
         .eq('attempt_id', attemptId) as { data: Response[] | null };
+
+    // Fetch peer statistics for this paper
+    type PaperStats = Record<string, { total: number; options: Record<string, number> }>;
+    let paperStats: PaperStats = {};
+
+    const { data: statsData } = await supabase
+        .rpc('get_paper_stats', { p_paper_id: attempt.paper_id });
+
+    if (statsData && typeof statsData === 'object') {
+        paperStats = statsData as PaperStats;
+    }
 
     const paper = attempt.papers;
     const sectionScores = attempt.section_scores || {};
@@ -236,6 +248,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                     <QuestionAnalysis
                         questions={questions}
                         responses={responses || []}
+                        peerStats={paperStats}
                     />
                 )}
 

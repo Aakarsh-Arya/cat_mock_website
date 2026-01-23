@@ -8,8 +8,8 @@
 
 import { useCallback, useMemo } from 'react';
 import { useExamStore, selectCurrentSection } from '@/features/exam-engine';
-import type { Question, QuestionStatus, SectionName } from '@/types/exam';
-import { getQuestionsForSection, SECTION_ORDER } from '@/types/exam';
+import type { Question, QuestionStatus } from '@/types/exam';
+import { getQuestionsForSection } from '@/types/exam';
 
 // =============================================================================
 // TYPES
@@ -25,7 +25,6 @@ interface QuestionPaletteProps {
 }
 
 interface QuestionButtonProps {
-    question: Question;
     index: number;
     status: QuestionStatus;
     isCurrent: boolean;
@@ -84,7 +83,7 @@ function getStatusStyles(status: QuestionStatus, isCurrent: boolean) {
 // QUESTION BUTTON
 // =============================================================================
 
-function QuestionButton({ question, index, status, isCurrent, onClick }: QuestionButtonProps) {
+function QuestionButton({ index, status, isCurrent, onClick }: QuestionButtonProps) {
     const styles = getStatusStyles(status, isCurrent);
 
     return (
@@ -241,7 +240,6 @@ export function QuestionPalette({
                     return (
                         <QuestionButton
                             key={question.id}
-                            question={question}
                             index={index}
                             status={status}
                             isCurrent={isCurrent}

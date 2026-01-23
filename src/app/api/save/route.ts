@@ -7,10 +7,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { checkRateLimit, RATE_LIMITS, userRateLimitKey, getRateLimitHeaders } from '@/lib/rate-limit';
+import { examLogger } from '@/lib/logger';
 
 export async function POST(req: NextRequest) {
     try {
-        const { attemptId, questionId, answer, sessionToken } = await req.json();
+        const { attemptId, questionId, answer, sessionToken, force_resume } = await req.json();
         if (!attemptId || !questionId) {
             return NextResponse.json({ error: 'attemptId and questionId required' }, { status: 400 });
         }
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
         // Ensure the attempt belongs to the user
         const { data: attempt } = await supabase
             .from('attempts')
-            .select('id, user_id, status, session_token, started_at')
+            .select('id, user_id, status, session_token, started_at, last_activity_at, paper_id')
             .eq('id', attemptId)
             .maybeSingle();
 
@@ -71,22 +72,66 @@ export async function POST(req: NextRequest) {
         // P0 FIX: Session token validation (multi-device/tab prevention)
         // If session token is provided and attempt has one, validate they match
         if (attempt.session_token && sessionToken && attempt.session_token !== sessionToken) {
-            console.warn(`Session token mismatch for attempt ${attemptId}: expected ${attempt.session_token}, got ${sessionToken}`);
-            return NextResponse.json({
-                error: 'Session conflict detected. This exam may be open in another tab or device.',
-                code: 'SESSION_CONFLICT'
-            }, { status: 409 });
+            // Allow force_resume to recover from browser crash/tab close
+            if (force_resume === true) {
+                const lastActivityAt = attempt.last_activity_at ? new Date(attempt.last_activity_at).getTime() : null;
+                const isStale = !lastActivityAt || (Date.now() - lastActivityAt) > 5 * 60 * 1000;
+                const ip = req.headers.get('x-forwarded-for') ?? 'unknown';
+                const userAgent = req.headers.get('user-agent') ?? 'unknown';
+
+                if (isStale) {
+                    examLogger.securityEvent('Force resume rejected (stale)', {
+                        attemptId,
+                        oldToken: attempt.session_token,
+                        lastActivityAt: attempt.last_activity_at,
+                        ip,
+                        userAgent,
+                    });
+                    return NextResponse.json({
+                        error: 'Force resume denied. Session is too old.',
+                        code: 'FORCE_RESUME_STALE',
+                    }, { status: 409 });
+                }
+
+                examLogger.securityEvent('Force resume: updating session token', {
+                    attemptId,
+                    oldToken: attempt.session_token,
+                    newToken: sessionToken,
+                    ip,
+                    userAgent,
+                });
+                await supabase
+                    .from('attempts')
+                    .update({ session_token: sessionToken })
+                    .eq('id', attemptId);
+            } else {
+                examLogger.securityEvent('Save session token mismatch', { attemptId, expected: attempt.session_token });
+                return NextResponse.json({
+                    error: 'Session conflict detected. This exam may be open in another tab or device.',
+                    code: 'SESSION_CONFLICT',
+                    canForceResume: true
+                }, { status: 409 });
+            }
         }
 
         // P0 FIX: Server-side section timer validation
-        // Check if too much time has elapsed since exam started
+        // Check if too much time has elapsed since exam started (dynamic per paper)
         if (attempt.started_at) {
-            const MAX_EXAM_DURATION_MS = 3 * 40 * 60 * 1000; // 120 minutes
+            const { data: paperTiming } = await supabase
+                .from('papers')
+                .select('sections')
+                .eq('id', attempt.paper_id)
+                .maybeSingle();
+
+            const totalMinutes = (paperTiming?.sections || [])
+                .reduce((sum: number, s: { time?: number }) => sum + (s.time || 0), 0);
+            const maxDurationMs = Math.max(1, totalMinutes || 120) * 60 * 1000;
             const GRACE_PERIOD_MS = 2 * 60 * 1000; // 2 minutes grace
+
             const startedAt = new Date(attempt.started_at).getTime();
             const elapsed = Date.now() - startedAt;
 
-            if (elapsed > MAX_EXAM_DURATION_MS + GRACE_PERIOD_MS) {
+            if (elapsed > maxDurationMs + GRACE_PERIOD_MS) {
                 return NextResponse.json({
                     error: 'Exam time has expired. Saves are no longer accepted.',
                     code: 'TIME_EXPIRED'

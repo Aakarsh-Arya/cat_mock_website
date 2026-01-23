@@ -17,6 +17,9 @@ importers:
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
+      jwt-decode:
+        specifier: ^4.0.0
+        version: 4.0.0
       katex:
         specifier: ^0.16.25
         version: 0.16.25

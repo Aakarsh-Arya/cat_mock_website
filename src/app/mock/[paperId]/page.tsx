@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from 'next/navigation';
 import { sbSSR } from '@/lib/supabase/server';
+import { logger } from '@/lib/logger';
 import Link from 'next/link';
 
 export const metadata: Metadata = {
@@ -155,7 +156,7 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             .single();
 
         if (insertErr || !attempt) {
-            console.error('Failed to create attempt:', insertErr);
+            logger.error('Failed to create attempt', insertErr, { paperId: p.id, userId: currentUser.id });
             throw new Error('Failed to create attempt');
         }
 

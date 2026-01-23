@@ -4,6 +4,7 @@
  */
 
 import { sbSSR } from '@/lib/supabase/server';
+import { adminLogger } from '@/lib/logger';
 import Link from 'next/link';
 
 export default async function ContextsPage() {
@@ -19,7 +20,7 @@ export default async function ContextsPage() {
         .order('created_at', { ascending: false });
 
     if (error) {
-        console.error('Error fetching contexts:', error);
+        adminLogger.dataModified('question_contexts', 'fetch_error', { error });
     }
 
     return (
@@ -73,8 +74,8 @@ export default async function ContextsPage() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${context.section === 'VARC' ? 'bg-blue-100 text-blue-800' :
-                                                context.section === 'DILR' ? 'bg-purple-100 text-purple-800' :
-                                                    'bg-green-100 text-green-800'
+                                            context.section === 'DILR' ? 'bg-purple-100 text-purple-800' :
+                                                'bg-green-100 text-green-800'
                                             }`}>
                                             {context.section}
                                         </span>

@@ -42,8 +42,10 @@ export async function middleware(req: NextRequest) {
     try {
         const pathname = req.nextUrl.pathname;
         const isProtected = pathname.startsWith('/exam/') || pathname.startsWith('/result/') || pathname.startsWith('/dashboard');
+        const isAdminRoute = pathname.startsWith('/admin');
 
-        if (isProtected) {
+        // All protected routes (including admin) require authentication
+        if (isProtected || isAdminRoute) {
             // Recreate a server client to read the user for gating (cookies copied on res)
             const { createServerClient } = await import('@supabase/ssr');
             const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
@@ -69,6 +71,34 @@ export async function middleware(req: NextRequest) {
                 redirect.searchParams.set('redirect_to', returnTo);
                 return NextResponse.redirect(redirect);
             }
+
+            // Admin routes require admin role (check JWT claims)
+            if (isAdminRoute) {
+                // DEV MODE: Skip RBAC check if SKIP_ADMIN_CHECK is set
+                const skipAdminCheck = process.env.SKIP_ADMIN_CHECK === 'true';
+
+                if (!skipAdminCheck) {
+                    const { data: { session } } = await supabase.auth.getSession();
+
+                    // Check for admin role in JWT claims
+                    // The custom_access_token_hook injects user_role at both root and app_metadata
+                    const userRole = session?.access_token
+                        ? JSON.parse(atob(session.access_token.split('.')[1]))?.user_role
+                        : null;
+                    const appMetadataRole = session?.access_token
+                        ? JSON.parse(atob(session.access_token.split('.')[1]))?.app_metadata?.user_role
+                        : null;
+
+                    const isAdmin = userRole === 'admin' || appMetadataRole === 'admin';
+
+                    if (!isAdmin) {
+                        // Not an admin - redirect to dashboard with error message
+                        const redirect = new URL('/dashboard', req.url);
+                        redirect.searchParams.set('error', 'unauthorized');
+                        return NextResponse.redirect(redirect);
+                    }
+                }
+            }
         }
 
         return res;
@@ -79,5 +109,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-    matcher: ['/dashboard/:path*', '/exam/:path*', '/result/:path*'],
+    matcher: ['/dashboard/:path*', '/exam/:path*', '/result/:path*', '/admin/:path*'],
 };
