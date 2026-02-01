@@ -79,6 +79,9 @@ export async function POST(req: NextRequest) {
 
         console.log('SUBMIT_ATTEMPT_QUERY_RESULT:', attempt);
 
+        // Track the effective attemptId - may change if fallback is used
+        let effectiveAttemptId = attemptId;
+
         if (attemptError || !attempt) {
             const reason = attemptError
                 ? `error:${attemptError.code ?? 'unknown'}`
@@ -97,7 +100,10 @@ export async function POST(req: NextRequest) {
 
             if (fallbackAttempt && !fallbackError) {
                 console.log('SUBMIT_FALLBACK_ATTEMPT_USED:', fallbackAttempt);
+                console.log('SUBMIT_FALLBACK_ID_PROMOTION:', `${attemptId} -> ${fallbackAttempt.id}`);
                 attempt = fallbackAttempt;
+                // CRITICAL FIX: Promote the fallback attempt ID for all downstream operations
+                effectiveAttemptId = fallbackAttempt.id;
             } else {
                 const { data: recentAttempts, error: recentError } = await adminClient
                     .from('attempts')
@@ -130,7 +136,7 @@ export async function POST(req: NextRequest) {
 
         // IDEMPOTENT: If already submitted, return success (don't error on retries)
         if (attempt.status === 'completed' || attempt.status === 'submitted') {
-            console.log('SUBMIT_ALREADY_COMPLETED:', attemptId, 'status:', attempt.status);
+            console.log('SUBMIT_ALREADY_COMPLETED:', effectiveAttemptId, 'status:', attempt.status);
             const already = addVersionHeader(NextResponse.json({ success: true, already_submitted: true }, { status: 200 }));
             res.cookies.getAll().forEach((cookie) => already.cookies.set(cookie));
             return already;
@@ -138,7 +144,7 @@ export async function POST(req: NextRequest) {
 
         if (attempt.status !== 'in_progress') {
             console.log('API_SUBMIT_ATTEMPT_STATUS_MISMATCH', {
-                attemptId,
+                attemptId: effectiveAttemptId,
                 userId: user.id,
                 status: attempt.status,
                 errorCode: 'INVALID_ATTEMPT_STATUS',
@@ -160,14 +166,14 @@ export async function POST(req: NextRequest) {
 
         const { data: isValidSession, error: validateError } = await supabase
             .rpc('validate_session_token', {
-                p_attempt_id: attemptId,
+                p_attempt_id: effectiveAttemptId,
                 p_session_token: sessionToken,
                 p_user_id: user.id,
             });
 
         if (validateError) {
             examLogger.securityEvent('Session validation RPC error', {
-                attemptId,
+                attemptId: effectiveAttemptId,
                 errorMessage: validateError.message,
                 errorCode: validateError.code,
             });
@@ -177,20 +183,20 @@ export async function POST(req: NextRequest) {
                 const userAgent = req.headers.get('user-agent') ?? 'unknown';
 
                 examLogger.securityEvent('Force resume on RPC error (submit)', {
-                    attemptId,
+                    attemptId: effectiveAttemptId,
                     ip,
                     userAgent,
                 });
 
                 const { error: forceResumeError } = await supabase
                     .rpc('force_resume_exam_session', {
-                        p_attempt_id: attemptId,
+                        p_attempt_id: effectiveAttemptId,
                         p_new_session_token: sessionToken,
                     });
 
                 if (!forceResumeError) {
                     // Force resume succeeded, continue with submit
-                    const result = await submitExam(attemptId, { sessionToken, force_resume: true, submissionId });
+                    const result = await submitExam(effectiveAttemptId, { sessionToken, force_resume: true, submissionId });
                     if (!result.success) {
                         return addVersionHeader(NextResponse.json({ error: result.error }, { status: 400 }));
                     }
@@ -209,14 +215,14 @@ export async function POST(req: NextRequest) {
                 const userAgent = req.headers.get('user-agent') ?? 'unknown';
 
                 examLogger.securityEvent('Force resume (submit)', {
-                    attemptId,
+                    attemptId: effectiveAttemptId,
                     ip,
                     userAgent,
                 });
 
                 const { error: forceResumeError } = await supabase
                     .rpc('force_resume_exam_session', {
-                        p_attempt_id: attemptId,
+                        p_attempt_id: effectiveAttemptId,
                         p_new_session_token: sessionToken,
                     });
 
@@ -231,7 +237,7 @@ export async function POST(req: NextRequest) {
                     return addVersionHeader(NextResponse.json({ error: 'Failed to force resume session' }, { status: 500 }));
                 }
             } else {
-                examLogger.securityEvent('Submit session mismatch', { attemptId });
+                examLogger.securityEvent('Submit session mismatch', { attemptId: effectiveAttemptId });
                 return addVersionHeader(NextResponse.json({
                     error: 'Session conflict detected. This exam may be open in another tab or device.',
                     code: 'SESSION_CONFLICT',
@@ -241,7 +247,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Use the server action which has full validation, timer checks, and scoring
-        const result = await submitExam(attemptId, { sessionToken, force_resume, submissionId });
+        const result = await submitExam(effectiveAttemptId, { sessionToken, force_resume, submissionId });
 
         if (!result.success) {
             // Phase 1: Include code for SESSION_CONFLICT so client can handle it

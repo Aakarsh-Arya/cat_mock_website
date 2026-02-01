@@ -454,8 +454,9 @@ export async function submitExam(
         },
     arg2?: { sessionToken?: string | null; force_resume?: boolean; submissionId?: string }
 ): Promise<ActionResult<SubmitExamResponse>> {
-    // Normalize inputs
-    const normalizedAttemptId = typeof arg1 === 'string' ? arg1 : arg1.attemptId;
+    // Normalize inputs - use let so we can promote fallback attempt ID if needed
+    let normalizedAttemptId = typeof arg1 === 'string' ? arg1 : arg1.attemptId;
+    const originalAttemptId = normalizedAttemptId; // Keep original for logging
     const options =
         typeof arg1 === 'string'
             ? arg2
@@ -484,9 +485,10 @@ export async function submitExam(
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
 
+        // CRITICAL: Select 'id' so we can promote fallback attempt ID
         let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('user_id, status, paper_id, started_at, submission_id')
+            .select('id, user_id, status, paper_id, started_at, submission_id')
             .eq('id', normalizedAttemptId)
             .maybeSingle();
 
@@ -500,7 +502,7 @@ export async function submitExam(
 
             const { data: fallbackAttempt, error: fallbackError } = await adminClient
                 .from('attempts')
-                .select('user_id, status, paper_id, started_at, submission_id')
+                .select('id, user_id, status, paper_id, started_at, submission_id')
                 .eq('user_id', user.id)
                 .eq('status', 'in_progress')
                 .order('created_at', { ascending: false })
@@ -508,12 +510,14 @@ export async function submitExam(
                 .maybeSingle();
 
             if (fallbackAttempt && !fallbackError) {
-                logger.error('submitExam using fallback attempt', {
-                    attemptId: normalizedAttemptId,
+                logger.warn('submitExam using fallback attempt - PROMOTING ID', {
+                    originalAttemptId,
+                    fallbackAttemptId: fallbackAttempt.id,
                     userId: user.id,
-                    fallbackAttemptId: fallbackAttempt.submission_id ? '[submission_id_present]' : 'unknown',
                 });
                 attempt = fallbackAttempt;
+                // CRITICAL FIX: Promote the fallback attempt ID for all downstream operations
+                normalizedAttemptId = fallbackAttempt.id;
             } else {
                 const { data: recentAttempts, error: recentError } = await adminClient
                     .from('attempts')
