@@ -2,11 +2,15 @@
  * @fileoverview Next.js Middleware
  * @description Auth session management and security headers
  * @blueprint Security Audit - P0 Fix - Security Headers
+ * 
+ * CRITICAL FIX (2026-02-02): 
+ * - Avoid double Supabase client creation (was causing cookie race conditions)
+ * - Skip session refresh for API routes (they handle their own auth)
+ * - Single client instance for protected route checks
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { updateSession } from './src/utils/update-session';
-import type { CookieOptions } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 /**
  * Apply security headers to response
@@ -33,81 +37,138 @@ function applySecurityHeaders(res: NextResponse): NextResponse {
     return res;
 }
 
-export async function middleware(req: NextRequest) {
-    const res = await updateSession(req);
+/**
+ * Get Supabase configuration from environment
+ */
+function getSupabaseConfig(): { url: string; anonKey: string } | null {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-    // Apply security headers to all matched routes
+    if (!url || !anonKey) {
+        console.error('Middleware: Missing Supabase configuration');
+        return null;
+    }
+
+    return { url, anonKey };
+}
+
+export async function middleware(req: NextRequest) {
+    const pathname = req.nextUrl.pathname;
+
+    // =========================================================================
+    // API ROUTES: Skip middleware auth entirely - APIs handle their own auth
+    // This prevents token refresh race conditions during exam submit
+    // =========================================================================
+    if (pathname.startsWith('/api/')) {
+        const res = NextResponse.next({ request: { headers: req.headers } });
+        applySecurityHeaders(res);
+        return res;
+    }
+
+    // =========================================================================
+    // PAGE ROUTES: Handle session refresh and protection
+    // =========================================================================
+
+    // Create response object
+    const res = NextResponse.next({ request: { headers: req.headers } });
     applySecurityHeaders(res);
 
+    // Block test login in production
+    if (pathname.startsWith('/auth/test-login') && process.env.NODE_ENV === 'production') {
+        return NextResponse.redirect(new URL('/auth/sign-in', req.url));
+    }
+
+    // Determine if route needs protection
+    const isProtected = pathname.startsWith('/exam/') ||
+        pathname.startsWith('/result/') ||
+        pathname.startsWith('/dashboard');
+    const isAdminRoute = pathname.startsWith('/admin');
+
+    // Only create Supabase client if we need to check auth
+    if (!isProtected && !isAdminRoute) {
+        return res;
+    }
+
+    // Get Supabase config
+    const config = getSupabaseConfig();
+    if (!config) {
+        // Allow request to proceed - let page handle the error
+        return res;
+    }
+
     try {
-        const pathname = req.nextUrl.pathname;
-        const isProtected = pathname.startsWith('/exam/') || pathname.startsWith('/result/') || pathname.startsWith('/dashboard');
-        const isAdminRoute = pathname.startsWith('/admin');
-
-        // All protected routes (including admin) require authentication
-        if (isProtected || isAdminRoute) {
-            // Recreate a server client to read the user for gating (cookies copied on res)
-            const { createServerClient } = await import('@supabase/ssr');
-            const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
-            const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
-            const supabase = createServerClient(url || 'http://localhost:54321', anon || 'anon', {
-                cookies: {
-                    get(name: string) {
-                        return req.cookies.get(name)?.value;
-                    },
-                    set(name: string, value: string, options: CookieOptions) {
-                        res.cookies.set({ name, value, ...options });
-                    },
-                    remove(name: string, options: CookieOptions) {
-                        res.cookies.set({ name, value: '', ...options });
-                    },
+        // Create SINGLE Supabase client for this request
+        const supabase = createServerClient(config.url, config.anonKey, {
+            cookies: {
+                getAll() {
+                    return req.cookies.getAll();
                 },
-            });
+                setAll(cookiesToSet: Array<{ name: string; value: string; options: CookieOptions }>) {
+                    cookiesToSet.forEach(({ name, value, options }) => {
+                        res.cookies.set({ name, value, ...options });
+                    });
+                },
+            },
+        });
 
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                const redirect = new URL('/auth/sign-in', req.url);
-                const returnTo = pathname + (req.nextUrl.search || '');
-                redirect.searchParams.set('redirect_to', returnTo);
-                return NextResponse.redirect(redirect);
-            }
+        // Get user (this also refreshes session if needed)
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-            // Admin routes require admin role (check JWT claims)
-            if (isAdminRoute) {
-                // DEV MODE: Skip RBAC check if SKIP_ADMIN_CHECK is set
-                const skipAdminCheck = process.env.SKIP_ADMIN_CHECK === 'true';
+        if (userError || !user) {
+            // Not authenticated - redirect to sign in
+            const redirect = new URL('/auth/sign-in', req.url);
+            const returnTo = pathname + (req.nextUrl.search || '');
+            redirect.searchParams.set('redirect_to', returnTo);
+            return NextResponse.redirect(redirect);
+        }
 
-                if (!skipAdminCheck) {
-                    const { data: { session } } = await supabase.auth.getSession();
+        // Admin routes require admin role
+        if (isAdminRoute) {
+            // DEV MODE: Skip RBAC check only in explicitly non-production environments
+            const env = process.env.NODE_ENV;
+            const skipAdminCheck =
+                process.env.SKIP_ADMIN_CHECK === 'true' && (env === 'development' || env === 'test');
 
-                    // Check for admin role in JWT claims
-                    // The custom_access_token_hook injects user_role at both root and app_metadata
-                    const userRole = session?.access_token
-                        ? JSON.parse(atob(session.access_token.split('.')[1]))?.user_role
-                        : null;
-                    const appMetadataRole = session?.access_token
-                        ? JSON.parse(atob(session.access_token.split('.')[1]))?.app_metadata?.user_role
-                        : null;
+            if (!skipAdminCheck) {
+                let isAdmin = false;
 
-                    const isAdmin = userRole === 'admin' || appMetadataRole === 'admin';
+                // Check admin role from app_metadata first (fastest)
+                const role = user.app_metadata?.user_role;
+                if (role === 'admin') {
+                    isAdmin = true;
+                }
 
-                    if (!isAdmin) {
-                        // Not an admin - redirect to dashboard with error message
-                        const redirect = new URL('/dashboard', req.url);
-                        redirect.searchParams.set('error', 'unauthorized');
-                        return NextResponse.redirect(redirect);
-                    }
+                // If not found in app_metadata, check via RPC
+                if (!isAdmin) {
+                    const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin');
+                    isAdmin = !rpcError && Boolean(isAdminRpc);
+                }
+
+                if (!isAdmin) {
+                    // Not an admin - redirect to dashboard with error message
+                    const redirect = new URL('/dashboard', req.url);
+                    redirect.searchParams.set('error', 'unauthorized');
+                    return NextResponse.redirect(redirect);
                 }
             }
         }
 
         return res;
     } catch (err) {
-        console.error('Middleware error', err);
+        console.error('Middleware error:', err);
+        // On error, allow request to proceed - let page handle the error
         return res;
     }
 }
 
 export const config = {
-    matcher: ['/dashboard/:path*', '/exam/:path*', '/result/:path*', '/admin/:path*'],
+    matcher: [
+        '/dashboard/:path*',
+        '/exam/:path*',
+        '/result/:path*',
+        '/admin/:path*',
+        '/auth/test-login',
+        // API routes included only for security headers - auth skipped
+        '/api/:path*',
+    ],
 };

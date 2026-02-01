@@ -1,0 +1,288 @@
+{
+    "schema_version": "v3.0",
+    "paper": {
+        "paper_key": "cat-2024-slot-1",
+        "title": "CAT 2024 Slot 1",
+        "slug": "cat-2024-slot-1",
+        "description": "Official CAT 2024 Slot 1 Question Paper",
+        "year": 2024,
+        "total_questions": 66,
+        "total_marks": 198,
+        "duration_minutes": 120,
+        "sections": [
+            "VARC",
+            "DILR",
+            "QA"
+        ],
+        "default_positive_marks": 3,
+        "default_negative_marks": 1,
+        "difficulty_level": "hard",
+        "is_free": false,
+        "published": false,
+        "allow_pause": true,
+        "attempt_limit": 0
+    },
+    "question_sets": [
+        {
+            "client_set_id": "VARC_RC_1",
+            "section": "VARC",
+            "set_type": "VARC",
+            "display_order": 1,
+            "context_type": "rc_passage",
+            "context_title": "Reading Comprehension Passage 1",
+            "context_body": "The passage text goes here. This is a reading comprehension passage that multiple questions will reference. It can contain **Markdown** formatting and $KaTeX$ math expressions.\n\nParagraph 2 of the passage continues here with more content for students to analyze.",
+            "content_layout": "text_only"
+        },
+        {
+            "client_set_id": "VARC_RC_2",
+            "section": "VARC",
+            "set_type": "VARC",
+            "display_order": 2,
+            "context_type": "rc_passage",
+            "context_title": "Reading Comprehension Passage 2",
+            "context_body": "Another passage for reading comprehension. This demonstrates that each RC passage is a separate question_set with its own client_set_id."
+        },
+        {
+            "client_set_id": "VARC_ATOMIC_1",
+            "section": "VARC",
+            "set_type": "ATOMIC",
+            "display_order": 3
+        },
+        {
+            "client_set_id": "DILR_SET_1",
+            "section": "DILR",
+            "set_type": "DILR",
+            "display_order": 1,
+            "context_type": "dilr_set",
+            "context_title": "Data Interpretation Set 1",
+            "context_body": "Table showing sales data for Company XYZ:\n\n| Year | Revenue | Profit |\n|------|---------|--------|\n| 2020 | 100     | 10     |\n| 2021 | 120     | 15     |\n| 2022 | 150     | 20     |",
+            "context_image_url": "https://example.com/chart.png"
+        },
+        {
+            "client_set_id": "QA_ATOMIC_1",
+            "section": "QA",
+            "set_type": "ATOMIC",
+            "display_order": 1
+        },
+        {
+            "client_set_id": "QA_ATOMIC_2",
+            "section": "QA",
+            "set_type": "ATOMIC",
+            "display_order": 2
+        }
+    ],
+    "questions": [
+        {
+            "client_question_id": "Q1",
+            "set_ref": "VARC_RC_1",
+            "sequence_order": 1,
+            "section": "VARC",
+            "question_number": 1,
+            "question_text": "What is the main argument presented in the passage?",
+            "question_type": "MCQ",
+            "taxonomy_type": "rc_main_idea",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "Option A text"
+                },
+                {
+                    "id": "B",
+                    "text": "Option B text"
+                },
+                {
+                    "id": "C",
+                    "text": "Option C text"
+                },
+                {
+                    "id": "D",
+                    "text": "Option D text"
+                }
+            ],
+            "correct_answer": "B",
+            "positive_marks": 3,
+            "negative_marks": 1,
+            "difficulty": "medium",
+            "topic": "Reading Comprehension",
+            "solution_text": "The correct answer is B because the passage explicitly states..."
+        },
+        {
+            "client_question_id": "Q2",
+            "set_ref": "VARC_RC_1",
+            "sequence_order": 2,
+            "section": "VARC",
+            "question_number": 2,
+            "question_text": "Which of the following can be inferred from paragraph 2?",
+            "question_type": "MCQ",
+            "taxonomy_type": "rc_inference",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "Inference option A"
+                },
+                {
+                    "id": "B",
+                    "text": "Inference option B"
+                },
+                {
+                    "id": "C",
+                    "text": "Inference option C"
+                },
+                {
+                    "id": "D",
+                    "text": "Inference option D"
+                }
+            ],
+            "correct_answer": "C",
+            "positive_marks": 3,
+            "negative_marks": 1,
+            "difficulty": "hard"
+        },
+        {
+            "client_question_id": "Q3",
+            "set_ref": "VARC_RC_2",
+            "sequence_order": 1,
+            "section": "VARC",
+            "question_number": 3,
+            "question_text": "The author's tone in the passage can best be described as:",
+            "question_type": "MCQ",
+            "taxonomy_type": "rc_tone",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "Optimistic"
+                },
+                {
+                    "id": "B",
+                    "text": "Critical"
+                },
+                {
+                    "id": "C",
+                    "text": "Neutral"
+                },
+                {
+                    "id": "D",
+                    "text": "Pessimistic"
+                }
+            ],
+            "correct_answer": "B",
+            "positive_marks": 3,
+            "negative_marks": 1,
+            "difficulty": "medium"
+        },
+        {
+            "client_question_id": "Q4",
+            "set_ref": "VARC_ATOMIC_1",
+            "sequence_order": 1,
+            "section": "VARC",
+            "question_number": 4,
+            "question_text": "The four sentences (labelled 1, 2, 3, 4) given below...\n\n1. First sentence here.\n2. Second sentence here.\n3. Third sentence here.\n4. Fourth sentence here.\n\nArrange in proper sequence:",
+            "question_type": "TITA",
+            "taxonomy_type": "para_jumble",
+            "correct_answer": "3142",
+            "positive_marks": 3,
+            "negative_marks": 0,
+            "difficulty": "medium",
+            "topic": "Para Jumbles"
+        },
+        {
+            "client_question_id": "Q5",
+            "set_ref": "DILR_SET_1",
+            "sequence_order": 1,
+            "section": "DILR",
+            "question_number": 5,
+            "question_text": "What was the percentage increase in revenue from 2020 to 2022?",
+            "question_type": "TITA",
+            "taxonomy_type": "di_percentage",
+            "correct_answer": "50",
+            "positive_marks": 3,
+            "negative_marks": 0,
+            "difficulty": "easy",
+            "topic": "Data Interpretation",
+            "solution_text": "Increase = (150-100)/100 × 100 = 50%"
+        },
+        {
+            "client_question_id": "Q6",
+            "set_ref": "DILR_SET_1",
+            "sequence_order": 2,
+            "section": "DILR",
+            "question_number": 6,
+            "question_text": "In which year was the profit margin highest?",
+            "question_type": "MCQ",
+            "taxonomy_type": "di_comparison",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "2020"
+                },
+                {
+                    "id": "B",
+                    "text": "2021"
+                },
+                {
+                    "id": "C",
+                    "text": "2022"
+                },
+                {
+                    "id": "D",
+                    "text": "Cannot be determined"
+                }
+            ],
+            "correct_answer": "C",
+            "positive_marks": 3,
+            "negative_marks": 1,
+            "difficulty": "medium"
+        },
+        {
+            "client_question_id": "Q7",
+            "set_ref": "QA_ATOMIC_1",
+            "sequence_order": 1,
+            "section": "QA",
+            "question_number": 7,
+            "question_text": "If $x^2 + y^2 = 25$ and $xy = 12$, find the value of $(x + y)^2$.",
+            "question_type": "TITA",
+            "taxonomy_type": "algebra_equations",
+            "correct_answer": "49",
+            "positive_marks": 3,
+            "negative_marks": 0,
+            "difficulty": "medium",
+            "topic": "Algebra",
+            "subtopic": "Quadratic Equations",
+            "solution_text": "$(x+y)^2 = x^2 + 2xy + y^2 = 25 + 2(12) = 49$"
+        },
+        {
+            "client_question_id": "Q8",
+            "set_ref": "QA_ATOMIC_2",
+            "sequence_order": 1,
+            "section": "QA",
+            "question_number": 8,
+            "question_text": "A train traveling at 60 km/h crosses a platform in 30 seconds...",
+            "question_type": "MCQ",
+            "taxonomy_type": "arithmetic_speed",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "200 meters"
+                },
+                {
+                    "id": "B",
+                    "text": "250 meters"
+                },
+                {
+                    "id": "C",
+                    "text": "300 meters"
+                },
+                {
+                    "id": "D",
+                    "text": "350 meters"
+                }
+            ],
+            "correct_answer": "C",
+            "positive_marks": 3,
+            "negative_marks": 1,
+            "difficulty": "easy",
+            "topic": "Arithmetic",
+            "subtopic": "Time, Speed, Distance"
+        }
+    ]
+}

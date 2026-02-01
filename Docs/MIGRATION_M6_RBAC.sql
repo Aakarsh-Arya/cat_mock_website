@@ -108,7 +108,7 @@ RETURNS JSONB
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     claims JSONB;
@@ -160,7 +160,7 @@ CREATE OR REPLACE FUNCTION public.handle_new_user_role()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_catalog
 AS $$
 BEGIN
     INSERT INTO public.user_roles (user_id, role)
@@ -362,6 +362,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.user_roles
@@ -374,6 +375,7 @@ RETURNS TEXT
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
     SELECT COALESCE(
         (SELECT role::TEXT FROM public.user_roles WHERE user_id = auth.uid()),

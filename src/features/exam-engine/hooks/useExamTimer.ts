@@ -15,34 +15,22 @@ import type { SectionName, SectionTimerState } from '@/types/exam';
 // =============================================================================
 
 export interface UseExamTimerOptions {
-    /** Callback when a section expires (for auto-submit) */
-    onSectionExpire?: (sectionName: SectionName) => void;
-    /** Callback when exam completes (QA section expires) */
-    onExamComplete?: () => void;
-    /** Update interval in milliseconds (default: 1000ms) */
+    onSectionExpire?: (sectionName: SectionName) => void | Promise<void>;
+    onExamComplete?: () => void | Promise<void>;
     intervalMs?: number;
-    /** Warning threshold in seconds (default: 300 = 5 minutes) */
     warningThresholdSeconds?: number;
-    /** Critical threshold in seconds (default: 60 = 1 minute) */
     criticalThresholdSeconds?: number;
 }
 
 export interface TimerDisplayData {
-    /** Minutes remaining (for display) */
     minutes: number;
-    /** Seconds remaining (for display) */
     seconds: number;
-    /** Total seconds remaining */
     totalSeconds: number;
-    /** Formatted time string "MM:SS" */
+    /** Formatted time string "HH:MM:SS" */
     displayTime: string;
-    /** Timer state: 'normal' | 'warning' | 'critical' | 'expired' */
     state: 'normal' | 'warning' | 'critical' | 'expired';
-    /** Current section name */
     sectionName: SectionName;
-    /** Is the section expired */
     isExpired: boolean;
-    /** Progress percentage (0-100, decreasing) */
     progressPercent: number;
 }
 
@@ -50,37 +38,25 @@ export interface TimerDisplayData {
 // DELTA-TIME CALCULATION
 // =============================================================================
 
-/**
- * Calculate remaining time using delta-time computation
- * This approach survives tab sleep and browser throttling
- * 
- * @param timer - Section timer state from store
- * @returns Remaining seconds (clamped to 0)
- */
 function calculateRemainingSeconds(timer: SectionTimerState): number {
     if (timer.isExpired) return 0;
     if (timer.startedAt === 0) return timer.durationSeconds;
 
-    const now = Date.now();
-    const elapsedMs = now - timer.startedAt;
-    const elapsedSeconds = Math.floor(elapsedMs / 1000);
-    const remaining = timer.durationSeconds - elapsedSeconds;
-
-    return Math.max(0, remaining);
+    // Guard against clock skew (e.g., system time changes)
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timer.startedAt) / 1000));
+    return Math.max(0, timer.durationSeconds - elapsedSeconds);
 }
 
-/**
- * Format seconds to MM:SS display string
- */
+/** Format seconds to "HH:MM:SS" */
 function formatTime(totalSeconds: number): string {
-    const minutes = Math.floor(totalSeconds / 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds
+        .toString()
+        .padStart(2, '0')}`;
 }
 
-/**
- * Determine timer state based on remaining time
- */
 function getTimerState(
     remainingSeconds: number,
     isExpired: boolean,
@@ -97,137 +73,49 @@ function getTimerState(
 // MAIN HOOK
 // =============================================================================
 
-/**
- * High-precision exam timer hook with delta-time computation
- * 
- * Features:
- * - Delta-time based (survives tab sleep/throttling)
- * - Auto-updates store with remaining time
- * - Triggers section expiry callbacks
- * - Provides formatted display data
- * - Handles section transitions automatically
- * 
- * @example
- * ```tsx
- * const { timerData, isActive, pause, resume } = useExamTimer({
- *   onSectionExpire: (section) => handleAutoSubmit(section),
- *   onExamComplete: () => submitExam(),
- * });
- * 
- * return <div className={timerData.state}>{timerData.displayTime}</div>;
- * ```
- */
 export function useExamTimer(options: UseExamTimerOptions = {}) {
     const {
         onSectionExpire,
         onExamComplete,
         intervalMs = 1000,
-        warningThresholdSeconds = 300, // 5 minutes
-        criticalThresholdSeconds = 60, // 1 minute
+        warningThresholdSeconds = 300,
+        criticalThresholdSeconds = 60,
     } = options;
 
-    // Store selectors
     const currentSection = useExamStore(selectCurrentSection);
     const currentTimer = useExamStore(selectCurrentTimer);
-    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
     const hasHydrated = useExamStore((s) => s.hasHydrated);
     const isSubmitting = useExamStore((s) => s.isSubmitting);
     const isAutoSubmitting = useExamStore((s) => s.isAutoSubmitting);
 
-    // Store actions
     const updateSectionTimer = useExamStore((s) => s.updateSectionTimer);
     const expireSection = useExamStore((s) => s.expireSection);
     const moveToNextSection = useExamStore((s) => s.moveToNextSection);
     const setAutoSubmitting = useExamStore((s) => s.setAutoSubmitting);
 
-    // Refs for stable callback identity
     const onSectionExpireRef = useRef(onSectionExpire);
     const onExamCompleteRef = useRef(onExamComplete);
+    const currentSectionRef = useRef(currentSection);
 
-    // Track if timer is active
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const isActiveRef = useRef(false);
-    const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Track last known section to detect transitions
-    const lastSectionRef = useRef<SectionName>(currentSection);
+    // Manual pause should survive re-renders/effects
+    const isManuallyPausedRef = useRef(false);
 
-    // Update refs when callbacks change
+    // Prevent double-trigger of expiry (interval ticks + visibility effect + delayed ticks)
+    const expiryInProgressRef = useRef(false);
+
     useEffect(() => {
         onSectionExpireRef.current = onSectionExpire;
         onExamCompleteRef.current = onExamComplete;
     }, [onSectionExpire, onExamComplete]);
 
-    /**
-     * Handle section expiry with auto-transition
-     */
-    const handleSectionExpiry = useCallback(async (sectionName: SectionName) => {
-        // Prevent duplicate handling
-        if (isAutoSubmitting) return;
+    // Keep currentSectionRef in sync to avoid stale closures in tick
+    useEffect(() => {
+        currentSectionRef.current = currentSection;
+    }, [currentSection]);
 
-        setAutoSubmitting(true);
-
-        try {
-            // Mark section as expired in store
-            expireSection(sectionName);
-
-            // Call external handler if provided
-            await onSectionExpireRef.current?.(sectionName);
-
-            // Check if this is the last section (QA)
-            const sectionIndex = currentSectionIndex;
-            if (sectionIndex >= 2) {
-                // Last section - exam complete
-                await onExamCompleteRef.current?.();
-            } else {
-                // Move to next section
-                moveToNextSection();
-            }
-        } finally {
-            setAutoSubmitting(false);
-        }
-    }, [currentSectionIndex, expireSection, isAutoSubmitting, moveToNextSection, setAutoSubmitting]);
-
-    /**
-     * Core timer tick - calculate remaining time using delta
-     */
-    const tick = useCallback(() => {
-        if (!hasHydrated || isSubmitting) return;
-
-        const timer = useExamStore.getState().sectionTimers[currentSection];
-
-        // Don't tick if section hasn't started or already expired
-        if (timer.startedAt === 0 || timer.isExpired) return;
-
-        // Calculate remaining using delta-time
-        const remaining = calculateRemainingSeconds(timer);
-
-        // Update store with new remaining time
-        updateSectionTimer(currentSection, remaining);
-
-        // Check for expiry
-        if (remaining <= 0 && !timer.isExpired) {
-            handleSectionExpiry(currentSection);
-        }
-    }, [currentSection, hasHydrated, isSubmitting, updateSectionTimer, handleSectionExpiry]);
-
-    /**
-     * Start/restart the timer interval
-     */
-    const startTimer = useCallback(() => {
-        if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-        }
-
-        isActiveRef.current = true;
-        intervalRef.current = setInterval(tick, intervalMs);
-
-        // Immediate tick to sync
-        tick();
-    }, [tick, intervalMs]);
-
-    /**
-     * Stop the timer interval
-     */
     const stopTimer = useCallback(() => {
         if (intervalRef.current) {
             clearInterval(intervalRef.current);
@@ -236,75 +124,147 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         isActiveRef.current = false;
     }, []);
 
-    /**
-     * Pause timer (keeps state, stops ticking)
-     */
+    const handleSectionExpiry = useCallback(
+        async (sectionName: SectionName) => {
+            // Atomic check-and-set to prevent race conditions
+            // Check both local ref AND store state before proceeding
+            const storeState = useExamStore.getState();
+            if (expiryInProgressRef.current) return;
+            if (storeState.isAutoSubmitting || storeState.isSubmitting) return;
+
+            // Set flag immediately to block any concurrent calls
+            expiryInProgressRef.current = true;
+
+            // Stop ticks immediately (don’t wait for state re-render)
+            stopTimer();
+
+            setAutoSubmitting(true);
+            try {
+                expireSection(sectionName);
+
+                // Persist section responses / server-side save (if provided)
+                await onSectionExpireRef.current?.(sectionName);
+
+                // Determine completion based on sectionName (most reliable)
+                if (sectionName === 'QA') {
+                    await onExamCompleteRef.current?.();
+                } else {
+                    moveToNextSection();
+                }
+            } finally {
+                setAutoSubmitting(false);
+                expiryInProgressRef.current = false;
+
+                // If not submitting and not manually paused, resume ticking for the next section
+                const st = useExamStore.getState();
+                if (!isManuallyPausedRef.current && st.hasHydrated && !st.isSubmitting && !st.isAutoSubmitting) {
+                    // start will happen via effect too, but doing nothing here keeps it simple
+                }
+            }
+        },
+        [expireSection, moveToNextSection, setAutoSubmitting, stopTimer]
+    );
+
+    const tick = useCallback(() => {
+        const st = useExamStore.getState();
+        if (!st.hasHydrated || st.isSubmitting || st.isAutoSubmitting) return;
+        if (isManuallyPausedRef.current) return;
+        if (expiryInProgressRef.current) return;
+
+        // Use ref to get current section (avoids stale closure)
+        const section = currentSectionRef.current;
+        const timer = st.sectionTimers[section];
+        if (!timer) return;
+
+        // If not started or already expired, nothing to do
+        if (timer.startedAt === 0 || timer.isExpired) return;
+
+        const remaining = calculateRemainingSeconds(timer);
+
+        // Avoid redundant state updates if store already has this remainingSeconds
+        const currentRemainingSeconds =
+            (timer as unknown as { remainingSeconds?: number }).remainingSeconds ??
+            (timer as unknown as { remaining_seconds?: number }).remaining_seconds;
+
+        if (typeof currentRemainingSeconds !== 'number' || currentRemainingSeconds !== remaining) {
+            updateSectionTimer(section, remaining);
+        }
+
+        if (remaining <= 0 && !timer.isExpired) {
+            void handleSectionExpiry(section);
+        }
+    }, [updateSectionTimer, handleSectionExpiry]);
+
+    const startTimer = useCallback(() => {
+        stopTimer();
+
+        if (intervalMs <= 0) {
+            // Fallback: no interval, but still do one sync tick.
+            isActiveRef.current = true;
+            tick();
+            return;
+        }
+
+        isActiveRef.current = true;
+        intervalRef.current = setInterval(tick, intervalMs);
+        tick();
+    }, [intervalMs, stopTimer, tick]);
+
     const pause = useCallback(() => {
+        isManuallyPausedRef.current = true;
         stopTimer();
     }, [stopTimer]);
 
-    /**
-     * Resume timer after pause
-     */
     const resume = useCallback(() => {
-        if (!isActiveRef.current) {
+        isManuallyPausedRef.current = false;
+        const st = useExamStore.getState();
+        if (st.hasHydrated && !st.isSubmitting && !st.isAutoSubmitting) {
             startTimer();
         }
     }, [startTimer]);
 
-    // Start timer when hydrated and not submitting
+    // Start/stop lifecycle
     useEffect(() => {
-        if (hasHydrated && !isSubmitting && !isAutoSubmitting) {
-            startTimer();
-        }
+        const st = useExamStore.getState();
+        const shouldRun = st.hasHydrated && !st.isSubmitting && !st.isAutoSubmitting && !isManuallyPausedRef.current;
 
-        return () => {
-            stopTimer();
-        };
+        if (shouldRun) startTimer();
+        else stopTimer();
+
+        return () => stopTimer();
     }, [hasHydrated, isSubmitting, isAutoSubmitting, startTimer, stopTimer]);
 
-    // Handle section transitions - restart timer on section change
+    // Ensure expiry is handled even if interval ticks are delayed (tab sleep / throttling)
     useEffect(() => {
-        if (currentSection !== lastSectionRef.current) {
-            lastSectionRef.current = currentSection;
-            // New section - ensure timer is running
-            if (hasHydrated && !isSubmitting) {
-                tick(); // Immediate sync
-            }
-        }
-    }, [currentSection, hasHydrated, isSubmitting, tick]);
+        if (!hasHydrated || isSubmitting || isAutoSubmitting) return;
+        if (isManuallyPausedRef.current) return;
+        if (expiryInProgressRef.current) return;
 
-    // Handle visibility change (tab switch, minimize)
+        if (currentTimer.isExpired) return;
+        if (currentTimer.startedAt === 0) return;
+
+        const remaining = calculateRemainingSeconds(currentTimer);
+        if (remaining <= 0) {
+            void handleSectionExpiry(currentSection);
+        }
+    }, [currentSection, currentTimer, handleSectionExpiry, hasHydrated, isSubmitting, isAutoSubmitting]);
+
+    // Sync on tab focus
     useEffect(() => {
         const handleVisibilityChange = () => {
-            if (document.hidden) {
-                // Tab hidden - we could pause here but delta-time handles it
-                // Just reduce interval frequency to save resources
-            } else {
-                // Tab visible - immediate sync via delta-time
-                tick();
-            }
+            if (!document.hidden) tick();
         };
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
     }, [tick]);
 
-    // Calculate display data
     const timerData: TimerDisplayData = (() => {
         const remaining = calculateRemainingSeconds(currentTimer);
-        const state = getTimerState(
-            remaining,
-            currentTimer.isExpired,
-            warningThresholdSeconds,
-            criticalThresholdSeconds
-        );
+        const state = getTimerState(remaining, currentTimer.isExpired, warningThresholdSeconds, criticalThresholdSeconds);
 
-        const progressPercent = currentTimer.durationSeconds > 0
-            ? (remaining / currentTimer.durationSeconds) * 100
-            : 0;
+        const progressPercent =
+            currentTimer.durationSeconds > 0 ? (remaining / currentTimer.durationSeconds) * 100 : 0;
 
         return {
             minutes: Math.floor(remaining / 60),
@@ -319,17 +279,11 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
     })();
 
     return {
-        /** Current timer display data */
         timerData,
-        /** Is the timer currently running */
         isActive: isActiveRef.current,
-        /** Is the timer in auto-submit mode */
         isAutoSubmitting,
-        /** Pause the timer (UI only, delta-time continues) */
         pause,
-        /** Resume the timer */
         resume,
-        /** Force an immediate tick (recalculate time) */
         sync: tick,
     };
 }
@@ -338,12 +292,8 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
 // UTILITY HOOKS
 // =============================================================================
 
-/**
- * Get timer data for a specific section (not necessarily current)
- */
 export function useSectionTimer(sectionName: SectionName) {
     const timer = useExamStore((s) => s.sectionTimers[sectionName]);
-
     const remaining = calculateRemainingSeconds(timer);
 
     return {
@@ -351,40 +301,22 @@ export function useSectionTimer(sectionName: SectionName) {
         displayTime: formatTime(remaining),
         isExpired: timer.isExpired || remaining <= 0,
         isStarted: timer.startedAt > 0,
-        progressPercent: timer.durationSeconds > 0
-            ? (remaining / timer.durationSeconds) * 100
-            : 0,
+        progressPercent: timer.durationSeconds > 0 ? (remaining / timer.durationSeconds) * 100 : 0,
     };
 }
 
-/**
- * Get all section timers summary
- */
 export function useAllSectionTimers() {
     const timers = useExamStore((s) => s.sectionTimers);
 
     return {
-        VARC: {
-            remaining: calculateRemainingSeconds(timers.VARC),
-            isExpired: timers.VARC.isExpired,
-        },
-        DILR: {
-            remaining: calculateRemainingSeconds(timers.DILR),
-            isExpired: timers.DILR.isExpired,
-        },
-        QA: {
-            remaining: calculateRemainingSeconds(timers.QA),
-            isExpired: timers.QA.isExpired,
-        },
+        VARC: { remaining: calculateRemainingSeconds(timers.VARC), isExpired: timers.VARC.isExpired },
+        DILR: { remaining: calculateRemainingSeconds(timers.DILR), isExpired: timers.DILR.isExpired },
+        QA: { remaining: calculateRemainingSeconds(timers.QA), isExpired: timers.QA.isExpired },
         totalRemaining:
             calculateRemainingSeconds(timers.VARC) +
             calculateRemainingSeconds(timers.DILR) +
             calculateRemainingSeconds(timers.QA),
     };
 }
-
-// =============================================================================
-// EXPORTS
-// =============================================================================
 
 export { calculateRemainingSeconds, formatTime, getTimerState };

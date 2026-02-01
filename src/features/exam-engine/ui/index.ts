@@ -18,6 +18,9 @@ export { MCQRenderer } from './MCQRenderer';
 export { TITARenderer } from './TITARenderer';
 export { QuestionRenderer } from './QuestionRenderer';  // Question Container Architecture
 
+// Calculator
+export { Calculator } from './Calculator';
+
 // Navigation
 export { NavigationButtons, ExamSubmitButton } from './NavigationButtons';
 

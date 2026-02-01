@@ -49,6 +49,8 @@ None required for this change
 - Implemented `calculateScore()`, `normalizeString()`, `parseAsNumber()`, `compareAnswers()`, `calculateQuestionMarks()`, `calculateTimeTaken()`
 - Updated `submitExam()` in `actions.ts` to use TypeScript scoring instead of RPC
 - Exports added to `lib/index.ts`
+- Legacy `finalize_attempt(UUID)` SQL path disabled (see Phase 1 hardening migration)
+- Unit tests added for scoring logic
 
 ---
 

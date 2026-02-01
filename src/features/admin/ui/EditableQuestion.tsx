@@ -229,7 +229,9 @@ export function EditableQuestion({
 }: EditableQuestionProps) {
     // Form state
     const [questionText, setQuestionText] = useState(question?.question_text ?? '');
-    const [questionType, setQuestionType] = useState<QuestionType>(question?.question_type ?? 'MCQ');
+    const [questionFormat, setQuestionFormat] = useState<QuestionType>(
+        (question?.question_format ?? question?.question_type ?? 'MCQ')
+    );
     const [options, setOptions] = useState<string[]>(question?.options ?? ['', '', '', '']);
     const [correctAnswer, setCorrectAnswer] = useState(question?.correct_answer ?? 'A');
     const [positiveMarks, setPositiveMarks] = useState(question?.positive_marks ?? 3);
@@ -238,11 +240,27 @@ export function EditableQuestion({
     const [imageUrl, setImageUrl] = useState<string | null>(question?.question_image_url ?? null);
     const [isUploading, setIsUploading] = useState(false);
     const [topic, setTopic] = useState(question?.topic ?? '');
+    const [taxonomyType, setTaxonomyType] = useState(question?.taxonomy_type ?? '');
+    const [topicTag, setTopicTag] = useState(question?.topic_tag ?? '');
+    const [difficultyRationale, setDifficultyRationale] = useState(question?.difficulty_rationale ?? '');
     const [difficulty, setDifficulty] = useState(question?.difficulty ?? 'medium');
     const [showPreview, setShowPreview] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
 
     useEffect(() => {
+        setQuestionText(question?.question_text ?? '');
+        setQuestionFormat((question?.question_format ?? question?.question_type ?? 'MCQ'));
+        setOptions(question?.options ?? ['', '', '', '']);
+        setCorrectAnswer(question?.correct_answer ?? 'A');
+        setPositiveMarks(question?.positive_marks ?? 3);
+        setNegativeMarks(question?.negative_marks ?? 1);
+        setSolutionText(question?.solution_text ?? '');
         setImageUrl(question?.question_image_url ?? null);
+        setTopic(question?.topic ?? '');
+        setTaxonomyType(question?.taxonomy_type ?? '');
+        setTopicTag(question?.topic_tag ?? '');
+        setDifficultyRationale(question?.difficulty_rationale ?? '');
+        setDifficulty(question?.difficulty ?? 'medium');
     }, [question?.id]);
 
     // Handle option text change
@@ -279,17 +297,26 @@ export function EditableQuestion({
 
     // Handle save
     const handleSave = useCallback(async () => {
+        if (isSaving) {
+            return;
+        }
+        setSaveError(null);
         const questionData: Partial<QuestionWithAnswer> = {
             ...question,
+            id: question?.id,
             paper_id: paperId,
             section,
             question_number: questionNumber,
             question_text: questionText,
-            question_type: questionType,
-            options: questionType === 'MCQ' ? options : null,
-            correct_answer: questionType === 'MCQ' ? correctAnswer : correctAnswer, // For TITA, this is the numeric answer
+            question_type: questionFormat,
+            question_format: questionFormat,
+            taxonomy_type: taxonomyType || undefined,
+            topic_tag: topicTag || undefined,
+            difficulty_rationale: difficultyRationale || undefined,
+            options: questionFormat === 'MCQ' ? options : null,
+            correct_answer: correctAnswer, // For TITA, this is the numeric answer
             positive_marks: positiveMarks,
-            negative_marks: questionType === 'TITA' ? 0 : negativeMarks,
+            negative_marks: questionFormat === 'TITA' ? 0 : negativeMarks,
             solution_text: solutionText || undefined,
             question_image_url: imageUrl || undefined,
             topic: topic || undefined,
@@ -297,11 +324,16 @@ export function EditableQuestion({
             is_active: true,
         };
 
-        await onSave(questionData);
+        try {
+            await onSave(questionData);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Failed to save question.';
+            setSaveError(message);
+        }
     }, [
-        question, paperId, section, questionNumber, questionText, questionType,
+        question, paperId, section, questionNumber, questionText, questionFormat,
         options, correctAnswer, positiveMarks, negativeMarks, solutionText,
-        topic, difficulty, imageUrl, onSave
+        topic, taxonomyType, topicTag, difficultyRationale, difficulty, imageUrl, onSave, isSaving
     ]);
 
     return (
@@ -320,8 +352,8 @@ export function EditableQuestion({
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
-                            onClick={() => setQuestionType('MCQ')}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${questionType === 'MCQ'
+                            onClick={() => setQuestionFormat('MCQ')}
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${questionFormat === 'MCQ'
                                 ? 'bg-blue-500 text-white'
                                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
@@ -331,10 +363,10 @@ export function EditableQuestion({
                         <button
                             type="button"
                             onClick={() => {
-                                setQuestionType('TITA');
+                                setQuestionFormat('TITA');
                                 setNegativeMarks(0);
                             }}
-                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${questionType === 'TITA'
+                            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${questionFormat === 'TITA'
                                 ? 'bg-blue-500 text-white'
                                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
@@ -363,7 +395,7 @@ export function EditableQuestion({
                                 onChange={(e) => setNegativeMarks(Number(e.target.value))}
                                 className="w-12 px-2 py-1 border border-gray-300 rounded text-center"
                                 min={0}
-                                disabled={questionType === 'TITA'}
+                                disabled={questionFormat === 'TITA'}
                             />
                         </label>
                     </div>
@@ -413,7 +445,7 @@ export function EditableQuestion({
                         <div className="prose prose-sm max-w-none text-gray-800">
                             <MathText text={questionText} />
                         </div>
-                        {questionType === 'MCQ' && (
+                        {questionFormat === 'MCQ' && (
                             <div className="space-y-2">
                                 {options.map((optionText, index) => {
                                     const label = OPTION_LABELS[index];
@@ -443,7 +475,7 @@ export function EditableQuestion({
             </div>
 
             {/* Options (MCQ only) or Answer Input (TITA) */}
-            {questionType === 'MCQ' ? (
+            {questionFormat === 'MCQ' ? (
                 <div className="space-y-3 mb-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                         Options <span className="text-red-500">*</span>
@@ -525,11 +557,58 @@ export function EditableQuestion({
                 </div>
             </div>
 
+            {/* Taxonomy Fields */}
+            <div className="grid grid-cols-1 gap-4 mb-6">
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Taxonomy Type (optional)
+                        </label>
+                        <input
+                            type="text"
+                            value={taxonomyType}
+                            onChange={(e) => setTaxonomyType(e.target.value)}
+                            placeholder="e.g., rc_inference, para_summary"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Topic Tag (optional)
+                        </label>
+                        <input
+                            type="text"
+                            value={topicTag}
+                            onChange={(e) => setTopicTag(e.target.value)}
+                            placeholder="e.g., inference, main_idea"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                        />
+                    </div>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Difficulty Rationale (optional)
+                    </label>
+                    <textarea
+                        value={difficultyRationale}
+                        onChange={(e) => setDifficultyRationale(e.target.value)}
+                        placeholder="Why this difficulty rating?"
+                        rows={2}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y"
+                    />
+                </div>
+            </div>
+
             {/* Action Buttons */}
             <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                 <div className="text-sm text-gray-500">
                     {question?.id ? 'Editing existing question' : 'Creating new question'}
                 </div>
+                {saveError && (
+                    <div className="text-sm text-red-600" role="alert">
+                        {saveError}
+                    </div>
+                )}
                 <div className="flex items-center gap-3">
                     {onCancel && (
                         <button
@@ -564,5 +643,3 @@ export function EditableQuestion({
         </div>
     );
 }
-
-export default EditableQuestion;

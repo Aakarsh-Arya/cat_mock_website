@@ -8,18 +8,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { checkRateLimit, RATE_LIMITS, userRateLimitKey, getRateLimitHeaders } from '@/lib/rate-limit';
 import { examLogger } from '@/lib/logger';
+import {
+    isNonEmptyString,
+    getSupabaseConfig,
+    serverMisconfiguredResponse,
+    addVersionHeader,
+} from '../_utils/validation';
 
 export async function POST(req: NextRequest) {
+    // Create a single response object up-front so any auth cookie mutations
+    // made by supabase SSR actually get returned to the client.
+    const res = NextResponse.next();
+
     try {
-        const { attemptId, questionId, answer, sessionToken, force_resume } = await req.json();
-        if (!attemptId || !questionId) {
-            return NextResponse.json({ error: 'attemptId and questionId required' }, { status: 400 });
+        const body = await req.json();
+        const { attemptId, questionId, answer, sessionToken, force_resume } = body ?? {};
+
+        if (!isNonEmptyString(attemptId)) {
+            return addVersionHeader(NextResponse.json({ error: 'attemptId is required' }, { status: 400 }));
+        }
+        if (!isNonEmptyString(questionId)) {
+            return addVersionHeader(NextResponse.json({ error: 'questionId is required' }, { status: 400 }));
         }
 
-        const res = NextResponse.next();
-        const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
-        const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
-        const supabase = createServerClient(url || 'http://localhost:54321', anon || 'anon', {
+        const config = getSupabaseConfig();
+        if (!config) {
+            return addVersionHeader(serverMisconfiguredResponse());
+        }
+
+        const supabase = createServerClient(config.url, config.anonKey, {
             cookies: {
                 get(name: string) {
                     return req.cookies.get(name)?.value;
@@ -33,9 +50,12 @@ export async function POST(req: NextRequest) {
             },
         });
 
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+            data: { session },
+        } = await supabase.auth.getSession();
+
         if (!session) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            return addVersionHeader(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
         }
 
         // P0 FIX: Rate limiting per user
@@ -54,77 +74,149 @@ export async function POST(req: NextRequest) {
         }
 
         // Ensure the attempt belongs to the user
-        const { data: attempt } = await supabase
+        const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('id, user_id, status, session_token, started_at, last_activity_at, paper_id')
+            .select('id, user_id, status, started_at, paper_id')
             .eq('id', attemptId)
             .maybeSingle();
 
+        if (attemptError) {
+            console.log('API_SAVE_ATTEMPT_LOOKUP_FAILED', {
+                attemptId,
+                userId: session.user.id,
+                status: null,
+                errorCode: attemptError.code ?? null,
+                errorMessage: attemptError.message ?? 'Attempt lookup failed',
+            });
+            return NextResponse.json({ error: 'Failed to fetch attempt' }, { status: 500 });
+        }
+
         if (!attempt || attempt.user_id !== session.user.id) {
+            const {
+                data: { user },
+            } = await supabase.auth.getUser();
+
+            if (!user) {
+                return NextResponse.json({ error: 'Session expired. Please sign in again.' }, { status: 401 });
+            }
+
+            console.log('API_SAVE_ATTEMPT_FORBIDDEN', {
+                attemptId,
+                userId: session.user.id,
+                status: attempt?.status ?? null,
+                errorCode: 'FORBIDDEN',
+                errorMessage: 'Attempt not found or not owned by user',
+            });
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         // P0 FIX: Don't allow saves on completed/submitted attempts
         if (attempt.status !== 'in_progress') {
+            console.log('API_SAVE_ATTEMPT_STATUS_MISMATCH', {
+                attemptId,
+                userId: session.user.id,
+                status: attempt.status,
+                errorCode: 'INVALID_ATTEMPT_STATUS',
+                errorMessage: 'Attempt is not in progress',
+            });
             return NextResponse.json({ error: 'Attempt is not in progress' }, { status: 400 });
         }
 
-        // P0 FIX: Session token validation (multi-device/tab prevention)
-        // If session token is provided and attempt has one, validate they match
-        if (attempt.session_token && sessionToken && attempt.session_token !== sessionToken) {
-            // Allow force_resume to recover from browser crash/tab close
+        if (!sessionToken) {
+            return NextResponse.json({ error: 'Missing session token' }, { status: 400 });
+        }
+
+        const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
+            p_attempt_id: attemptId,
+            p_session_token: sessionToken,
+            p_user_id: session.user.id,
+        });
+
+        if (validateError) {
+            examLogger.securityEvent('Save session validation RPC error', {
+                attemptId,
+                errorMessage: validateError.message,
+                errorCode: validateError.code,
+            });
+            // If RPC error and force_resume is set, try to proceed with force resume
             if (force_resume === true) {
-                const lastActivityAt = attempt.last_activity_at ? new Date(attempt.last_activity_at).getTime() : null;
-                const isStale = !lastActivityAt || (Date.now() - lastActivityAt) > 5 * 60 * 1000;
+                const { error: forceResumeError } = await supabase.rpc('force_resume_exam_session', {
+                    p_attempt_id: attemptId,
+                    p_new_session_token: sessionToken,
+                });
+                if (!forceResumeError) {
+                    // Force resume succeeded, continue with save
+                } else {
+                    return NextResponse.json({ error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' }, { status: 500 });
+                }
+            } else {
+                return NextResponse.json({ error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' }, { status: 500 });
+            }
+        }
+
+        if (!isValidSession) {
+            if (force_resume === true) {
                 const ip = req.headers.get('x-forwarded-for') ?? 'unknown';
                 const userAgent = req.headers.get('user-agent') ?? 'unknown';
 
-                if (isStale) {
-                    examLogger.securityEvent('Force resume rejected (stale)', {
-                        attemptId,
-                        oldToken: attempt.session_token,
-                        lastActivityAt: attempt.last_activity_at,
-                        ip,
-                        userAgent,
-                    });
-                    return NextResponse.json({
-                        error: 'Force resume denied. Session is too old.',
-                        code: 'FORCE_RESUME_STALE',
-                    }, { status: 409 });
-                }
-
-                examLogger.securityEvent('Force resume: updating session token', {
+                examLogger.securityEvent('Force resume (save)', {
                     attemptId,
-                    oldToken: attempt.session_token,
-                    newToken: sessionToken,
                     ip,
                     userAgent,
                 });
-                await supabase
-                    .from('attempts')
-                    .update({ session_token: sessionToken })
-                    .eq('id', attemptId);
+
+                const { error: forceResumeError } = await supabase.rpc('force_resume_exam_session', {
+                    p_attempt_id: attemptId,
+                    p_new_session_token: sessionToken,
+                });
+
+                if (forceResumeError) {
+                    if (
+                        forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
+                        forceResumeError.message?.includes('stale')
+                    ) {
+                        return NextResponse.json(
+                            {
+                                error: 'Force resume denied. Session is too old.',
+                                code: 'FORCE_RESUME_STALE',
+                            },
+                            { status: 409 }
+                        );
+                    }
+
+                    return NextResponse.json({ error: 'Failed to force resume session' }, { status: 500 });
+                }
             } else {
-                examLogger.securityEvent('Save session token mismatch', { attemptId, expected: attempt.session_token });
-                return NextResponse.json({
-                    error: 'Session conflict detected. This exam may be open in another tab or device.',
-                    code: 'SESSION_CONFLICT',
-                    canForceResume: true
-                }, { status: 409 });
+                examLogger.securityEvent('Save session token mismatch', { attemptId });
+                return NextResponse.json(
+                    {
+                        error: 'Session conflict detected. This exam may be open in another tab or device.',
+                        code: 'SESSION_CONFLICT',
+                        canForceResume: true,
+                    },
+                    { status: 409 }
+                );
             }
         }
 
         // P0 FIX: Server-side section timer validation
         // Check if too much time has elapsed since exam started (dynamic per paper)
         if (attempt.started_at) {
-            const { data: paperTiming } = await supabase
+            const { data: paperTiming, error: paperTimingError } = await supabase
                 .from('papers')
                 .select('sections')
                 .eq('id', attempt.paper_id)
                 .maybeSingle();
 
-            const totalMinutes = (paperTiming?.sections || [])
-                .reduce((sum: number, s: { time?: number }) => sum + (s.time || 0), 0);
+            if (paperTimingError) {
+                return NextResponse.json({ error: 'Failed to fetch paper timing' }, { status: 500 });
+            }
+
+            const totalMinutes = (paperTiming?.sections || []).reduce(
+                (sum: number, s: { time?: number }) => sum + (s.time || 0),
+                0
+            );
+
             const maxDurationMs = Math.max(1, totalMinutes || 120) * 60 * 1000;
             const GRACE_PERIOD_MS = 2 * 60 * 1000; // 2 minutes grace
 
@@ -132,18 +224,15 @@ export async function POST(req: NextRequest) {
             const elapsed = Date.now() - startedAt;
 
             if (elapsed > maxDurationMs + GRACE_PERIOD_MS) {
-                return NextResponse.json({
-                    error: 'Exam time has expired. Saves are no longer accepted.',
-                    code: 'TIME_EXPIRED'
-                }, { status: 400 });
+                return NextResponse.json(
+                    {
+                        error: 'Exam time has expired. Saves are no longer accepted.',
+                        code: 'TIME_EXPIRED',
+                    },
+                    { status: 400 }
+                );
             }
         }
-
-        // Update last_activity_at for session tracking
-        await supabase
-            .from('attempts')
-            .update({ last_activity_at: new Date().toISOString() })
-            .eq('id', attemptId);
 
         // Upsert response
         const { data, error } = await supabase
@@ -153,13 +242,54 @@ export async function POST(req: NextRequest) {
             .single();
 
         if (error) {
-            return NextResponse.json({ error: error.message }, { status: 500 });
+            const errorMessage = error.message ?? 'Upsert failed';
+            const errorCode = error.code ?? null;
+            const isRls =
+                errorCode === '42501' ||
+                errorMessage.toLowerCase().includes('row-level security') ||
+                errorMessage.toLowerCase().includes('permission denied');
+
+            if (isRls) {
+                const {
+                    data: { user },
+                } = await supabase.auth.getUser();
+
+                if (!user) {
+                    return NextResponse.json(
+                        { error: 'Session expired. Please sign in again.' },
+                        { status: 401 }
+                    );
+                }
+
+                return NextResponse.json(
+                    { error: 'Insufficient permissions to save response.' },
+                    { status: 403 }
+                );
+            }
+
+            console.log('API_SAVE_RESPONSE_UPSERT_FAILED', {
+                attemptId,
+                userId: session.user.id,
+                status: attempt.status,
+                errorCode,
+                errorMessage,
+            });
+            return NextResponse.json({ error: errorMessage }, { status: 500 });
         }
 
         // Add rate limit headers to successful response
         const successHeaders = getRateLimitHeaders(rateLimitResult, RATE_LIMITS.SAVE_RESPONSE.limit);
-        return NextResponse.json({ success: true, data }, { headers: successHeaders });
+
+        // Create proper JSON response with cookie mutations from res preserved
+        const response = NextResponse.json({ success: true, data }, { status: 200 });
+        Object.entries(successHeaders).forEach(([k, v]) => response.headers.set(k, String(v)));
+        // Copy any auth cookies set by supabase SSR
+        res.cookies.getAll().forEach(cookie => {
+            response.cookies.set(cookie.name, cookie.value);
+        });
+
+        return addVersionHeader(response);
     } catch {
-        return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+        return addVersionHeader(NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }));
     }
 }

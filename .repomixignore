@@ -1,0 +1,32 @@
+# Repomix ignore list
+# Secrets and environment files
+.env
+.env.*
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+service-account*.json
+
+# Build artifacts and dependencies
+.next/
+node_modules/
+.venv/
+
+# Large/generated files
+pnpm-lock.yaml
+gemini_*.md
+repomix-output*
+VS_Codebase.md
+
+# Temp export files
+.export_sanitized/
+.export_tmp/
+.repomix-vs-codebase.json
+
+# Original question paper data (use sanitized versions)
+data/*.json
+data/*.jsonc

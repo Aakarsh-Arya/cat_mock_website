@@ -2,6 +2,17 @@
 
 ## Changelog
 
+### 2026-01-24: Phase A/B Security Verification (Runtime Reads + RBAC Hook)
+- **Verified**: Runtime read paths only use safe view `questions_exam` for exam fetches and result rendering.
+	- Evidence: `fetchPaperForExam()` and `fetchExamResults()` in [src/features/exam-engine/lib/actions.ts](src/features/exam-engine/lib/actions.ts)
+	- Evidence: Exam page uses `questions_exam` in [src/app/exam/[attemptId]/page.tsx](src/app/exam/[attemptId]/page.tsx)
+- **Verified**: Results are gated via `fetch_attempt_solutions` RPC and only consumed through `fetchExamResults()`.
+	- Evidence: RPC definition in [docs/migrations/004_fetch_attempt_solutions.sql](docs/migrations/004_fetch_attempt_solutions.sql)
+	- Evidence: Results page in [src/app/result/[attemptId]/page.tsx](src/app/result/[attemptId]/page.tsx)
+- **Verified**: RBAC hook enablement checklist documented and current.
+	- Evidence: RBAC hook verification steps in [docs/BLUEPRINT.md](docs/BLUEPRINT.md)
+	- Evidence: Auth hook function + grants in [docs/MIGRATION_M6_RBAC.sql](docs/MIGRATION_M6_RBAC.sql)
+
 ### 2026-01-22: Mirror Principle Admin Editor (M6+)
 - **Added**: `EditableExamLayout.tsx` - Admin editor that mirrors exam UI exactly
 - **Added**: `ImageUploadZone` component with Supabase Storage integration

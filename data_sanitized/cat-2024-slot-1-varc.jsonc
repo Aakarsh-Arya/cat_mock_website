@@ -1,0 +1,69 @@
+{
+  "_SCHEMA_NOTE": "This file has been sanitized. Question text, options, answers, and passages have been replaced with placeholders.",
+  "_ORIGINAL_STRUCTURE": "{ paper: object, contexts: object, questions: object }",
+  "paper": {
+    "slug": "cat-2024-slot-1",
+    "title": "CAT 2024 Slot 1",
+    "description": "CAT 2024 Slot 1 actual exam with 66 questions across VARC, DILR, and QA sections.",
+    "year": 2024,
+    "total_questions": 66,
+    "total_marks": 198,
+    "duration_minutes": 120,
+    "sections": [
+      {
+        "name": "VARC",
+        "questions": 24,
+        "time": 40,
+        "marks": 72
+      },
+      {
+        "name": "DILR",
+        "questions": 20,
+        "time": 40,
+        "marks": 60
+      },
+      {
+        "name": "QA",
+        "questions": 22,
+        "time": 40,
+        "marks": 66
+      }
+    ],
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "difficulty_level": "cat-level",
+    "is_free": true,
+    "published": true,
+    "available_from": null,
+    "available_until": null
+  },
+  "contexts": [
+    {
+      "id": "dilr-set-1",
+      "title": "Web Surfers and Bloggers",
+      "section": "DILR",
+      "text": "<TEXT_OMITTED>"
+    },
+    {
+      "_NOTE": "... 10 more items omitted (total: 11) ..."
+    }
+  ],
+  "questions": [
+    {
+      "section": "DILR",
+      "question_number": 1,
+      "context_id": "<CONTEXT_ID_OMITTED>",
+      "question_text": "<QUESTION_TEXT_OMITTED>",
+      "question_type": "TITA",
+      "options": null,
+      "correct_answer": "<ANSWER_OMITTED>",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "difficulty": "medium",
+      "is_active": true
+    },
+    {
+      "_NOTE": "... 65 more items omitted (total: 66) ..."
+    }
+  ]
+}

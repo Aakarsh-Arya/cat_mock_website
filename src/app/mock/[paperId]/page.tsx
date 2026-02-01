@@ -78,9 +78,10 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
         previousAttempts = attempts || [];
     }
 
-    // Check attempt limit
-    const completedAttempts = previousAttempts.filter(a => a.status === 'completed').length;
-    const canAttempt = paper?.attempt_limit === null || completedAttempts < (paper?.attempt_limit || 0);
+    // Check attempt limit (count attempts that are not expired)
+    const activeAttemptsCount = previousAttempts.filter((a) => a.status !== 'expired').length;
+    const attemptLimit = paper?.attempt_limit ?? null;
+    const canAttempt = attemptLimit === null || attemptLimit <= 0 || activeAttemptsCount < attemptLimit;
 
     async function startExam() {
         'use server';
@@ -94,13 +95,13 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
         // Check if paperId looks like a UUID
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
 
-        type PaperData = { id: string; published: boolean; sections: Section[]; duration_minutes: number };
+        type PaperData = { id: string; published: boolean; sections: Section[]; duration_minutes: number; attempt_limit: number | null };
         let p: PaperData | null = null;
 
         if (isUUID) {
             const { data } = await s
                 .from('papers')
-                .select('id, published, sections, duration_minutes')
+                .select('id, published, sections, duration_minutes, attempt_limit')
                 .eq('id', paperId)
                 .maybeSingle();
             p = data as PaperData | null;
@@ -109,7 +110,7 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
         if (!p) {
             const { data } = await s
                 .from('papers')
-                .select('id, published, sections, duration_minutes')
+                .select('id, published, sections, duration_minutes, attempt_limit')
                 .eq('slug', paperId)
                 .maybeSingle();
             p = data as PaperData | null;
@@ -117,6 +118,20 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
 
         if (!p || p.published !== true) {
             throw new Error('Paper not available');
+        }
+
+        const attemptLimitServer = p.attempt_limit ?? null;
+        if (attemptLimitServer !== null && attemptLimitServer > 0) {
+            const { count: attemptCount } = await s
+                .from('attempts')
+                .select('id', { count: 'exact', head: true })
+                .eq('paper_id', p.id)
+                .eq('user_id', currentUser.id)
+                .neq('status', 'expired');
+
+            if ((attemptCount ?? 0) >= attemptLimitServer) {
+                redirect(`/mock/${paperId}?limit_reached=1`);
+            }
         }
 
         // FIX: Check for existing in_progress attempt - reuse instead of creating new
@@ -255,7 +270,7 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
                     </thead>
                     <tbody>
                         {sections.map((section: Section, idx: number) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+                            <tr key={`${section.name}-${idx}`} style={{ borderBottom: '1px solid #eee' }}>
                                 <td style={{ padding: 12 }}>{section.name}</td>
                                 <td style={{ padding: 12, textAlign: 'center' }}>{section.questions}</td>
                                 <td style={{ padding: 12, textAlign: 'center' }}>{section.time}</td>

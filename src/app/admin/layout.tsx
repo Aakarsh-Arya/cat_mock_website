@@ -28,34 +28,32 @@ export default async function AdminLayout({
         redirect('/auth/sign-in');
     }
 
-    // DEV MODE: Skip RBAC check if SKIP_ADMIN_CHECK is set (for development before DB migration)
-    const skipAdminCheck = process.env.SKIP_ADMIN_CHECK === 'true';
+    // DEV MODE: Skip RBAC check only in non-production environments
+    const skipAdminCheck = process.env.SKIP_ADMIN_CHECK === 'true' && process.env.NODE_ENV !== 'production';
 
     let isAdmin = skipAdminCheck; // Default to true if skip is enabled
 
     if (!skipAdminCheck) {
         // M6+ RBAC: Check JWT claims for admin role
         const { data: { session } } = await supabase.auth.getSession();
+        let role: string | null = session?.user?.app_metadata?.user_role ?? null;
 
-        if (session?.access_token) {
+        if (!role && session?.access_token) {
             try {
                 const decoded = jwtDecode<JWTClaims>(session.access_token);
-                isAdmin = decoded?.user_role === 'admin' || decoded?.app_metadata?.user_role === 'admin';
+                role = decoded?.user_role ?? decoded?.app_metadata?.user_role ?? null;
             } catch {
-                // JWT decode failed - not admin
-                isAdmin = false;
+                // JWT decode failed - no role
+                role = null;
             }
         }
 
-        // Fallback: Check database if JWT claims not available (during migration period)
-        if (!isAdmin) {
-            const { data: userRole } = await supabase
-                .from('user_roles')
-                .select('role')
-                .eq('user_id', user.id)
-                .single();
+        isAdmin = role === 'admin';
 
-            isAdmin = userRole?.role === 'admin';
+        // Fallback: Check database function if claims not available
+        if (!isAdmin) {
+            const { data: isAdminRpc } = await supabase.rpc('is_admin');
+            isAdmin = Boolean(isAdminRpc);
         }
     }
 
@@ -101,12 +99,6 @@ export default async function AdminLayout({
                                     className="text-gray-200 hover:text-white transition-colors"
                                 >
                                     Questions
-                                </Link>
-                                <Link
-                                    href="/admin/contexts"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    Contexts
                                 </Link>
                             </nav>
                         </div>

@@ -153,5 +153,3 @@ export function SectionTimerSummary({ className = '' }: SectionTimerSummaryProps
         </div>
     );
 }
-
-export default ExamTimer;

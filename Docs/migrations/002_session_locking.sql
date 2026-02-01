@@ -15,6 +15,12 @@ ALTER TABLE attempts
 ADD COLUMN IF NOT EXISTS session_token UUID,
 ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ;
 
+-- Add pause control flag to papers
+ALTER TABLE public.papers
+ADD COLUMN IF NOT EXISTS allow_pause BOOLEAN DEFAULT FALSE;
+
+COMMENT ON COLUMN public.papers.allow_pause IS 'Whether attempts on this paper can be paused/resumed';
+
 -- Create index for session token lookups
 CREATE INDEX IF NOT EXISTS idx_attempts_session_token 
 ON attempts(session_token) 
@@ -37,6 +43,7 @@ CREATE OR REPLACE FUNCTION validate_session_token(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     v_stored_token UUID;
@@ -92,10 +99,12 @@ CREATE OR REPLACE FUNCTION initialize_exam_session(
 RETURNS UUID
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     v_session_token UUID;
     v_current_token UUID;
+    v_rows_updated INTEGER;
 BEGIN
     -- Check if session already exists
     SELECT session_token INTO v_current_token
@@ -118,7 +127,12 @@ BEGIN
     WHERE id = p_attempt_id 
       AND user_id = p_user_id 
       AND status = 'in_progress';
-    
+
+    GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+    IF v_rows_updated = 0 THEN
+        RAISE EXCEPTION 'Attempt not found or not in progress';
+    END IF;
+
     RETURN v_session_token;
 END;
 $$;
@@ -139,6 +153,7 @@ RETURNS TABLE(
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, pg_catalog
 AS $$
 BEGIN
     RETURN QUERY
@@ -170,6 +185,19 @@ $$;
 -- ON attempts FOR SELECT 
 -- USING (auth.uid() = user_id)
 -- WITH CHECK (false);  -- Prevent updates to session_token from client
+
+-- Lock down attempt status transitions via PostgREST
+-- Users can update progress fields only; status/submitted_at/completed_at must remain unchanged
+DROP POLICY IF EXISTS "Users can update own attempts" ON public.attempts;
+CREATE POLICY "Users can update own attempts" ON public.attempts
+    FOR UPDATE TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (
+        auth.uid() = user_id
+        AND status = (SELECT status FROM public.attempts a WHERE a.id = attempts.id)
+        AND submitted_at IS NOT DISTINCT FROM (SELECT submitted_at FROM public.attempts a WHERE a.id = attempts.id)
+        AND completed_at IS NOT DISTINCT FROM (SELECT completed_at FROM public.attempts a WHERE a.id = attempts.id)
+    );
 
 -- ============================================================================
 -- Rollback script (if needed)

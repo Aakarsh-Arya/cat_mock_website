@@ -5,9 +5,42 @@
 
 import { sbSSR } from '@/lib/supabase/server';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 export default async function AdminPage() {
     const supabase = await sbSSR();
+
+    // Server-side admin verification
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+        redirect('/auth/sign-in');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    let role: string | null = session?.user?.app_metadata?.user_role ?? null;
+
+    if (!role && session?.access_token) {
+        try {
+            const payload = JSON.parse(Buffer.from(session.access_token.split('.')[1], 'base64').toString('utf-8')) as {
+                user_role?: string;
+                app_metadata?: { user_role?: string };
+            };
+            role = payload.user_role ?? payload.app_metadata?.user_role ?? null;
+        } catch {
+            role = null;
+        }
+    }
+
+    let isAdmin = role === 'admin';
+
+    if (!isAdmin) {
+        const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin');
+        isAdmin = !rpcError && Boolean(isAdminRpc);
+    }
+
+    if (!isAdmin) {
+        redirect('/dashboard?error=unauthorized');
+    }
 
     // Fetch statistics
     const [papersResult, questionsResult, attemptsResult] = await Promise.all([
@@ -144,20 +177,6 @@ export default async function AdminPage() {
                         </div>
                     </Link>
 
-                    <Link
-                        href="/admin/contexts/new"
-                        className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-yellow-500 hover:bg-yellow-50 transition-colors"
-                    >
-                        <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
-                            <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                        </div>
-                        <div>
-                            <p className="font-medium text-gray-900">Add Context/Passage</p>
-                            <p className="text-sm text-gray-500">Add a shared context for questions</p>
-                        </div>
-                    </Link>
                 </div>
             </div>
         </div>

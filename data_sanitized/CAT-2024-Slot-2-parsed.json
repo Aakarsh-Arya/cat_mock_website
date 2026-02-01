@@ -1,0 +1,372 @@
+{
+  "_SCHEMA_NOTE": "This file has been sanitized. Question text, options, answers, and passages have been replaced with placeholders.",
+  "_ORIGINAL_STRUCTURE": "{ schema_version: string, paper: object, question_sets: object, questions: object }",
+  "schema_version": "v3.0",
+  "paper": {
+    "paper_key": "CAT_2024_SLOT2",
+    "slug": "cat-2024-slot-2",
+    "title": "CAT 2024 Slot 2",
+    "year": 2024,
+    "duration_minutes": 120,
+    "total_questions": 68,
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "total_marks": 198,
+    "sections": [
+      "VARC",
+      "DILR",
+      "QA"
+    ]
+  },
+  "question_sets": [
+    {
+      "client_set_id": "VARC_PJ_01",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_OO_01",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 2,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_PJ_02",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 3,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_SUM_01",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 4,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_SUM_02",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_PJ_03",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 6,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_RC_01",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 7,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_SUM_03",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_OO_02",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 9,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_RC_02",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 10,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_RC_03",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 11,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_RC_04",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 12,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "DILR_01",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 13,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "DILR_02",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 14,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "DILR_03",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 15,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "DILR_04",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 16,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "notes": "Scatter Plot Interpretation",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "DILR_05",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 17,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_47",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 18,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_48",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 19,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_49",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 20,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_50",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 21,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_51",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 22,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_52",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 23,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_53",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 24,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_54",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 25,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_55",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 26,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_56",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 27,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_57",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 28,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_58",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 29,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_59",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 30,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_60",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 31,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_61",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 32,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_62",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 33,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_63",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 34,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_64",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 35,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_65",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 36,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_66",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 37,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_67",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 38,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_68",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 39,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>"
+    }
+  ],
+  "questions": [
+    {
+      "client_question_id": "VARC_PJ_01_Q1",
+      "question_number": 1,
+      "sequence_order": 1,
+      "question_type": "MCQ",
+      "question_text": "<QUESTION_TEXT_OMITTED>",
+      "correct_answer": "<ANSWER_OMITTED>",
+      "topic": "Verbal Ability",
+      "subtopic": "Paragraph Completion",
+      "difficulty": "medium",
+      "options": [
+        {
+          "id": "A",
+          "text": "<TEXT_OMITTED>"
+        },
+        {
+          "_NOTE": "... 3 more items omitted (total: 4) ..."
+        }
+      ],
+      "set_ref": "VARC_PJ_01",
+      "section": "VARC"
+    },
+    {
+      "_NOTE": "... 67 more items omitted (total: 68) ..."
+    }
+  ]
+}

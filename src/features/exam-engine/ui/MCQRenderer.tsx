@@ -36,6 +36,9 @@ interface OptionProps {
     isCorrect?: boolean;
     isIncorrect?: boolean;
     readOnly: boolean;
+    name: string;
+    inputId: string;
+    textId: string;
     onChange: (value: string) => void;
 }
 
@@ -57,6 +60,9 @@ function MCQOption({
     isCorrect,
     isIncorrect,
     readOnly,
+    name,
+    inputId,
+    textId,
     onChange,
 }: OptionProps) {
     // Determine styling based on state
@@ -88,69 +94,79 @@ function MCQOption({
     }
 
     return (
-        <button
-            type="button"
-            onClick={() => !readOnly && onChange(value)}
-            disabled={readOnly}
-            className={`
+        <div>
+            <input
+                id={inputId}
+                type="radio"
+                name={name}
+                value={value}
+                checked={isSelected}
+                onChange={() => !readOnly && onChange(value)}
+                disabled={readOnly}
+                aria-describedby={textId}
+                className="sr-only peer"
+            />
+            <label
+                htmlFor={inputId}
+                className={`
         w-full flex items-start gap-3 p-4 rounded-lg border-2 transition-all
         ${borderColor} ${bgColor}
         ${readOnly ? 'cursor-default' : 'cursor-pointer hover:border-blue-300 hover:bg-gray-50'}
+        peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-2
       `}
-            aria-pressed={isSelected}
-            aria-label={`Option ${label}: ${text}`}
-        >
-            {/* Option Label (A, B, C, D) */}
-            <span
-                className={`
+            >
+                {/* Option Label (A, B, C, D) */}
+                <span
+                    className={`
           flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center
           text-sm font-bold transition-colors
           ${labelBg} ${labelText}
         `}
-            >
-                {label}
-            </span>
+                >
+                    {label}
+                </span>
 
-            {/* Option Text */}
-            <span className={`flex-1 text-left ${textColor}`}>
-                <MathText text={text} />
-            </span>
+                {/* Option Text */}
+                <span id={textId} className={`flex-1 text-left ${textColor}`}>
+                    <MathText text={text} />
+                </span>
 
-            {/* Selected/Correct Indicator */}
-            {isSelected && !isCorrect && !isIncorrect && (
-                <span className="flex-shrink-0 text-blue-500">
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                            clipRule="evenodd"
-                        />
-                    </svg>
-                </span>
-            )}
-            {isCorrect && (
-                <span className="flex-shrink-0 text-green-500">
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                            fillRule="evenodd"
-                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                            clipRule="evenodd"
-                        />
-                    </svg>
-                </span>
-            )}
-            {isIncorrect && isSelected && (
-                <span className="flex-shrink-0 text-red-500">
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                            fillRule="evenodd"
-                            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                            clipRule="evenodd"
-                        />
-                    </svg>
-                </span>
-            )}
-        </button>
+                {/* Selected/Correct Indicator */}
+                {isSelected && !isCorrect && !isIncorrect && (
+                    <span className="flex-shrink-0 text-blue-500">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                                fillRule="evenodd"
+                                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                clipRule="evenodd"
+                            />
+                        </svg>
+                    </span>
+                )}
+                {isCorrect && (
+                    <span className="flex-shrink-0 text-green-500">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                            />
+                        </svg>
+                    </span>
+                )}
+                {isIncorrect && isSelected && (
+                    <span className="flex-shrink-0 text-red-500">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                                fillRule="evenodd"
+                                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                                clipRule="evenodd"
+                            />
+                        </svg>
+                    </span>
+                )}
+            </label>
+        </div>
     );
 }
 
@@ -166,18 +182,20 @@ export function MCQRenderer({
     correctAnswer,
 }: MCQRendererProps) {
     const response = useExamStore(selectResponse(question.id));
-    const setAnswer = useExamStore((s) => s.setAnswer);
+    // FIX: Use setLocalAnswer to store answer locally without changing status
+    // Status only changes when user clicks "Save and Next"
+    const setLocalAnswer = useExamStore((s) => s.setLocalAnswer);
 
     const selectedAnswer = response?.answer ?? null;
 
-    // Handle option selection
+    // Handle option selection - stores locally, does NOT turn palette green
     const handleChange = useCallback(
         (value: string) => {
             if (!readOnly) {
-                setAnswer(question.id, value);
+                setLocalAnswer(question.id, value);
             }
         },
-        [question.id, readOnly, setAnswer]
+        [question.id, readOnly, setLocalAnswer]
     );
 
     // Parse options from the question
@@ -185,18 +203,16 @@ export function MCQRenderer({
 
     return (
         <div className={`space-y-4 ${className}`}>
-            {/* Question Text */}
-            <div className="prose prose-lg max-w-none">
-                <MathText text={question.question_text} className="text-gray-800" />
-            </div>
-
-            {/* Options */}
-            <div className="space-y-3">
+            <fieldset className="space-y-3">
+                <legend className="sr-only">Multiple choice options</legend>
                 {options.map((optionText, index) => {
                     const label = OPTION_LABELS[index];
                     const isSelected = selectedAnswer === label;
                     const isCorrect = showCorrectAnswer && correctAnswer === label;
                     const isIncorrect = showCorrectAnswer && isSelected && correctAnswer !== label;
+                    const name = `mcq-${question.id}`;
+                    const inputId = `mcq-${question.id}-${label}`;
+                    const textId = `mcq-${question.id}-${label}-text`;
 
                     return (
                         <MCQOption
@@ -208,11 +224,14 @@ export function MCQRenderer({
                             isCorrect={isCorrect}
                             isIncorrect={isIncorrect}
                             readOnly={readOnly}
+                            name={name}
+                            inputId={inputId}
+                            textId={textId}
                             onChange={handleChange}
                         />
                     );
                 })}
-            </div>
+            </fieldset>
 
             {/* Marking Info */}
             <div className="flex items-center gap-4 text-sm text-gray-500 pt-2">
@@ -222,5 +241,3 @@ export function MCQRenderer({
         </div>
     );
 }
-
-export default MCQRenderer;

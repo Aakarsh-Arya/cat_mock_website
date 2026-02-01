@@ -53,6 +53,10 @@ DROP INDEX IF EXISTS idx_question_sets_paper_section;
 DROP INDEX IF EXISTS idx_questions_set_id;
 DROP INDEX IF EXISTS idx_question_sets_type;
 
+-- Drop dependent views BEFORE altering columns they depend on
+DROP VIEW IF EXISTS public.questions_exam CASCADE;
+DROP VIEW IF EXISTS public.question_sets_with_questions CASCADE;
+
 -- Remove columns from questions if they exist
 ALTER TABLE public.questions DROP COLUMN IF EXISTS set_id;
 ALTER TABLE public.questions DROP COLUMN IF EXISTS sequence_order;
@@ -184,31 +188,18 @@ ON public.question_sets(set_type);
 
 -- ============================================================================
 -- STEP 5: Create view for complete question sets with questions
+-- NOTE: This is a LEGACY view definition. The canonical hardened view is in
+-- docs/MIGRATION_RLS_VIEWS.sql (Phase C) which adds:
+--   - security_invoker = true
+--   - is_published = TRUE filter
+--   - published papers filter
+--   - excludes sensitive columns (correct_answer, solution_*)
+-- Run Phase C migration AFTER this one to overwrite with secure version.
 -- ============================================================================
-CREATE OR REPLACE VIEW public.question_sets_with_questions AS
-SELECT 
-    qs.*,
-    COALESCE(
-        json_agg(
-            json_build_object(
-                'id', q.id,
-                'question_text', q.question_text,
-                'question_type', q.question_type,
-                'options', q.options,
-                'positive_marks', q.positive_marks,
-                'negative_marks', q.negative_marks,
-                'sequence_order', q.sequence_order,
-                'difficulty', q.difficulty,
-                'topic', q.topic,
-                'is_active', q.is_active
-            ) ORDER BY q.sequence_order
-        ) FILTER (WHERE q.id IS NOT NULL),
-        '[]'::json
-    ) AS questions
-FROM public.question_sets qs
-LEFT JOIN public.questions q ON q.set_id = qs.id AND q.is_active = TRUE
-WHERE qs.is_active = TRUE
-GROUP BY qs.id;
+DROP VIEW IF EXISTS public.question_sets_with_questions CASCADE;
+
+-- Placeholder: Phase C will create the canonical secure view
+-- CREATE VIEW public.question_sets_with_questions ... (see MIGRATION_RLS_VIEWS.sql)
 
 -- ============================================================================
 -- STEP 6: RLS Policies for question_sets
@@ -216,6 +207,10 @@ GROUP BY qs.id;
 
 -- Enable RLS
 ALTER TABLE public.question_sets ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies to avoid conflicts
+DROP POLICY IF EXISTS "Anyone can read published question sets" ON public.question_sets;
+DROP POLICY IF EXISTS "Admins can manage question sets" ON public.question_sets;
 
 -- Public can read published sets from published papers
 CREATE POLICY "Anyone can read published question sets" ON public.question_sets
@@ -226,11 +221,11 @@ CREATE POLICY "Anyone can read published question sets" ON public.question_sets
         AND paper_id IN (SELECT id FROM public.papers WHERE published = TRUE)
     );
 
--- Admins can do everything (check admin email pattern - matches existing RLS approach)
+-- Admins can do everything
 CREATE POLICY "Admins can manage question sets" ON public.question_sets
     FOR ALL
     USING (
-        auth.uid() IN (SELECT id FROM public.users WHERE email LIKE '%@admin%')
+        public.is_admin()
     );
 
 -- ============================================================================

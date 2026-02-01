@@ -96,6 +96,9 @@ export function NavigationButtons({
     const goToQuestion = useExamStore((s) => s.goToQuestion);
     const clearAnswer = useExamStore((s) => s.clearAnswer);
     const toggleMarkForReview = useExamStore((s) => s.toggleMarkForReview);
+    const setResponseStatus = useExamStore((s) => s.setResponseStatus);
+    // FIX: Use saveAnswer to update status when saving
+    const saveAnswer = useExamStore((s) => s.saveAnswer);
     // NOTE: moveToNextSection removed - sections advance only via timer expiry (SOP requirement)
 
     // Get questions for current section
@@ -109,18 +112,21 @@ export function NavigationButtons({
 
     // Current response state
     const isMarked = response?.isMarkedForReview ?? false;
-    const hasAnswer = response?.answer !== null && response?.answer !== '';
+    const hasLocalAnswer = response?.answer !== null && response?.answer !== '';
 
-    // Handle Save & Next
+    // Handle Save & Next - FIX: Use saveAnswer to set status to 'answered'
     const handleSaveAndNext = useCallback(async () => {
-        // Save current answer if provided callback
-        if (onSave && response?.answer) {
-            await onSave(question.id, response.answer);
+        // Only save if there's an answer
+        if (hasLocalAnswer && response?.answer) {
+            // Update status to 'answered' in store
+            saveAnswer(question.id, response.answer);
+            // Persist to database
+            if (onSave) {
+                await onSave(question.id, response.answer);
+            }
         }
 
         if (isLastQuestion) {
-            // Last question in section - don't auto-advance to next section
-            // User must explicitly submit section or wait for timer
             return;
         }
 
@@ -135,22 +141,35 @@ export function NavigationButtons({
         currentQuestionIndex,
         currentSectionIndex,
         goToQuestion,
+        hasLocalAnswer,
         isLastQuestion,
         onNextQuestion,
         onSave,
         question.id,
         response?.answer,
+        saveAnswer,
         sectionQuestions,
     ]);
 
     // Handle Mark for Review & Next
+    // FIX: Correct logic for Mark & Next:
+    // 1) Has local answer → SAVE + MARK → answered_marked (purple with check)
+    // 2) No local answer → just MARK → marked (purple, no check)
     const handleMarkAndNext = useCallback(async () => {
-        // Toggle mark
-        toggleMarkForReview(question.id);
-
-        // Save if callback provided
-        if (onSave && response?.answer) {
-            await onSave(question.id, response.answer);
+        if (hasLocalAnswer && response?.answer) {
+            // Has answer - save it AND mark
+            toggleMarkForReview(question.id);
+            saveAnswer(question.id, response.answer);  // Sets status to answered_marked
+            if (onSave) {
+                await onSave(question.id, response.answer);
+            }
+        } else {
+            // No answer - just mark
+            toggleMarkForReview(question.id);
+            setResponseStatus(question.id, 'marked', true);
+            if (onSave) {
+                await onSave(question.id, null);
+            }
         }
 
         if (isLastQuestion) {
@@ -168,12 +187,15 @@ export function NavigationButtons({
         currentQuestionIndex,
         currentSectionIndex,
         goToQuestion,
+        hasLocalAnswer,
         isLastQuestion,
         onNextQuestion,
         onSave,
         question.id,
         response?.answer,
+        saveAnswer,
         sectionQuestions,
+        setResponseStatus,
         toggleMarkForReview,
     ]);
 
@@ -210,7 +232,7 @@ export function NavigationButtons({
                 <NavButton
                     variant="danger"
                     onClick={handleClear}
-                    disabled={!hasAnswer}
+                    disabled={!hasLocalAnswer}
                 >
                     Clear Response
                 </NavButton>
@@ -297,5 +319,3 @@ export function ExamSubmitButton({
         </div>
     );
 }
-
-export default NavigationButtons;

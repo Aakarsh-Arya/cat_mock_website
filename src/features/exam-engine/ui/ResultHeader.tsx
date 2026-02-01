@@ -166,5 +166,3 @@ export function ResultHeader({
         </div>
     );
 }
-
-export default ResultHeader;

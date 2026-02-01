@@ -6,33 +6,222 @@
 
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { EditableExamLayout } from '@/features/admin';
-import type { Paper, QuestionWithAnswer, QuestionContext } from '@/types/exam';
+import type { EditorNavigationState } from '@/features/admin/ui/EditableExamLayout';
+import type { Paper, QuestionWithAnswer, QuestionContext, QuestionSet, SectionName } from '@/types/exam';
 import {
     updateQuestion,
     createQuestion,
     updateContext,
     createContext,
+    deleteContext,
     updatePaper,
+    updateQuestionSet,
+    createQuestionSet,
 } from './actions';
 
 interface ExamEditorClientProps {
     paper: Paper;
     initialQuestions: QuestionWithAnswer[];
+    initialQuestionSets: QuestionSet[];
     initialContexts: QuestionContext[];
 }
+
+type QuestionOrderBySection = Record<SectionName, string[]>;
+
+const SECTIONS: SectionName[] = ['VARC', 'DILR', 'QA'];
+
+const createEmptyQuestionOrder = (): QuestionOrderBySection => ({
+    VARC: [],
+    DILR: [],
+    QA: [],
+});
+
+const parseSection = (value: string | null): SectionName | undefined => {
+    if (!value) return undefined;
+    return SECTIONS.includes(value as SectionName) ? (value as SectionName) : undefined;
+};
+
+const parseNavigation = (params: URLSearchParams): EditorNavigationState => {
+    const section = parseSection(params.get('section'));
+    const qid = params.get('qid') ?? undefined;
+    const setId = params.get('setId') ?? undefined;
+    const qParam = params.get('q');
+    const q = qParam ? Number(qParam) : undefined;
+    return {
+        section,
+        qid: qid || undefined,
+        setId: setId || undefined,
+        q: typeof q === 'number' && Number.isFinite(q) && q > 0 ? q : undefined,
+    };
+};
+
+const normalizeQuestions = (items: QuestionWithAnswer[]) => {
+    const questionsById: Record<string, QuestionWithAnswer> = {};
+    const questionOrderBySection: QuestionOrderBySection = createEmptyQuestionOrder();
+
+    items.forEach((q) => {
+        questionsById[q.id] = q;
+    });
+
+    SECTIONS.forEach((section) => {
+        questionOrderBySection[section] = items
+            .filter((q) => q.section === section)
+            .sort((a, b) => {
+                const aNum = a.question_number ?? 0;
+                const bNum = b.question_number ?? 0;
+                if (aNum !== bNum) return aNum - bNum;
+                const aSeq = a.sequence_order ?? 0;
+                const bSeq = b.sequence_order ?? 0;
+                if (aSeq !== bSeq) return aSeq - bSeq;
+                return a.id.localeCompare(b.id);
+            })
+            .map((q) => q.id);
+    });
+
+    return { questionsById, questionOrderBySection };
+};
+
+const normalizeById = <T extends { id: string }>(items: T[]) => {
+    return items.reduce<Record<string, T>>((acc, item) => {
+        acc[item.id] = item;
+        return acc;
+    }, {});
+};
+
+const sortQuestionIdsForSection = (
+    questionsById: Record<string, QuestionWithAnswer>,
+    section: SectionName
+) => {
+    return Object.values(questionsById)
+        .filter((q) => q.section === section)
+        .sort((a, b) => {
+            const aNum = a.question_number ?? 0;
+            const bNum = b.question_number ?? 0;
+            if (aNum !== bNum) return aNum - bNum;
+            const aSeq = a.sequence_order ?? 0;
+            const bSeq = b.sequence_order ?? 0;
+            if (aSeq !== bSeq) return aSeq - bSeq;
+            return a.id.localeCompare(b.id);
+        })
+        .map((q) => q.id);
+};
 
 export function ExamEditorClient({
     paper,
     initialQuestions,
+    initialQuestionSets,
     initialContexts,
 }: ExamEditorClientProps) {
-    const [questions, setQuestions] = useState<QuestionWithAnswer[]>(initialQuestions);
-    const [contexts, setContexts] = useState<QuestionContext[]>(initialContexts);
+    const router = useRouter();
+    const pathname = usePathname();
+    const [paperState, setPaperState] = useState<Paper>(paper);
+    const [{ questionsById, questionOrderBySection }, setQuestionState] = useState(() => normalizeQuestions(initialQuestions));
+    const [questionSetsById, setQuestionSetsById] = useState<Record<string, QuestionSet>>(() => normalizeById(initialQuestionSets));
+    const [contextsById, setContextsById] = useState<Record<string, QuestionContext>>(() => normalizeById(initialContexts));
     const [saveError, setSaveError] = useState<string | null>(null);
     const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
     const [retryAction, setRetryAction] = useState<(() => void) | null>(null);
+    const [externalNavigation, setExternalNavigation] = useState<EditorNavigationState | null>(null);
+
+    const STORAGE_KEY = `paper:${paper.id}:editorNav`;
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const resolveNavigation = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const fromUrl = parseNavigation(urlParams);
+            const hasUrl = Boolean(fromUrl.section || fromUrl.qid || fromUrl.setId || fromUrl.q);
+
+            if (hasUrl) {
+                setExternalNavigation(fromUrl);
+                return;
+            }
+
+            const storedRaw = window.localStorage.getItem(STORAGE_KEY);
+            if (storedRaw) {
+                try {
+                    const stored = JSON.parse(storedRaw) as EditorNavigationState;
+                    setExternalNavigation({
+                        section: parseSection(stored.section ?? null),
+                        qid: stored.qid ?? undefined,
+                        setId: stored.setId ?? undefined,
+                        q: typeof stored.q === 'number' && Number.isFinite(stored.q) && stored.q > 0 ? stored.q : undefined,
+                    });
+                    return;
+                } catch {
+                    window.localStorage.removeItem(STORAGE_KEY);
+                }
+            }
+
+            setExternalNavigation({ section: 'VARC', q: 1 });
+        };
+
+        resolveNavigation();
+
+        const handlePopState = () => resolveNavigation();
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [STORAGE_KEY]);
+
+    const questions = useMemo(() => {
+        return SECTIONS.flatMap((section) =>
+            (questionOrderBySection[section] || [])
+                .map((id) => questionsById[id])
+                .filter(Boolean)
+        );
+    }, [questionOrderBySection, questionsById]);
+
+    // Dev-only: Detect duplicate question IDs in assembled list
+    useEffect(() => {
+        if (process.env.NODE_ENV === 'production') return;
+
+        const seen = new Set<string>();
+        const duplicates = new Set<string>();
+        questions.forEach((q) => {
+            if (seen.has(q.id)) {
+                duplicates.add(q.id);
+            } else {
+                seen.add(q.id);
+            }
+        });
+
+        if (duplicates.size > 0) {
+            console.warn('[ExamEditor] Detected duplicate question ids in assembled question list', {
+                duplicateIds: Array.from(duplicates),
+                totalQuestions: questions.length,
+            });
+        }
+    }, [questions]);
+
+    const questionSets = useMemo(() => {
+        return Object.values(questionSetsById)
+            .sort((a, b) => {
+                if (a.section !== b.section) {
+                    return SECTIONS.indexOf(a.section) - SECTIONS.indexOf(b.section);
+                }
+                const order = (a.display_order ?? 0) - (b.display_order ?? 0);
+                if (order !== 0) return order;
+                return a.id.localeCompare(b.id);
+            });
+    }, [questionSetsById]);
+
+    const contexts = useMemo(() => {
+        return Object.values(contextsById)
+            .sort((a, b) => {
+                if (a.section !== b.section) {
+                    return SECTIONS.indexOf(a.section) - SECTIONS.indexOf(b.section);
+                }
+                const order = (a.display_order ?? 0) - (b.display_order ?? 0);
+                if (order !== 0) return order;
+                return a.id.localeCompare(b.id);
+            });
+    }, [contextsById]);
 
     // Clear notifications after delay
     const showNotification = useCallback((type: 'success' | 'error', message: string, retry?: () => void) => {
@@ -51,11 +240,42 @@ export function ExamEditorClient({
 
     // Save question to database using server action
     const handleSaveQuestion = useCallback(async (questionData: Partial<QuestionWithAnswer>) => {
+        if (!questionData.id) {
+            const existingQuestion = Object.values(questionsById).find((q) => {
+                if (!questionData.section || questionData.question_number === undefined) {
+                    return false;
+                }
+
+                if (q.section !== questionData.section) {
+                    return false;
+                }
+
+                if (q.question_number !== questionData.question_number) {
+                    return false;
+                }
+
+                if (questionData.set_id && q.set_id !== questionData.set_id) {
+                    return false;
+                }
+
+                return true;
+            });
+
+            if (existingQuestion && process.env.NODE_ENV !== 'production') {
+                console.warn('[ExamEditor] Attempted to create when update expected (question id missing).', {
+                    attemptedPayload: questionData,
+                    existingQuestionId: existingQuestion.id,
+                });
+                showNotification('error', 'Refused to create: missing question id for an existing question.');
+                return;
+            }
+        }
+
         const nowIso = new Date().toISOString();
 
         try {
             if (questionData.id) {
-                const previousQuestion = questions.find(q => q.id === questionData.id) ?? null;
+                const previousQuestion = questionsById[questionData.id] ?? null;
                 if (previousQuestion) {
                     const optimisticQuestion = {
                         ...previousQuestion,
@@ -63,9 +283,12 @@ export function ExamEditorClient({
                         updated_at: nowIso,
                     } as QuestionWithAnswer;
 
-                    setQuestions(prev =>
-                        prev.map(q => q.id === questionData.id ? optimisticQuestion : q)
-                    );
+                    setQuestionState((prev) => {
+                        const nextById = { ...prev.questionsById, [optimisticQuestion.id]: optimisticQuestion };
+                        const nextOrder = { ...prev.questionOrderBySection };
+                        nextOrder[optimisticQuestion.section] = sortQuestionIdsForSection(nextById, optimisticQuestion.section);
+                        return { questionsById: nextById, questionOrderBySection: nextOrder };
+                    });
                 }
 
                 // Update existing question via server action
@@ -74,24 +297,35 @@ export function ExamEditorClient({
                 if (!result.success || !result.data) {
                     console.error('Failed to update question:', result.error);
                     if (previousQuestion) {
-                        setQuestions(prev => prev.map(q => q.id === previousQuestion.id ? previousQuestion : q));
+                        setQuestionState((prev) => {
+                            const nextById = { ...prev.questionsById, [previousQuestion.id]: previousQuestion };
+                            const nextOrder = { ...prev.questionOrderBySection };
+                            nextOrder[previousQuestion.section] = sortQuestionIdsForSection(nextById, previousQuestion.section);
+                            return { questionsById: nextById, questionOrderBySection: nextOrder };
+                        });
                     }
                     showNotification('error', result.error || 'Failed to save', () => handleSaveQuestion(questionData));
                     return;
                 }
 
                 // Update local state
-                setQuestions(prev =>
-                    prev.map(q => q.id === result.data!.id ? result.data! : q)
-                );
+                setQuestionState((prev) => {
+                    const updated = result.data!;
+                    const nextById = { ...prev.questionsById, [updated.id]: updated };
+                    const nextOrder = { ...prev.questionOrderBySection };
+                    nextOrder[updated.section] = sortQuestionIdsForSection(nextById, updated.section);
+                    return { questionsById: nextById, questionOrderBySection: nextOrder };
+                });
                 showNotification('success', 'Question updated successfully!');
             } else {
                 const tempId = `temp-${Date.now()}`;
                 const optimisticQuestion: QuestionWithAnswer = {
                     id: tempId,
-                    paper_id: questionData.paper_id ?? paper.id,
+                    paper_id: questionData.paper_id ?? paperState.id,
                     section: questionData.section ?? 'VARC',
                     question_number: questionData.question_number ?? 1,
+                    set_id: questionData.set_id ?? null,
+                    sequence_order: questionData.sequence_order ?? null,
                     question_text: questionData.question_text ?? '',
                     question_type: questionData.question_type ?? 'MCQ',
                     options: questionData.options ?? null,
@@ -109,23 +343,43 @@ export function ExamEditorClient({
                     updated_at: nowIso,
                 };
 
-                setQuestions(prev => [...prev, optimisticQuestion]);
+                setQuestionState((prev) => {
+                    const nextById = { ...prev.questionsById, [tempId]: optimisticQuestion };
+                    const nextOrder = { ...prev.questionOrderBySection };
+                    nextOrder[optimisticQuestion.section] = sortQuestionIdsForSection(nextById, optimisticQuestion.section);
+                    return { questionsById: nextById, questionOrderBySection: nextOrder };
+                });
 
                 // Create new question via server action
                 const result = await createQuestion({
                     ...questionData,
-                    paper_id: questionData.paper_id ?? paper.id,
+                    paper_id: questionData.paper_id ?? paperState.id,
                 });
 
                 if (!result.success || !result.data) {
                     console.error('Failed to create question:', result.error);
-                    setQuestions(prev => prev.filter(q => q.id !== tempId));
+                    setQuestionState((prev) => {
+                        const { [tempId]: _removed, ...remaining } = prev.questionsById;
+                        const nextOrder = { ...prev.questionOrderBySection };
+                        Object.keys(nextOrder).forEach((sectionKey) => {
+                            const section = sectionKey as SectionName;
+                            nextOrder[section] = sortQuestionIdsForSection(remaining, section);
+                        });
+                        return { questionsById: remaining, questionOrderBySection: nextOrder };
+                    });
                     showNotification('error', result.error || 'Failed to create', () => handleSaveQuestion(questionData));
                     return;
                 }
 
                 // Add to local state
-                setQuestions(prev => prev.map(q => q.id === tempId ? result.data! : q));
+                setQuestionState((prev) => {
+                    const created = result.data!;
+                    const { [tempId]: _removed, ...remaining } = prev.questionsById;
+                    const nextById = { ...remaining, [created.id]: created };
+                    const nextOrder = { ...prev.questionOrderBySection };
+                    nextOrder[created.section] = sortQuestionIdsForSection(nextById, created.section);
+                    return { questionsById: nextById, questionOrderBySection: nextOrder };
+                });
                 showNotification('success', 'Question created successfully!');
             }
         } catch (err) {
@@ -133,7 +387,7 @@ export function ExamEditorClient({
             const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
             showNotification('error', message, () => handleSaveQuestion(questionData));
         }
-    }, [paper.id, questions, showNotification]);
+    }, [paperState.id, questionsById, showNotification]);
 
     // Save context to database using server action
     const handleSaveContext = useCallback(async (contextData: Partial<QuestionContext>) => {
@@ -141,7 +395,7 @@ export function ExamEditorClient({
 
         try {
             if (contextData.id) {
-                const previousContext = contexts.find(c => c.id === contextData.id) ?? null;
+                const previousContext = contextsById[contextData.id] ?? null;
                 if (previousContext) {
                     const optimisticContext = {
                         ...previousContext,
@@ -149,9 +403,7 @@ export function ExamEditorClient({
                         updated_at: nowIso,
                     } as QuestionContext;
 
-                    setContexts(prev =>
-                        prev.map(c => c.id === contextData.id ? optimisticContext : c)
-                    );
+                    setContextsById((prev) => ({ ...prev, [optimisticContext.id]: optimisticContext }));
                 }
 
                 // Update existing context via server action
@@ -160,22 +412,20 @@ export function ExamEditorClient({
                 if (!result.success || !result.data) {
                     console.error('Failed to update context:', result.error);
                     if (previousContext) {
-                        setContexts(prev => prev.map(c => c.id === previousContext.id ? previousContext : c));
+                        setContextsById((prev) => ({ ...prev, [previousContext.id]: previousContext }));
                     }
                     showNotification('error', result.error || 'Failed to save context', () => handleSaveContext(contextData));
                     return;
                 }
 
-                setContexts(prev =>
-                    prev.map(c => c.id === result.data!.id ? result.data! : c)
-                );
+                setContextsById((prev) => ({ ...prev, [result.data!.id]: result.data! }));
                 showNotification('success', 'Context updated successfully!');
             } else {
                 const tempId = `temp-${Date.now()}`;
-                const displayOrder = contexts.filter(c => c.section === contextData.section).length;
+                const displayOrder = Object.values(contextsById).filter(c => c.section === contextData.section).length;
                 const optimisticContext: QuestionContext = {
                     id: tempId,
-                    paper_id: contextData.paper_id ?? paper.id,
+                    paper_id: contextData.paper_id ?? paperState.id,
                     section: contextData.section ?? 'VARC',
                     title: contextData.title ?? undefined,
                     content: contextData.content ?? '',
@@ -187,22 +437,28 @@ export function ExamEditorClient({
                     updated_at: nowIso,
                 };
 
-                setContexts(prev => [...prev, optimisticContext]);
+                setContextsById((prev) => ({ ...prev, [tempId]: optimisticContext }));
 
                 // Create new context via server action
                 const result = await createContext(
-                    { ...contextData, paper_id: contextData.paper_id ?? paper.id },
+                    { ...contextData, paper_id: contextData.paper_id ?? paperState.id },
                     displayOrder
                 );
 
                 if (!result.success || !result.data) {
                     console.error('Failed to create context:', result.error);
-                    setContexts(prev => prev.filter(c => c.id !== tempId));
+                    setContextsById((prev) => {
+                        const { [tempId]: _removed, ...remaining } = prev;
+                        return remaining;
+                    });
                     showNotification('error', result.error || 'Failed to create context', () => handleSaveContext(contextData));
                     return;
                 }
 
-                setContexts(prev => prev.map(c => c.id === tempId ? result.data! : c));
+                setContextsById((prev) => {
+                    const { [tempId]: _removed, ...remaining } = prev;
+                    return { ...remaining, [result.data!.id]: result.data! };
+                });
                 showNotification('success', 'Context created successfully!');
             }
         } catch (err) {
@@ -210,12 +466,82 @@ export function ExamEditorClient({
             const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
             showNotification('error', message, () => handleSaveContext(contextData));
         }
-    }, [contexts, paper.id, showNotification]);
+    }, [contextsById, paperState.id, showNotification]);
+
+    const handleSaveQuestionSet = useCallback(async (setData: Partial<QuestionSet>) => {
+        try {
+            if (!setData.id) {
+                showNotification('error', 'Missing question set id.');
+                return;
+            }
+
+            const previousSet = questionSetsById[setData.id] ?? null;
+            if (previousSet) {
+                const optimisticSet = {
+                    ...previousSet,
+                    ...setData,
+                    updated_at: new Date().toISOString(),
+                } as QuestionSet;
+                setQuestionSetsById((prev) => ({ ...prev, [optimisticSet.id]: optimisticSet }));
+            }
+
+            const result = await updateQuestionSet(setData.id, setData);
+
+            if (!result.success || !result.data) {
+                if (previousSet) {
+                    setQuestionSetsById((prev) => ({ ...prev, [previousSet.id]: previousSet }));
+                }
+                showNotification('error', result.error || 'Failed to update question set');
+                return;
+            }
+
+            setQuestionSetsById((prev) => ({ ...prev, [result.data!.id]: result.data! }));
+            showNotification('success', 'Question set updated successfully!');
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            showNotification('error', message);
+        }
+    }, [questionSetsById, showNotification]);
+
+    const handleCreateQuestionSet = useCallback(async (setData: Partial<QuestionSet>) => {
+        try {
+            const result = await createQuestionSet(setData);
+            if (!result.success || !result.data) {
+                showNotification('error', result.error || 'Failed to create question set');
+                return null;
+            }
+            setQuestionSetsById((prev) => ({ ...prev, [result.data!.id]: result.data! }));
+            showNotification('success', 'Question set created successfully!');
+            return result.data;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            showNotification('error', message);
+            return null;
+        }
+    }, [showNotification]);
+
+    const handleDeleteContext = useCallback(async (contextId: string) => {
+        try {
+            const result = await deleteContext(contextId);
+            if (!result.success) {
+                showNotification('error', result.error || 'Failed to delete context');
+                return;
+            }
+            setContextsById((prev) => {
+                const { [contextId]: _removed, ...remaining } = prev;
+                return remaining;
+            });
+            showNotification('success', 'Context deleted successfully!');
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            showNotification('error', message);
+        }
+    }, [showNotification]);
 
     // Update paper metadata using server action
     const handleUpdatePaper = useCallback(async (paperData: Partial<Paper>) => {
         try {
-            const result = await updatePaper(paper.id, paperData);
+            const result = await updatePaper(paperState.id, paperData);
 
             if (!result.success) {
                 console.error('Failed to update paper:', result.error);
@@ -229,7 +555,73 @@ export function ExamEditorClient({
             const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
             showNotification('error', message, () => handleUpdatePaper(paperData));
         }
-    }, [paper.id, showNotification]);
+    }, [paperState.id, showNotification]);
+
+    const handleUpdatePaperTitle = useCallback(async (title: string) => {
+        const trimmed = title.trim();
+        try {
+            const result = await updatePaper(paperState.id, { title: trimmed });
+
+            if (!result.success) {
+                console.error('Failed to update paper title:', result.error);
+                showNotification('error', result.error || 'Failed to update title', () => handleUpdatePaperTitle(title));
+                return { success: false, error: result.error || 'Failed to update title' };
+            }
+
+            setPaperState(prev => ({ ...prev, title: trimmed }));
+            showNotification('success', 'Paper title updated successfully!');
+            return { success: true };
+        } catch (err) {
+            console.error('Unexpected error updating paper title:', err);
+            const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+            showNotification('error', message, () => handleUpdatePaperTitle(title));
+            return { success: false, error: message };
+        }
+    }, [paperState.id, showNotification]);
+
+    const handleNavigate = useCallback((navigation: { section: SectionName; qid?: string | null; setId?: string | null; q: number }) => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const nextQ = String(navigation.q);
+        const nextQid = navigation.qid ?? '';
+        const nextSetId = navigation.setId ?? '';
+
+        const isSame =
+            params.get('section') === navigation.section &&
+            (params.get('qid') ?? '') === nextQid &&
+            (params.get('setId') ?? '') === nextSetId &&
+            (params.get('q') ?? '') === nextQ;
+
+        params.set('section', navigation.section);
+        if (navigation.qid) {
+            params.set('qid', navigation.qid);
+        } else {
+            params.delete('qid');
+        }
+        if (navigation.setId) {
+            params.set('setId', navigation.setId);
+        } else {
+            params.delete('setId');
+        }
+        params.set('q', nextQ);
+
+        window.localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+                section: navigation.section,
+                qid: navigation.qid ?? undefined,
+                setId: navigation.setId ?? undefined,
+                q: navigation.q,
+            })
+        );
+
+        if (!isSame) {
+            router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+        }
+    }, [pathname, router, STORAGE_KEY]);
 
     return (
         <>
@@ -264,11 +656,18 @@ export function ExamEditorClient({
                 </div>
             )}
             <EditableExamLayout
-                paper={paper}
+                paper={paperState}
                 questions={questions}
+                questionSets={questionSets}
                 contexts={contexts}
                 onSaveQuestion={handleSaveQuestion}
+                onSaveQuestionSet={handleSaveQuestionSet}
+                onCreateQuestionSet={handleCreateQuestionSet}
                 onSaveContext={handleSaveContext}
+                onDeleteContext={handleDeleteContext}
+                onUpdatePaperTitle={handleUpdatePaperTitle}
+                initialNavigation={externalNavigation}
+                onNavigate={handleNavigate}
             />
         </>
     );

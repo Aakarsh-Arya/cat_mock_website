@@ -10,6 +10,7 @@ import { useCallback, useMemo } from 'react';
 import { useExamStore, selectCurrentSection } from '@/features/exam-engine';
 import type { Question, QuestionStatus } from '@/types/exam';
 import { getQuestionsForSection } from '@/types/exam';
+import { PaletteShell } from '@/features/shared/ui/PaletteShell';
 
 // =============================================================================
 // TYPES
@@ -18,6 +19,10 @@ import { getQuestionsForSection } from '@/types/exam';
 interface QuestionPaletteProps {
     /** All questions for the current paper */
     questions: Question[];
+    /** Candidate display name */
+    candidateName?: string;
+    /** Candidate photo URL */
+    candidatePhotoUrl?: string;
     /** Optional CSS class name */
     className?: string;
     /** Callback when a question is clicked */
@@ -29,52 +34,76 @@ interface QuestionButtonProps {
     status: QuestionStatus;
     isCurrent: boolean;
     onClick: () => void;
+    disabled?: boolean;
+    isLocked?: boolean;
 }
 
 // =============================================================================
 // STATUS COLORS (CAT exam standard)
 // =============================================================================
 
+// TCS iON Style "Irregular Hexagons" (Pentagons)
+// Answered (Green): Pointed Top, Flat Bottom, Vertical Sides (Side parallel to X-axis at bottom)
+const HEXAGON_UP = 'polygon(50% 0%, 100% 35%, 100% 100%, 0% 100%, 0% 35%)';
+
+// Not Answered (Red): Flat Top, Vertical Sides, Pointed Bottom (Side parallel to X-axis at top)
+const HEXAGON_DOWN = 'polygon(0% 0%, 100% 0%, 100% 65%, 50% 100%, 0% 65%)';
+
 /**
  * Get button styles based on question status
- * Colors match standard CAT exam palette
+ * Colors + shapes match required CAT palette spec
+ * 
+ * PHASE 2 FIX: 5 distinct status categories:
+ * 1. Answered (green hexagon-up)
+ * 2. Not Answered/Visited (red hexagon-down)
+ * 3. Not Visited (gray square)
+ * 4. Marked for Review (purple circle - no answer)
+ * 5. Attempted & Marked (purple circle with green checkmark - answered_marked)
  */
 function getStatusStyles(status: QuestionStatus, isCurrent: boolean) {
-    const baseStyles = 'w-10 h-10 rounded-md flex items-center justify-center text-sm font-semibold transition-all border';
-    const currentRing = isCurrent ? 'ring-2 ring-offset-1 ring-[#1565c0]' : '';
+    const baseStyles =
+        'w-10 h-10 flex items-center justify-center text-sm font-semibold transition-all border ' +
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]';
+    const currentRing = isCurrent ? 'ring-4 ring-offset-1 ring-[#D35400]' : '';
 
-    // TCS iON-inspired palette
     switch (status) {
         case 'answered':
             return {
                 className: `${baseStyles} ${currentRing} bg-[#4caf50] text-white hover:bg-[#43a047] border-[#388e3c]`,
                 label: 'Answered',
-                icon: '✓',
+                shapeClass: 'rounded-none',
+                clipPath: HEXAGON_UP,
             };
         case 'answered_marked':
+            // PHASE 2 FIX: Distinct styling for "Attempted & Marked"
+            // Purple circle with green checkmark badge to show both states
             return {
-                className: `${baseStyles} ${currentRing} bg-[#5c6bc0] text-white hover:bg-[#4652a3] border-[#3949ab]`,
-                label: 'Answered & Marked for Review',
-                icon: '✓?',
+                className: `${baseStyles} ${currentRing} bg-[#7e57c2] text-white hover:bg-[#6a46ae] border-[#5e35b1]`,
+                label: 'Attempted & Marked for Review',
+                shapeClass: 'rounded-full',
+                clipPath: undefined,
             };
         case 'marked':
             return {
                 className: `${baseStyles} ${currentRing} bg-[#7e57c2] text-white hover:bg-[#6a46ae] border-[#5e35b1]`,
-                label: 'Marked for Review',
-                icon: '?',
+                label: 'Marked for Review (Not Answered)',
+                shapeClass: 'rounded-full',
+                clipPath: undefined,
             };
         case 'visited':
             return {
                 className: `${baseStyles} ${currentRing} bg-[#e53935] text-white hover:bg-[#d32f2f] border-[#c62828]`,
                 label: 'Not Answered',
-                icon: '',
+                shapeClass: 'rounded-none',
+                clipPath: HEXAGON_DOWN,
             };
         case 'not_visited':
         default:
             return {
                 className: `${baseStyles} ${currentRing} bg-[#eceff1] text-[#37474f] hover:bg-[#e0e6e9] border-[#cfd8dc]`,
                 label: 'Not Visited',
-                icon: '',
+                shapeClass: 'rounded-none',
+                clipPath: undefined,
             };
     }
 }
@@ -83,48 +112,50 @@ function getStatusStyles(status: QuestionStatus, isCurrent: boolean) {
 // QUESTION BUTTON
 // =============================================================================
 
-function QuestionButton({ index, status, isCurrent, onClick }: QuestionButtonProps) {
+function QuestionButton({ index, status, isCurrent, onClick, disabled = false, isLocked = false }: QuestionButtonProps) {
     const styles = getStatusStyles(status, isCurrent);
+    const isMarkedForReview = status === 'answered_marked' || status === 'marked';
+    const isAttemptedAndMarked = status === 'answered_marked';
+    const statusLabel =
+        status === 'answered' || status === 'answered_marked'
+            ? 'Answered'
+            : status === 'visited'
+                ? 'Not Answered'
+                : status === 'marked'
+                    ? 'Not Answered'
+                    : 'Not Visited';
+    const markedLabel = isMarkedForReview ? ', Marked for review' : '';
+    const lockedLabel = isLocked ? ', Locked' : '';
+    const ariaLabel = `Question ${index + 1}, ${statusLabel}${markedLabel}${isCurrent ? ', current' : ''}${lockedLabel}`;
 
     return (
         <button
             type="button"
             onClick={onClick}
-            className={styles.className}
+            className={`${styles.className} ${styles.shapeClass} relative ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+            style={styles.clipPath ? { clipPath: styles.clipPath } : undefined}
             title={`Question ${index + 1}: ${styles.label}`}
-            aria-label={`Go to question ${index + 1}, status: ${styles.label}`}
+            aria-label={ariaLabel}
             aria-current={isCurrent ? 'true' : undefined}
+            aria-disabled={disabled ? 'true' : undefined}
+            disabled={disabled}
         >
             {index + 1}
+            {isAttemptedAndMarked && (
+                <span className="absolute -bottom-1 -right-1 w-3 h-3 bg-[#2E7D32] rounded-full border border-white flex items-center justify-center">
+                    <svg className="w-2 h-2 text-white" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                        />
+                    </svg>
+                </span>
+            )}
+            {isLocked && (
+                <span className="absolute -top-1 -right-1 rounded bg-gray-800 text-white text-[9px] px-1 py-0.5">Locked</span>
+            )}
         </button>
-    );
-}
-
-// =============================================================================
-// LEGEND
-// =============================================================================
-
-function PaletteLegend() {
-    const legends = [
-        { status: 'answered' as const, label: 'Answered', color: 'bg-[#4caf50]' },
-        { status: 'visited' as const, label: 'Not Answered', color: 'bg-[#e53935]' },
-        { status: 'not_visited' as const, label: 'Not Visited', color: 'bg-[#eceff1] border border-[#cfd8dc]' },
-        { status: 'marked' as const, label: 'Marked for Review', color: 'bg-[#7e57c2]' },
-        { status: 'answered_marked' as const, label: 'Answered & Marked', color: 'bg-[#5c6bc0]' },
-    ];
-
-    return (
-        <div className="mt-4 pt-4 border-t border-gray-200">
-            <h4 className="text-xs font-medium text-gray-500 uppercase mb-2">Legend</h4>
-            <div className="grid grid-cols-1 gap-1.5 text-xs">
-                {legends.map(({ label, color }) => (
-                    <div key={label} className="flex items-center gap-2">
-                        <div className={`w-4 h-4 rounded ${color}`} />
-                        <span className="text-gray-600">{label}</span>
-                    </div>
-                ))}
-            </div>
-        </div>
     );
 }
 
@@ -144,23 +175,23 @@ function SectionCounts({ questions }: SectionCountsProps) {
             answered: 0,
             notAnswered: 0,
             notVisited: 0,
-            markedForReview: 0,
+            marked: 0,           // Marked but NOT answered
+            answeredMarked: 0,   // PHASE 2 FIX: Separate count for answered & marked
         };
 
         questions.forEach((q) => {
             const response = responses[q.id];
             if (!response || response.status === 'not_visited') {
                 result.notVisited++;
-            } else if (response.status === 'answered' || response.status === 'answered_marked') {
+            } else if (response.status === 'answered') {
                 result.answered++;
-                if (response.status === 'answered_marked') {
-                    result.markedForReview++;
-                }
+            } else if (response.status === 'answered_marked') {
+                // PHASE 2 FIX: Count answered_marked separately
+                result.answeredMarked++;
             } else if (response.status === 'visited') {
                 result.notAnswered++;
             } else if (response.status === 'marked') {
-                result.markedForReview++;
-                result.notAnswered++;
+                result.marked++;
             }
         });
 
@@ -182,8 +213,37 @@ function SectionCounts({ questions }: SectionCountsProps) {
                 <span className="text-gray-600">{counts.notVisited} Not Visited</span>
             </div>
             <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-[#7e57c2]" />
-                <span className="text-gray-600">{counts.markedForReview} Marked</span>
+                <span className="w-3 h-3 rounded-full bg-[#7e57c2]" />
+                <span className="text-gray-600">{counts.marked} Marked</span>
+            </div>
+            {/* PHASE 2 FIX: Show Attempted & Marked count */}
+            <div className="flex items-center gap-2 col-span-2">
+                <span className="w-3 h-3 rounded-full bg-[#7e57c2] relative">
+                    <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-[#4caf50] rounded-full" />
+                </span>
+                <span className="text-gray-600">{counts.answeredMarked} Attempted & Marked</span>
+            </div>
+        </div>
+    );
+}
+
+// =============================================================================
+// CANDIDATE PROFILE
+// =============================================================================
+
+function CandidateProfile({ name, photoUrl }: { name: string; photoUrl?: string }) {
+    return (
+        <div className="flex items-center gap-3 p-4 border-b border-gray-200">
+            <div className="w-12 h-12 rounded-full bg-gray-200 overflow-hidden flex items-center justify-center">
+                {photoUrl ? (
+                    <img src={photoUrl} alt="Candidate" className="w-full h-full object-cover" />
+                ) : (
+                    <span className="text-xs text-gray-500">Photo</span>
+                )}
+            </div>
+            <div>
+                <div className="text-sm font-semibold text-gray-800">{name}</div>
+                <div className="text-xs text-gray-500">Candidate</div>
             </div>
         </div>
     );
@@ -195,6 +255,8 @@ function SectionCounts({ questions }: SectionCountsProps) {
 
 export function QuestionPalette({
     questions,
+    candidateName = 'Candidate',
+    candidatePhotoUrl,
     className = '',
     onQuestionClick
 }: QuestionPaletteProps) {
@@ -211,14 +273,19 @@ export function QuestionPalette({
 
     // Handle question click
     const handleQuestionClick = useCallback((question: Question, index: number) => {
+        if (question.section !== currentSection) {
+            return;
+        }
         goToQuestion(question.id, currentSectionIndex, index);
         onQuestionClick?.(question.id, index);
-    }, [goToQuestion, currentSectionIndex, onQuestionClick]);
+    }, [goToQuestion, currentSectionIndex, currentSection, onQuestionClick]);
 
     return (
-        <div className={`bg-white rounded-lg shadow-sm border border-gray-200 p-4 ${className}`}>
+        <PaletteShell className={className}>
+            <CandidateProfile name={candidateName} photoUrl={candidatePhotoUrl} />
+
             {/* Section Header */}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 mt-4">
                 <h3 className="text-lg font-semibold text-gray-800">
                     {currentSection}
                 </h3>
@@ -236,6 +303,7 @@ export function QuestionPalette({
                     const response = responses[question.id];
                     const status: QuestionStatus = response?.status ?? 'not_visited';
                     const isCurrent = index === currentQuestionIndex;
+                    const isLocked = question.section !== currentSection;
 
                     return (
                         <QuestionButton
@@ -243,16 +311,14 @@ export function QuestionPalette({
                             index={index}
                             status={status}
                             isCurrent={isCurrent}
+                            disabled={isLocked}
+                            isLocked={isLocked}
                             onClick={() => handleQuestionClick(question, index)}
                         />
                     );
                 })}
             </div>
 
-            {/* Legend */}
-            <PaletteLegend />
-        </div>
+        </PaletteShell>
     );
 }
-
-export default QuestionPalette;

@@ -91,9 +91,11 @@ export default async function DashboardPage({
         : 0;
 
     const formatTime = (seconds: number | null) => {
-        if (!seconds) return '—';
+        if (!seconds && seconds !== 0) return '—';
         const mins = Math.floor(seconds / 60);
-        return `${mins}m`;
+        const secs = Math.floor(seconds % 60);
+        const paddedSecs = secs.toString().padStart(2, '0');
+        return `${mins}m ${paddedSecs}s`;
     };
 
     const getStatusColor = (status: string) => {
@@ -240,7 +242,10 @@ export default async function DashboardPage({
                                 <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Score</th>
                                 <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Accuracy</th>
                                 <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Percentile</th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Time</th>
+                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>
+                                    <div title="Duration (not submission timestamp)">Time Taken</div>
+                                    <div style={{ fontSize: 11, color: '#777', marginTop: 2 }}>Duration</div>
+                                </th>
                                 <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Date</th>
                                 <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Action</th>
                             </tr>

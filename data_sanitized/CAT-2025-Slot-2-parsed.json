@@ -1,0 +1,167 @@
+{
+  "_SCHEMA_NOTE": "This file has been sanitized. Question text, options, answers, and passages have been replaced with placeholders.",
+  "_ORIGINAL_STRUCTURE": "{ schema_version: string, paper: object, question_sets: object, questions: object }",
+  "schema_version": "v3.0",
+  "paper": {
+    "paper_key": "CAT_2025_SLOT2_CRACKU",
+    "slug": "cat-2025-slot-2",
+    "title": "CAT 2025 Slot 2 Question Paper",
+    "year": 2025,
+    "duration_minutes": 120,
+    "total_questions": 68,
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "total_marks": 204,
+    "sections": [
+      "VARC",
+      "DILR",
+      "QA"
+    ]
+  },
+  "question_sets": [
+    {
+      "client_set_id": "VARC_ATOMIC_01",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_RC_01",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 2,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_ATOMIC_02",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 3,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_RC_02",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 4,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_ATOMIC_03",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_RC_03",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 6,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_RC_04",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 7,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_ATOMIC_04",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "LRDI_SET_01",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 1,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_02",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 2,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_03",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 3,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_04",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 4,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_05",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 5,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_ATOMIC_01",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus"
+    }
+  ],
+  "questions": [
+    {
+      "client_question_id": "VARC_Q01",
+      "question_number": 1,
+      "sequence_order": 1,
+      "question_type": "MCQ",
+      "question_text": "<QUESTION_TEXT_OMITTED>",
+      "correct_answer": "<ANSWER_OMITTED>",
+      "topic": "Verbal Ability",
+      "subtopic": "Paragraph Completion",
+      "difficulty": "hard",
+      "solution_text": "<SOLUTION_TEXT_OMITTED>",
+      "options": [
+        {
+          "id": "A",
+          "text": "<TEXT_OMITTED>"
+        },
+        {
+          "_NOTE": "... 3 more items omitted (total: 4) ..."
+        }
+      ],
+      "set_ref": "VARC_ATOMIC_01",
+      "section": "VARC"
+    },
+    {
+      "_NOTE": "... 67 more items omitted (total: 68) ..."
+    }
+  ]
+}

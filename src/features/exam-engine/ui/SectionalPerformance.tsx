@@ -165,5 +165,3 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
         </div>
     );
 }
-
-export default SectionalPerformance;

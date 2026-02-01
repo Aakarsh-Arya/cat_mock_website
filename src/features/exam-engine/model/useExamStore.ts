@@ -3,11 +3,15 @@
  * @description Global state management for the CAT exam engine with localStorage persistence
  * @blueprint Milestone 4 SOP-SSOT - Phase 1.2
  * @architecture Uses Zustand with persist middleware for offline resilience
+ *
+ * PHASE 1 FIX: Attempt-scoped persistence + proper resume position
+ * PHASE 2 FIX: Consolidated marking logic with proper status transitions
  */
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { logger } from '@/lib/logger';
+import { examDebug, cleanupOrphanedExamState } from '@/lib/examDebug';
 import type {
     ExamStore,
     ExamData,
@@ -20,9 +24,28 @@ import type {
 import {
     SECTION_ORDER,
     getSectionByIndex,
-    calculateQuestionStatus,
     getSectionDurationSecondsMap,
+    calculateQuestionStatus,
 } from '@/types/exam';
+
+// =============================================================================
+// SAFE STORAGE (SSR GUARD)
+// =============================================================================
+
+const noopStorage: Storage = {
+    getItem: () => null,
+    setItem: () => {
+        /* noop */
+    },
+    removeItem: () => {
+        /* noop */
+    },
+    clear: () => {
+        /* noop */
+    },
+    key: () => null,
+    length: 0,
+};
 
 // =============================================================================
 // INITIAL STATE
@@ -43,7 +66,7 @@ const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActio
     // Exam metadata
     attemptId: null,
     paperId: null,
-    sessionToken: null,  // P0 FIX: Session token for multi-device/tab prevention
+    sessionToken: null, // P0 FIX: Session token for multi-device/tab prevention
 
     // Navigation
     currentSectionIndex: 0,
@@ -55,6 +78,10 @@ const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActio
     // Responses
     responses: {},
 
+    // Pending sync queue (local-first responses awaiting backend sync)
+    pendingSyncResponses: {},
+    lastSyncTimestamp: 0,
+
     // Timer state per section
     sectionTimers: (() => {
         const defaults = getSectionDurationSecondsMap();
@@ -65,7 +92,7 @@ const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActio
         };
     })(),
 
-    // Question tracking - converted to arrays for JSON serialization
+    // Question tracking
     visitedQuestions: new Set<string>(),
     markedQuestions: new Set<string>(),
 
@@ -85,6 +112,13 @@ const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActio
 export const createExamStore = (attemptId?: string) => {
     const storeName = attemptId ? `cat-exam-state-${attemptId}` : 'cat-exam-state-temp';
 
+    // PHASE 0: Clean up orphaned temp state on store creation
+    if (typeof window !== 'undefined' && attemptId) {
+        cleanupOrphanedExamState();
+    }
+
+    examDebug.log('Creating exam store', { attemptId, storeName });
+
     return create<ExamStore>()(
         persist(
             (set, get) => ({
@@ -95,14 +129,17 @@ export const createExamStore = (attemptId?: string) => {
                 // =====================================================================
 
                 initializeExam: (data: ExamData) => {
-                    const { paper, questions, attempt } = data;
+                    const { paper, questions, attempt, responses: serverResponses } = data;
                     const currentState = get();
 
-                    // P0 FIX: Check if we're resuming the same attempt with persisted state
-                    // If so, preserve the existing timer and response state
+                    // PHASE 1 FIX: Check if we're resuming the same attempt with persisted state
                     if (currentState.attemptId === attempt.id && currentState.hasHydrated) {
-                        // Same attempt, already initialized - just update hydration flag
-                        // This prevents timer reset on page refresh
+                        examDebug.resume({
+                            attemptId: attempt.id,
+                            fromSection: currentState.currentSectionIndex,
+                            fromQuestion: currentState.currentQuestionIndex,
+                            preservedState: true,
+                        });
                         logger.debug('Resuming existing attempt, preserving timer state', { attemptId: attempt.id });
                         return;
                     }
@@ -119,21 +156,27 @@ export const createExamStore = (attemptId?: string) => {
                         };
                     });
 
-                    // Initialize section timers
-                    // Use server-synced time_remaining from attempt if available (resuming)
-                    // Otherwise start fresh with delta-time based calculation
-                    const now = Date.now();
+                    // Hydrate responses from server if available
+                    if (serverResponses && serverResponses.length > 0) {
+                        serverResponses.forEach((r) => {
+                            if (!responses[r.question_id]) return;
+                            responses[r.question_id] = {
+                                answer: r.answer ?? null,
+                                status: r.status,
+                                isMarkedForReview: r.is_marked_for_review ?? false,
+                                timeSpentSeconds: r.time_spent_seconds ?? 0,
+                                visitCount: r.visit_count ?? 0,
+                            };
+                        });
+                    }
 
-                    // Calculate startedAt from attempt.started_at for accurate delta-time
-                    const attemptStartedAt = attempt.started_at
-                        ? new Date(attempt.started_at).getTime()
-                        : now;
+                    const now = Date.now();
+                    const attemptStartedAt = attempt.started_at ? new Date(attempt.started_at).getTime() : now;
 
                     const sectionDurations = getSectionDurationSecondsMap(paper.sections);
                     const sectionTimers: Record<SectionName, SectionTimerState> = {
                         VARC: {
                             sectionName: 'VARC',
-                            // Use the original attempt start time for delta calculation
                             startedAt: attemptStartedAt,
                             durationSeconds: sectionDurations.VARC,
                             remainingSeconds: sectionDurations.VARC,
@@ -141,14 +184,14 @@ export const createExamStore = (attemptId?: string) => {
                         },
                         DILR: {
                             sectionName: 'DILR',
-                            startedAt: 0, // Will be set when section starts
+                            startedAt: 0,
                             durationSeconds: sectionDurations.DILR,
                             remainingSeconds: sectionDurations.DILR,
                             isExpired: false,
                         },
                         QA: {
                             sectionName: 'QA',
-                            startedAt: 0, // Will be set when section starts
+                            startedAt: 0,
                             durationSeconds: sectionDurations.QA,
                             remainingSeconds: sectionDurations.QA,
                             isExpired: false,
@@ -158,12 +201,12 @@ export const createExamStore = (attemptId?: string) => {
                     // Parse existing time_remaining from server if resuming
                     if (attempt.time_remaining) {
                         const timeRemaining = attempt.time_remaining;
+
                         if (timeRemaining.VARC !== undefined) {
                             sectionTimers.VARC.remainingSeconds = timeRemaining.VARC;
-                            // If VARC has less than full time, calculate proper startedAt
                             if (timeRemaining.VARC < sectionDurations.VARC) {
                                 const elapsedSeconds = sectionDurations.VARC - timeRemaining.VARC;
-                                sectionTimers.VARC.startedAt = now - (elapsedSeconds * 1000);
+                                sectionTimers.VARC.startedAt = now - elapsedSeconds * 1000;
                             }
                         }
                         if (timeRemaining.DILR !== undefined) {
@@ -174,27 +217,47 @@ export const createExamStore = (attemptId?: string) => {
                         }
                     }
 
-                    // Determine current section from attempt
                     const currentSection = attempt.current_section || 'VARC';
                     const currentSectionIndex = SECTION_ORDER[currentSection];
 
-                    // If we're on a later section, set its startedAt to now (or calculate from remaining)
+                    const currentQuestionFromServer = attempt.current_question ?? 1;
+                    const currentQuestionIndex = Math.max(0, currentQuestionFromServer - 1);
+
                     if (currentSectionIndex > 0 && sectionTimers[currentSection].startedAt === 0) {
                         const sectionTimer = sectionTimers[currentSection];
                         if (sectionTimer.remainingSeconds < sectionDurations[currentSection]) {
-                            // Calculate startedAt based on remaining time
                             const elapsedSeconds = sectionDurations[currentSection] - sectionTimer.remainingSeconds;
-                            sectionTimer.startedAt = now - (elapsedSeconds * 1000);
+                            sectionTimer.startedAt = now - elapsedSeconds * 1000;
                         } else {
                             sectionTimer.startedAt = now;
                         }
                     }
 
-                    // P0 FIX: Generate session token for multi-device/tab prevention
-                    // Use crypto.randomUUID for secure random UUID generation
-                    const sessionToken = typeof crypto !== 'undefined' && crypto.randomUUID
-                        ? crypto.randomUUID()
-                        : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                    // P0 FIX: Generate session token (client-local; server token may overwrite later)
+                    const sessionToken =
+                        typeof crypto !== 'undefined' && crypto.randomUUID
+                            ? crypto.randomUUID()
+                            : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+                    const visitedQuestions = new Set<string>();
+                    const markedQuestions = new Set<string>();
+
+                    Object.entries(responses).forEach(([questionId, response]) => {
+                        if (response.status !== 'not_visited') visitedQuestions.add(questionId);
+                        if (response.isMarkedForReview) markedQuestions.add(questionId);
+                    });
+
+                    const lockedSections: SectionName[] = [];
+                    const sectionOrder: SectionName[] = ['VARC', 'DILR', 'QA'];
+                    for (let i = 0; i < currentSectionIndex; i++) lockedSections.push(sectionOrder[i]);
+
+                    examDebug.storeInit({
+                        attemptId: attempt.id,
+                        storeName,
+                        sessionToken,
+                        currentSectionIndex,
+                        currentQuestionIndex,
+                    });
 
                     set({
                         hasHydrated: true,
@@ -202,12 +265,12 @@ export const createExamStore = (attemptId?: string) => {
                         paperId: paper.id,
                         sessionToken,
                         currentSectionIndex,
-                        currentQuestionIndex: 0,
-                        lockedSections: [],
+                        currentQuestionIndex,
+                        lockedSections,
                         responses,
                         sectionTimers,
-                        visitedQuestions: new Set(),
-                        markedQuestions: new Set(),
+                        visitedQuestions,
+                        markedQuestions,
                         isSubmitting: false,
                         isAutoSubmitting: false,
                     });
@@ -217,6 +280,10 @@ export const createExamStore = (attemptId?: string) => {
                     set({ hasHydrated: hydrated });
                 },
 
+                setSessionToken: (sessionToken: string | null) => {
+                    set({ sessionToken });
+                },
+
                 // =====================================================================
                 // NAVIGATION
                 // =====================================================================
@@ -224,17 +291,18 @@ export const createExamStore = (attemptId?: string) => {
                 goToQuestion: (questionId: string, sectionIndex: number, questionIndex: number) => {
                     const state = get();
 
-                    // Validate section access (no backward navigation between sections)
-                    if (sectionIndex < state.currentSectionIndex) {
-                        logger.warn('Cannot navigate to locked section', { attemptId: state.attemptId, targetSection: sectionIndex, currentSection: state.currentSectionIndex });
+                    if (sectionIndex !== state.currentSectionIndex) {
+                        logger.warn('Section locked. Navigation restricted to current section', {
+                            attemptId: state.attemptId,
+                            targetSection: sectionIndex,
+                            currentSection: state.currentSectionIndex,
+                        });
                         return;
                     }
 
-                    // Mark question as visited
                     const newVisitedQuestions = new Set(state.visitedQuestions);
                     newVisitedQuestions.add(questionId);
 
-                    // Update response status if first visit
                     const response = state.responses[questionId];
                     if (response && response.status === 'not_visited') {
                         set({
@@ -274,25 +342,83 @@ export const createExamStore = (attemptId?: string) => {
 
                 goToNextQuestion: () => {
                     const state = get();
-                    // This will be called with question context from the UI
-                    // The actual logic depends on current section's question list
-                    set({
-                        currentQuestionIndex: state.currentQuestionIndex + 1,
-                    });
+                    set({ currentQuestionIndex: state.currentQuestionIndex + 1 });
                 },
 
                 goToPreviousQuestion: () => {
                     const state = get();
                     if (state.currentQuestionIndex > 0) {
-                        set({
-                            currentQuestionIndex: state.currentQuestionIndex - 1,
-                        });
+                        set({ currentQuestionIndex: state.currentQuestionIndex - 1 });
                     }
                 },
 
                 // =====================================================================
                 // ANSWER MANAGEMENT
                 // =====================================================================
+
+                setLocalAnswer: (questionId: string, answer: string | null) => {
+                    const state = get();
+                    const response = state.responses[questionId];
+
+                    if (!response) {
+                        logger.warn('Response not found for question', { questionId, attemptId: state.attemptId });
+                        return;
+                    }
+
+                    examDebug.log('setLocalAnswer - storing locally only', {
+                        questionId,
+                        answer,
+                        currentStatus: response.status,
+                    });
+
+                    set({
+                        responses: {
+                            ...state.responses,
+                            [questionId]: {
+                                ...response,
+                                answer,
+                            },
+                        },
+                    });
+                },
+
+                saveAnswer: (questionId: string, answer: string | null) => {
+                    const state = get();
+                    const response = state.responses[questionId];
+
+                    if (!response) {
+                        logger.warn('Response not found for question', { questionId, attemptId: state.attemptId });
+                        return;
+                    }
+
+                    const hasAnswer = answer !== null && answer !== '';
+                    let newStatus = response.status;
+
+                    if (hasAnswer) {
+                        newStatus = response.isMarkedForReview ? 'answered_marked' : 'answered';
+                    } else {
+                        newStatus = response.isMarkedForReview ? 'marked' : 'visited';
+                    }
+
+                    examDebug.log('saveAnswer - updating status', {
+                        questionId,
+                        answer,
+                        oldStatus: response.status,
+                        newStatus,
+                        isMarkedForReview: response.isMarkedForReview,
+                    });
+
+                    set({
+                        responses: {
+                            ...state.responses,
+                            [questionId]: {
+                                ...response,
+                                answer,
+                                status: newStatus,
+                            },
+                        },
+                    });
+                },
 
                 setAnswer: (questionId: string, answer: string | null) => {
                     const state = get();
@@ -304,17 +430,26 @@ export const createExamStore = (attemptId?: string) => {
                     }
 
                     const hasAnswer = answer !== null && answer !== '';
-                    const newStatus = calculateQuestionStatus(
-                        hasAnswer,
-                        response.isMarkedForReview,
-                        true // Always visited if answering
-                    );
+                    let newStatus = response.status;
 
-                    // Update marked questions set if needed
+                    if (hasAnswer) {
+                        newStatus = response.isMarkedForReview ? 'answered_marked' : 'answered';
+                    } else {
+                        newStatus = response.isMarkedForReview ? 'marked' : 'visited';
+                    }
+
                     const newMarkedQuestions = new Set(state.markedQuestions);
                     if (response.isMarkedForReview) {
                         newMarkedQuestions.add(questionId);
                     }
+
+                    examDebug.responseStatus({
+                        questionId,
+                        oldStatus: response.status,
+                        newStatus,
+                        answer,
+                        isMarkedForReview: response.isMarkedForReview,
+                    });
 
                     set({
                         responses: {
@@ -326,28 +461,49 @@ export const createExamStore = (attemptId?: string) => {
                             },
                         },
                         markedQuestions: newMarkedQuestions,
+                        pendingSyncResponses: {
+                            ...state.pendingSyncResponses,
+                            [questionId]: {
+                                answer,
+                                timestamp: Date.now(),
+                            },
+                        },
                     });
                 },
 
+                // ✅ FIXED: clearAnswer now ALSO unmarks the question for review.
                 clearAnswer: (questionId: string) => {
                     const state = get();
                     const response = state.responses[questionId];
-
                     if (!response) return;
 
-                    const newStatus = calculateQuestionStatus(
-                        false, // No answer
-                        response.isMarkedForReview,
-                        true // Still visited
-                    );
+                    // Clearing implies: no answer + NOT marked + visited
+                    const newStatus = calculateQuestionStatus(false, false, true);
+
+                    // Ensure sets reflect unmarking + visited
+                    const newMarkedQuestions = new Set(state.markedQuestions);
+                    newMarkedQuestions.delete(questionId);
+
+                    const newVisitedQuestions = new Set(state.visitedQuestions);
+                    newVisitedQuestions.add(questionId);
 
                     set({
+                        visitedQuestions: newVisitedQuestions,
+                        markedQuestions: newMarkedQuestions,
                         responses: {
                             ...state.responses,
                             [questionId]: {
                                 ...response,
                                 answer: null,
+                                isMarkedForReview: false,
                                 status: newStatus,
+                            },
+                        },
+                        pendingSyncResponses: {
+                            ...state.pendingSyncResponses,
+                            [questionId]: {
+                                answer: null,
+                                timestamp: Date.now(),
                             },
                         },
                     });
@@ -356,21 +512,30 @@ export const createExamStore = (attemptId?: string) => {
                 toggleMarkForReview: (questionId: string) => {
                     const state = get();
                     const response = state.responses[questionId];
-
                     if (!response) return;
 
                     const newIsMarked = !response.isMarkedForReview;
                     const hasAnswer = response.answer !== null && response.answer !== '';
 
-                    const newStatus = calculateQuestionStatus(hasAnswer, newIsMarked, true);
+                    const hadSavedAnswer = response.status === 'answered' || response.status === 'answered_marked';
 
-                    // Update marked questions set
-                    const newMarkedQuestions = new Set(state.markedQuestions);
+                    let newStatus: QuestionStatus;
                     if (newIsMarked) {
-                        newMarkedQuestions.add(questionId);
+                        newStatus = hadSavedAnswer ? 'answered_marked' : 'marked';
                     } else {
-                        newMarkedQuestions.delete(questionId);
+                        newStatus = hadSavedAnswer ? 'answered' : hasAnswer ? 'visited' : 'visited';
                     }
+
+                    examDebug.markForReview({
+                        questionId,
+                        hadSavedAnswer,
+                        newStatus,
+                        isMarking: newIsMarked,
+                    });
+
+                    const newMarkedQuestions = new Set(state.markedQuestions);
+                    if (newIsMarked) newMarkedQuestions.add(questionId);
+                    else newMarkedQuestions.delete(questionId);
 
                     set({
                         responses: {
@@ -379,6 +544,66 @@ export const createExamStore = (attemptId?: string) => {
                                 ...response,
                                 isMarkedForReview: newIsMarked,
                                 status: newStatus,
+                            },
+                        },
+                        markedQuestions: newMarkedQuestions,
+                    });
+                },
+
+                queuePendingSync: (questionId: string, answer: string | null) => {
+                    const state = get();
+                    set({
+                        pendingSyncResponses: {
+                            ...state.pendingSyncResponses,
+                            [questionId]: {
+                                answer,
+                                timestamp: Date.now(),
+                            },
+                        },
+                    });
+                },
+
+                clearPendingSync: (questionIds?: string[]) => {
+                    if (!questionIds || questionIds.length === 0) {
+                        set({ pendingSyncResponses: {} });
+                        return;
+                    }
+
+                    const state = get();
+                    const nextQueue = { ...state.pendingSyncResponses };
+                    for (const id of questionIds) delete nextQueue[id];
+                    set({ pendingSyncResponses: nextQueue });
+                },
+
+                setLastSyncTimestamp: (timestamp: number) => {
+                    set({ lastSyncTimestamp: timestamp });
+                },
+
+                setResponseStatus: (questionId: string, status: QuestionStatus, isMarkedForReview?: boolean) => {
+                    const state = get();
+                    const response = state.responses[questionId];
+                    if (!response) return;
+
+                    const nextIsMarked = isMarkedForReview ?? response.isMarkedForReview;
+                    const newMarkedQuestions = new Set(state.markedQuestions);
+                    if (nextIsMarked) newMarkedQuestions.add(questionId);
+                    else newMarkedQuestions.delete(questionId);
+
+                    examDebug.responseStatus({
+                        questionId,
+                        oldStatus: response.status,
+                        newStatus: status,
+                        answer: response.answer,
+                        isMarkedForReview: nextIsMarked,
+                    });
+
+                    set({
+                        responses: {
+                            ...state.responses,
+                            [questionId]: {
+                                ...response,
+                                status,
+                                isMarkedForReview: nextIsMarked,
                             },
                         },
                         markedQuestions: newMarkedQuestions,
@@ -415,7 +640,6 @@ export const createExamStore = (attemptId?: string) => {
                 updateTimeSpent: (questionId: string, seconds: number) => {
                     const state = get();
                     const response = state.responses[questionId];
-
                     if (!response) return;
 
                     set({
@@ -435,12 +659,8 @@ export const createExamStore = (attemptId?: string) => {
 
                 completeSection: (sectionName: SectionName) => {
                     const state = get();
-
-                    // Add to locked sections if not already
                     if (!state.lockedSections.includes(sectionName)) {
-                        set({
-                            lockedSections: [...state.lockedSections, sectionName],
-                        });
+                        set({ lockedSections: [...state.lockedSections, sectionName] });
                     }
                 },
 
@@ -448,17 +668,13 @@ export const createExamStore = (attemptId?: string) => {
                     const state = get();
                     const currentSection = getSectionByIndex(state.currentSectionIndex);
 
-                    // Lock current section
                     const newLockedSections = state.lockedSections.includes(currentSection)
                         ? state.lockedSections
                         : [...state.lockedSections, currentSection];
 
-                    // Move to next section if not at QA
                     if (state.currentSectionIndex < 2) {
                         const nextSectionIndex = state.currentSectionIndex + 1;
                         const nextSection = getSectionByIndex(nextSectionIndex);
-
-                        // Start timer for next section
                         const now = Date.now();
 
                         set({
@@ -474,10 +690,7 @@ export const createExamStore = (attemptId?: string) => {
                             },
                         });
                     } else {
-                        // At QA - just lock it
-                        set({
-                            lockedSections: newLockedSections,
-                        });
+                        set({ lockedSections: newLockedSections });
                     }
                 },
 
@@ -487,7 +700,6 @@ export const createExamStore = (attemptId?: string) => {
 
                 updateSectionTimer: (sectionName: SectionName, remainingSeconds: number) => {
                     const state = get();
-
                     set({
                         sectionTimers: {
                             ...state.sectionTimers,
@@ -501,7 +713,6 @@ export const createExamStore = (attemptId?: string) => {
 
                 expireSection: (sectionName: SectionName) => {
                     const state = get();
-
                     set({
                         sectionTimers: {
                             ...state.sectionTimers,
@@ -539,35 +750,25 @@ export const createExamStore = (attemptId?: string) => {
             }),
             {
                 name: storeName,
-                storage: createJSONStorage(() => localStorage),
-                // Only persist essential data (not hydration flags or submission states)
+                storage: createJSONStorage(() => (typeof window !== 'undefined' ? localStorage : noopStorage)),
                 partialize: (state) => ({
                     attemptId: state.attemptId,
                     paperId: state.paperId,
-                    sessionToken: state.sessionToken, // P0 FIX: Persist session token
+                    sessionToken: state.sessionToken,
                     currentSectionIndex: state.currentSectionIndex,
                     currentQuestionIndex: state.currentQuestionIndex,
                     lockedSections: state.lockedSections,
                     responses: state.responses,
+                    pendingSyncResponses: state.pendingSyncResponses,
+                    lastSyncTimestamp: state.lastSyncTimestamp,
                     sectionTimers: state.sectionTimers,
-                    // Convert Sets to arrays for JSON serialization
                     visitedQuestions: Array.from(state.visitedQuestions),
                     markedQuestions: Array.from(state.markedQuestions),
                 }),
-                // Handle rehydration
                 onRehydrateStorage: () => (state) => {
                     if (state) {
-                        // Convert arrays back to Sets after rehydration
-                        state.visitedQuestions = new Set(
-                            Array.isArray(state.visitedQuestions)
-                                ? state.visitedQuestions
-                                : []
-                        );
-                        state.markedQuestions = new Set(
-                            Array.isArray(state.markedQuestions)
-                                ? state.markedQuestions
-                                : []
-                        );
+                        state.visitedQuestions = new Set(Array.isArray(state.visitedQuestions) ? state.visitedQuestions : []);
+                        state.markedQuestions = new Set(Array.isArray(state.markedQuestions) ? state.markedQuestions : []);
                         state.hasHydrated = true;
                     }
                 },
@@ -580,75 +781,64 @@ export const createExamStore = (attemptId?: string) => {
 // DEFAULT STORE INSTANCE
 // =============================================================================
 
-// Default store for initial use (will be replaced with attemptId-specific store)
 export const useExamStore = createExamStore();
 
 // =============================================================================
 // SELECTORS (for optimized re-renders)
 // =============================================================================
 
-/** Select current section name */
-export const selectCurrentSection = (state: ExamStore): SectionName =>
-    getSectionByIndex(state.currentSectionIndex);
+export const selectCurrentSection = (state: ExamStore): SectionName => getSectionByIndex(state.currentSectionIndex);
 
-/** Select current section timer */
 export const selectCurrentTimer = (state: ExamStore): SectionTimerState => {
     const section = getSectionByIndex(state.currentSectionIndex);
     return state.sectionTimers[section];
 };
 
-/** Select response for a specific question */
-export const selectResponse = (questionId: string) =>
-    (state: ExamStore): ResponseState | undefined => state.responses[questionId];
+export const selectResponse = (questionId: string) => (state: ExamStore): ResponseState | undefined => state.responses[questionId];
 
-/** Select if a section is locked */
-export const selectIsSectionLocked = (sectionName: SectionName) =>
-    (state: ExamStore): boolean => state.lockedSections.includes(sectionName);
+export const selectIsSectionLocked = (sectionName: SectionName) => (state: ExamStore): boolean =>
+    state.lockedSections.includes(sectionName);
 
-/** Select question status for palette */
-export const selectQuestionStatus = (questionId: string) =>
-    (state: ExamStore): QuestionStatus => {
-        const response = state.responses[questionId];
-        return response?.status ?? 'not_visited';
+export const selectQuestionStatus = (questionId: string) => (state: ExamStore): QuestionStatus => {
+    const response = state.responses[questionId];
+    return response?.status ?? 'not_visited';
+};
+
+export const selectSectionCounts = (questions: Question[]) => (state: ExamStore) => {
+    const counts = {
+        total: questions.length,
+        notVisited: 0,
+        visited: 0,
+        answered: 0,
+        marked: 0,
+        answeredMarked: 0,
     };
 
-/** Count questions by status in current section */
-export const selectSectionCounts = (questions: Question[]) =>
-    (state: ExamStore) => {
-        const counts = {
-            total: questions.length,
-            notVisited: 0,
-            visited: 0,
-            answered: 0,
-            marked: 0,
-            answeredMarked: 0,
-        };
+    questions.forEach((q) => {
+        const response = state.responses[q.id];
+        if (!response) {
+            counts.notVisited++;
+            return;
+        }
 
-        questions.forEach((q) => {
-            const response = state.responses[q.id];
-            if (!response) {
+        switch (response.status) {
+            case 'not_visited':
                 counts.notVisited++;
-                return;
-            }
+                break;
+            case 'visited':
+                counts.visited++;
+                break;
+            case 'answered':
+                counts.answered++;
+                break;
+            case 'marked':
+                counts.marked++;
+                break;
+            case 'answered_marked':
+                counts.answeredMarked++;
+                break;
+        }
+    });
 
-            switch (response.status) {
-                case 'not_visited':
-                    counts.notVisited++;
-                    break;
-                case 'visited':
-                    counts.visited++;
-                    break;
-                case 'answered':
-                    counts.answered++;
-                    break;
-                case 'marked':
-                    counts.marked++;
-                    break;
-                case 'answered_marked':
-                    counts.answeredMarked++;
-                    break;
-            }
-        });
-
-        return counts;
-    };
+    return counts;
+};

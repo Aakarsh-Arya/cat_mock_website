@@ -21,7 +21,7 @@ CREATE OR REPLACE FUNCTION public.get_paper_stats(p_paper_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_catalog
 AS $$
 DECLARE
     result JSONB := '{}'::JSONB;

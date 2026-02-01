@@ -1,0 +1,362 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://nexams.com/schemas/paper_schema_v3.json",
+    "title": "CAT Paper Schema v3.0 (Sets-First)",
+    "description": "Canonical ingestion format: paper → question_sets → questions. Questions reference sets via set_ref (client_set_id).",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "paper",
+        "question_sets",
+        "questions"
+    ],
+    "properties": {
+        "schema_version": {
+            "type": "string",
+            "const": "v3.0",
+            "description": "Must be 'v3.0' for sets-first format"
+        },
+        "paper": {
+            "type": "object",
+            "required": [
+                "title",
+                "slug"
+            ],
+            "properties": {
+                "paper_key": {
+                    "type": "string",
+                    "description": "Stable semantic key for idempotent imports (e.g., 'cat-2024-slot-1')"
+                },
+                "title": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "slug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "year": {
+                    "type": "integer"
+                },
+                "total_questions": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "total_marks": {
+                    "type": "number"
+                },
+                "duration_minutes": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "VARC",
+                            "DILR",
+                            "QA"
+                        ]
+                    }
+                },
+                "default_positive_marks": {
+                    "type": "number",
+                    "default": 3
+                },
+                "default_negative_marks": {
+                    "type": "number",
+                    "default": 1
+                },
+                "difficulty_level": {
+                    "type": "string",
+                    "enum": [
+                        "easy",
+                        "medium",
+                        "hard"
+                    ]
+                },
+                "is_free": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "published": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "allow_pause": {
+                    "type": "boolean",
+                    "default": true
+                },
+                "attempt_limit": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                }
+            }
+        },
+        "question_sets": {
+            "type": "array",
+            "description": "Parent containers for questions. Inserted FIRST, then questions reference them.",
+            "items": {
+                "type": "object",
+                "required": [
+                    "client_set_id",
+                    "section",
+                    "set_type",
+                    "display_order"
+                ],
+                "properties": {
+                    "client_set_id": {
+                        "type": "string",
+                        "description": "Stable human-readable ID (e.g., 'VARC_RC_1', 'DILR_SET_3'). Used by questions.set_ref to link.",
+                        "pattern": "^[A-Z0-9_]+$"
+                    },
+                    "section": {
+                        "type": "string",
+                        "enum": [
+                            "VARC",
+                            "DILR",
+                            "QA"
+                        ]
+                    },
+                    "set_type": {
+                        "type": "string",
+                        "enum": [
+                            "VARC",
+                            "DILR",
+                            "CASELET",
+                            "ATOMIC"
+                        ],
+                        "description": "VARC/DILR/CASELET require context_body. ATOMIC is for standalone questions."
+                    },
+                    "display_order": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Order within section for deterministic export"
+                    },
+                    "context_title": {
+                        "type": "string",
+                        "description": "Optional title for the passage/set"
+                    },
+                    "context_body": {
+                        "type": "string",
+                        "description": "Required for VARC/DILR/CASELET sets. The passage or data content."
+                    },
+                    "context_image_url": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "Optional image URL for DI sets"
+                    },
+                    "context_additional_images": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "uri"
+                        }
+                    },
+                    "context_type": {
+                        "type": "string",
+                        "enum": [
+                            "rc_passage",
+                            "dilr_set",
+                            "caselet",
+                            "data_table",
+                            "graph",
+                            "other_shared_stimulus"
+                        ],
+                        "description": "Explicit categorization for analytics"
+                    },
+                    "content_layout": {
+                        "type": "string",
+                        "enum": [
+                            "split_passage",
+                            "split_chart",
+                            "split_table",
+                            "single_focus",
+                            "image_top"
+                        ],
+                        "default": "single_focus"
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "description": "Arbitrary metadata for the set"
+                    }
+                },
+                "if": {
+                    "properties": {
+                        "set_type": {
+                            "enum": [
+                                "VARC",
+                                "DILR",
+                                "CASELET"
+                            ]
+                        }
+                    }
+                },
+                "then": {
+                    "required": [
+                        "context_body"
+                    ],
+                    "properties": {
+                        "context_body": {
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        },
+        "questions": {
+            "type": "array",
+            "description": "Questions reference sets via set_ref (matches client_set_id)",
+            "items": {
+                "type": "object",
+                "required": [
+                    "client_question_id",
+                    "set_ref",
+                    "sequence_order",
+                    "question_number",
+                    "question_text",
+                    "question_type"
+                ],
+                "properties": {
+                    "client_question_id": {
+                        "type": "string",
+                        "description": "Stable human-readable ID (e.g., 'Q1', 'VARC_RC1_Q3'). Unique within paper.",
+                        "pattern": "^[A-Za-z0-9_]+$"
+                    },
+                    "set_ref": {
+                        "type": "string",
+                        "description": "References a question_set by client_set_id. Must exist in question_sets[].",
+                        "pattern": "^[A-Z0-9_]+$"
+                    },
+                    "sequence_order": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Order within the set (1-based)"
+                    },
+                    "section": {
+                        "type": "string",
+                        "enum": [
+                            "VARC",
+                            "DILR",
+                            "QA"
+                        ]
+                    },
+                    "question_number": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Global question number in the paper"
+                    },
+                    "question_text": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "question_type": {
+                        "type": "string",
+                        "enum": [
+                            "MCQ",
+                            "TITA"
+                        ],
+                        "description": "Answer format"
+                    },
+                    "question_format": {
+                        "type": "string",
+                        "enum": [
+                            "MCQ",
+                            "TITA"
+                        ],
+                        "description": "Alias for question_type (DB uses this)"
+                    },
+                    "taxonomy_type": {
+                        "type": "string",
+                        "description": "Semantic category (e.g., rc_inference, para_summary, di_table_analysis)"
+                    },
+                    "topic_tag": {
+                        "type": "string",
+                        "description": "Fine-grained topic for analytics"
+                    },
+                    "difficulty_rationale": {
+                        "type": "string",
+                        "description": "Explanation for difficulty rating"
+                    },
+                    "options": {
+                        "type": "array",
+                        "description": "Required for MCQ questions",
+                        "items": {
+                            "type": "object",
+                            "required": [
+                                "id",
+                                "text"
+                            ],
+                            "properties": {
+                                "id": {
+                                    "type": "string"
+                                },
+                                "text": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "correct_answer": {
+                        "type": [
+                            "string",
+                            "number",
+                            "array"
+                        ],
+                        "description": "MCQ: option id(s). TITA: numeric or string answer."
+                    },
+                    "positive_marks": {
+                        "type": "number",
+                        "default": 3
+                    },
+                    "negative_marks": {
+                        "type": "number",
+                        "default": 1
+                    },
+                    "difficulty": {
+                        "type": "string",
+                        "enum": [
+                            "easy",
+                            "medium",
+                            "hard"
+                        ]
+                    },
+                    "topic": {
+                        "type": "string"
+                    },
+                    "subtopic": {
+                        "type": "string"
+                    },
+                    "solution_text": {
+                        "type": "string"
+                    },
+                    "solution_image_url": {
+                        "type": "string",
+                        "format": "uri"
+                    },
+                    "video_solution_url": {
+                        "type": "string",
+                        "format": "uri"
+                    }
+                },
+                "if": {
+                    "properties": {
+                        "question_type": {
+                            "const": "MCQ"
+                        }
+                    }
+                },
+                "then": {
+                    "required": [
+                        "options"
+                    ]
+                }
+            }
+        }
+    }
+}

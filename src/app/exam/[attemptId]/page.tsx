@@ -8,21 +8,61 @@ import { sbSSR } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { ExamClient } from './ExamClient';
-import type { Paper, Question, Attempt, SectionConfig, QuestionContext } from '@/types/exam';
+import type {
+    Paper,
+    Question,
+    Attempt,
+    SectionConfig,
+    QuestionSetComplete,
+    QuestionSetMetadata,
+    QuestionSetType,
+    ContentLayoutType,
+    QuestionType,
+    SectionName,
+    QuestionContext,
+    Response,
+} from '@/types/exam';
+import { buildLegacyQuestionSets } from '@/utils/question-sets';
+import { assemblePaper } from '@/features/exam-engine/lib/assemblePaper';
+import { logger } from '@/lib/logger';
 
-export default async function ExamPage({ params }: { params: Promise<Record<string, unknown>> }) {
-    const { attemptId } = (await params) as { attemptId: string };
+type PageProps = {
+    params: { attemptId: string } | Promise<{ attemptId: string }>;
+};
+
+export default async function ExamPage({ params }: PageProps) {
+    const { attemptId } = await params;
+
+    if (!attemptId || typeof attemptId !== 'string') {
+        return (
+            <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Invalid Attempt</h1>
+                    <p className="text-gray-600 mb-6">The attempt id is missing or invalid.</p>
+                    <Link href="/dashboard" className="text-blue-600 hover:underline">
+                        Back to Dashboard
+                    </Link>
+                </div>
+            </main>
+        );
+    }
+
     const supabase = await sbSSR();
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const {
+        data: { user },
+        error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
         redirect(`/auth/sign-in?redirect_to=${encodeURIComponent(`/exam/${attemptId}`)}`);
     }
 
     // Get attempt with paper details
     const { data: attemptData, error: attemptError } = await supabase
         .from('attempts')
-        .select(`
+        .select(
+            `
             id, user_id, paper_id, status, started_at, submitted_at, completed_at,
             current_section, current_question, time_remaining,
             total_score, correct_count, incorrect_count, unanswered_count,
@@ -32,10 +72,11 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
                 total_questions, total_marks, duration_minutes, sections,
                 default_positive_marks, default_negative_marks,
                 published, available_from, available_until,
-                difficulty_level, is_free, attempt_limit,
+                difficulty_level, is_free, attempt_limit, allow_pause,
                 created_at, updated_at
             )
-        `)
+        `
+        )
         .eq('id', attemptId)
         .single();
 
@@ -44,7 +85,9 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
             <main className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="text-center">
                     <h1 className="text-2xl font-bold text-gray-800 mb-4">Attempt Not Found</h1>
-                    <p className="text-gray-600 mb-6">This exam attempt does not exist or you don&apos;t have access to it.</p>
+                    <p className="text-gray-600 mb-6">
+                        This exam attempt does not exist or you don&apos;t have access to it.
+                    </p>
                     <Link href="/dashboard" className="text-blue-600 hover:underline">
                         Back to Dashboard
                     </Link>
@@ -73,65 +116,12 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         redirect(`/result/${attemptId}`);
     }
 
-    // Get questions for this paper using secure view `questions_exam` (excludes correct_answer).
-    // Fail fast if the view isn't deployed to avoid leaking answers.
-    type QuestionRow = {
-        id: string;
-        paper_id: string;
-        section: string;
-        question_number: number;
-        question_text: string;
-        question_type: string;
-        options: unknown;
-        positive_marks: number;
-        negative_marks: number;
-        question_image_url?: string | null;
-        context_id?: string | null;
-        difficulty: string | null;
-        topic: string | null;
-        subtopic: string | null;
-        is_active: boolean;
-        created_at: string;
-        updated_at: string;
-    };
-
-    let questionsData: QuestionRow[] | null = null;
-
-    {
-        const { data, error } = await supabase
-            .from('questions_exam')
-            .select('*')
-            .eq('paper_id', attemptData.paper_id)
-            .eq('is_active', true)
-            .order('section')
-            .order('question_number');
-
-        if (!error && data) {
-            questionsData = data as unknown as QuestionRow[];
-        } else {
-            return (
-                <main className="min-h-screen flex items-center justify-center bg-gray-50">
-                    <div className="text-center max-w-xl px-4">
-                        <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
-                        <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
-                        <p className="text-gray-600 mb-6">
-                            Ensure the secure questions_exam view and its RLS policies are deployed.
-                        </p>
-                        <Link href="/dashboard" className="text-blue-600 hover:underline">
-                            Back to Dashboard
-                        </Link>
-                    </div>
-                </main>
-            );
-        }
-    }
-
-    if (!questionsData) {
+    if (attemptData.status !== 'in_progress') {
         return (
             <main className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="text-center">
-                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
-                    <p className="text-gray-600 mb-6">There was an error loading the exam questions.</p>
+                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Attempt Not Available</h1>
+                    <p className="text-gray-600 mb-6">This exam attempt is not in progress and cannot be resumed.</p>
                     <Link href="/dashboard" className="text-blue-600 hover:underline">
                         Back to Dashboard
                     </Link>
@@ -140,30 +130,26 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         );
     }
 
-    // Transform data to match our types
-    // Note: Supabase returns single relation as object, not array
+    // Supabase can return a single relation as object OR array depending on relationship config.
     const paperRaw = attemptData.papers as unknown;
-    const paperData = paperRaw as {
-        id: string;
-        slug: string;
-        title: string;
-        description: string | null;
-        year: number;
-        total_questions: number;
-        total_marks: number;
-        duration_minutes: number;
-        sections: SectionConfig[];
-        default_positive_marks: number;
-        default_negative_marks: number;
-        published: boolean;
-        available_from: string | null;
-        available_until: string | null;
-        difficulty_level: string | null;
-        is_free: boolean;
-        attempt_limit: number | null;
-        created_at: string;
-        updated_at: string;
-    };
+    const paperData =
+        Array.isArray(paperRaw) && paperRaw.length > 0
+            ? (paperRaw[0] as any)
+            : (paperRaw as any);
+
+    if (!paperData?.id) {
+        return (
+            <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Paper Not Found</h1>
+                    <p className="text-gray-600 mb-6">This attempt is missing its paper data.</p>
+                    <Link href="/dashboard" className="text-blue-600 hover:underline">
+                        Back to Dashboard
+                    </Link>
+                </div>
+            </main>
+        );
+    }
 
     const paper: Paper = {
         id: paperData.id,
@@ -174,7 +160,7 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         total_questions: paperData.total_questions,
         total_marks: paperData.total_marks,
         duration_minutes: paperData.duration_minutes,
-        sections: paperData.sections,
+        sections: paperData.sections as SectionConfig[],
         default_positive_marks: paperData.default_positive_marks,
         default_negative_marks: paperData.default_negative_marks,
         published: paperData.published,
@@ -183,6 +169,7 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         difficulty_level: paperData.difficulty_level as Paper['difficulty_level'],
         is_free: paperData.is_free,
         attempt_limit: paperData.attempt_limit ?? undefined,
+        allow_pause: paperData.allow_pause ?? true,
         created_at: paperData.created_at,
         updated_at: paperData.updated_at,
     };
@@ -209,45 +196,195 @@ export default async function ExamPage({ params }: { params: Promise<Record<stri
         updated_at: attemptData.updated_at,
     };
 
-    // Fetch question contexts for questions that have context_id
-    const contextIds = [...new Set(
-        questionsData
-            .map(q => q.context_id)
-            .filter((id): id is string => Boolean(id))
-    )];
+    type QuestionSetViewRow = {
+        id: string;
+        paper_id: string;
+        section: string;
+        set_type: string;
+        content_layout: string;
+        context_title?: string | null;
+        context_body?: string | null;
+        context_image_url?: string | null;
+        context_additional_images?: unknown;
+        display_order: number;
+        question_count: number;
+        metadata?: QuestionSetMetadata | null;
+        is_active: boolean;
+        is_published: boolean;
+        created_at: string;
+        updated_at: string;
+        questions: Array<{
+            id: string;
+            question_text: string;
+            question_type: string;
+            options: unknown;
+            positive_marks: number;
+            negative_marks: number;
+            question_number: number;
+            sequence_order: number | null;
+            question_image_url?: string | null;
+            difficulty?: string | null;
+            topic?: string | null;
+            subtopic?: string | null;
+            is_active: boolean;
+        }>;
+    };
 
-    let contextMap = new Map<string, QuestionContext>();
-    if (contextIds.length > 0) {
-        const { data: contexts } = await supabase
-            .from('question_contexts')
-            .select('id, title, section, content, context_type, paper_id, display_order, is_active, image_url')
-            .in('id', contextIds);
+    // Prefer set-aware view when available
+    const { data: questionSetRows, error: questionSetError } = await supabase
+        .from('question_sets_with_questions')
+        .select('*')
+        .eq('paper_id', attemptData.paper_id);
 
-        if (contexts) {
-            contextMap = new Map(contexts.map(c => [c.id, c as QuestionContext]));
-        }
+    if (questionSetError) {
+        logger?.warn?.('Failed to fetch question_sets_with_questions', questionSetError, {
+            paperId: attemptData.paper_id,
+            attemptId,
+        });
     }
 
-    const questions: Question[] = questionsData.map((q: QuestionRow) => ({
-        id: q.id,
-        paper_id: q.paper_id,
-        section: q.section as Question['section'],
-        question_number: q.question_number,
-        question_text: q.question_text,
-        question_type: q.question_type as Question['question_type'],
-        options: q.options as Question['options'],
-        positive_marks: q.positive_marks,
-        negative_marks: q.negative_marks,
-        question_image_url: q.question_image_url ?? undefined,
-        context_id: q.context_id ?? undefined,
-        context: q.context_id ? contextMap.get(q.context_id) : undefined,
-        difficulty: q.difficulty as Question['difficulty'],
-        topic: q.topic ?? undefined,
-        subtopic: q.subtopic ?? undefined,
-        is_active: q.is_active,
-        created_at: q.created_at,
-        updated_at: q.updated_at,
+    let questionSets: QuestionSetComplete[] = [];
+
+    if (questionSetRows && questionSetRows.length > 0) {
+        questionSets = (questionSetRows as QuestionSetViewRow[]).map((row) => ({
+            id: row.id,
+            paper_id: row.paper_id,
+            section: row.section as SectionName,
+            set_type: row.set_type as QuestionSetType,
+            content_layout: row.content_layout as ContentLayoutType,
+            context_title: row.context_title ?? undefined,
+            context_body: row.context_body ?? undefined,
+            context_image_url: row.context_image_url ?? undefined,
+            context_additional_images: Array.isArray(row.context_additional_images)
+                ? (row.context_additional_images as QuestionSetComplete['context_additional_images'])
+                : [],
+            display_order: row.display_order,
+            question_count: row.question_count,
+            metadata: (row.metadata ?? {}) as QuestionSetMetadata,
+            is_active: row.is_active,
+            is_published: row.is_published,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            questions: (row.questions ?? []).map((q, index) => ({
+                id: q.id,
+                set_id: row.id,
+                paper_id: row.paper_id,
+                section: row.section as SectionName,
+                sequence_order: q.sequence_order ?? index + 1,
+                question_number: q.question_number,
+                question_text: q.question_text,
+                question_type: q.question_type as QuestionType,
+                options: q.options as Question['options'],
+                positive_marks: q.positive_marks,
+                negative_marks: q.negative_marks,
+                question_image_url: q.question_image_url ?? undefined,
+                difficulty: q.difficulty as Question['difficulty'],
+                topic: q.topic ?? undefined,
+                subtopic: q.subtopic ?? undefined,
+                is_active: q.is_active,
+            })),
+        }));
+
+        // IMPORTANT: Supabase .order('section') sorts alphabetically (DILR, QA, VARC),
+        // which is not the exam flow order. Force deterministic section ordering in JS.
+        const sectionOrder: Record<SectionName, number> = { VARC: 0, DILR: 1, QA: 2 };
+        questionSets.sort((a, b) => {
+            const sd = (sectionOrder[a.section] ?? 99) - (sectionOrder[b.section] ?? 99);
+            if (sd) return sd;
+            return (a.display_order ?? 9999) - (b.display_order ?? 9999);
+        });
+    }
+
+    // Fallback to legacy assembly if set view not available / empty
+    if (questionSets.length === 0) {
+        const { data: questionsData, error: questionsError } = await supabase
+            .from('questions_exam')
+            .select('*')
+            .eq('paper_id', attemptData.paper_id)
+            .eq('is_active', true)
+            .order('question_number');
+
+        if (questionsError || !questionsData) {
+            return (
+                <main className="min-h-screen flex items-center justify-center bg-gray-50">
+                    <div className="text-center max-w-xl px-4">
+                        <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
+                        <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
+                        <p className="text-gray-600 mb-6">
+                            Ensure the secure questions_exam view and its RLS policies are deployed.
+                        </p>
+                        <Link href="/dashboard" className="text-blue-600 hover:underline">
+                            Back to Dashboard
+                        </Link>
+                    </div>
+                </main>
+            );
+        }
+
+        // Force correct section ordering (VARC → DILR → QA)
+        const sectionOrder: Record<SectionName, number> = { VARC: 0, DILR: 1, QA: 2 };
+        const orderedQuestions = [...(questionsData as Question[])].sort((a, b) => {
+            const sd = (sectionOrder[a.section] ?? 99) - (sectionOrder[b.section] ?? 99);
+            if (sd) return sd;
+            return (a.question_number ?? 0) - (b.question_number ?? 0);
+        });
+
+        const contextIds = Array.from(
+            new Set(
+                orderedQuestions
+                    .map((q) => (q as any).context_id as string | null | undefined)
+                    .filter((id): id is string => Boolean(id))
+            )
+        );
+
+        let contexts: QuestionContext[] = [];
+        if (contextIds.length > 0) {
+            const { data: contextsData, error: contextsError } = await supabase
+                .from('question_contexts')
+                .select(
+                    'id, title, section, content, context_type, paper_id, display_order, is_active, image_url, created_at, updated_at'
+                )
+                .in('id', contextIds);
+
+            if (contextsError) {
+                logger?.warn?.('Failed to fetch question_contexts', contextsError, {
+                    paperId: attemptData.paper_id,
+                    attemptId,
+                });
+            } else {
+                contexts = (contextsData ?? []) as QuestionContext[];
+            }
+        }
+
+        questionSets = buildLegacyQuestionSets(orderedQuestions, contexts, attemptData.paper_id);
+    }
+
+    const { questions } = assemblePaper(questionSets);
+
+    const { data: responseRows, error: responsesError } = await supabase
+        .from('responses')
+        .select(
+            'id, attempt_id, question_id, answer, status, is_marked_for_review, is_visited, time_spent_seconds, visit_count, created_at, updated_at'
+        )
+        .eq('attempt_id', attemptId);
+
+    if (responsesError) {
+        logger?.warn?.('Failed to fetch responses for exam page', responsesError, { attemptId });
+    }
+
+    const responses: Response[] = (responseRows ?? []).map((r: any) => ({
+        id: r.id,
+        attempt_id: r.attempt_id,
+        question_id: r.question_id,
+        answer: r.answer,
+        status: r.status,
+        is_marked_for_review: r.is_marked_for_review ?? false,
+        is_visited: r.is_visited ?? false,
+        time_spent_seconds: r.time_spent_seconds ?? 0,
+        visit_count: r.visit_count ?? 0,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
     }));
 
-    return <ExamClient paper={paper} questions={questions} attempt={attempt} />;
+    return <ExamClient paper={paper} questions={questions} attempt={attempt} responses={responses} />;
 }

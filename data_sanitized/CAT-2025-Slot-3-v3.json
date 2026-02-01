@@ -1,0 +1,604 @@
+{
+  "_SCHEMA_NOTE": "This file has been sanitized. Question text, options, answers, and passages have been replaced with placeholders.",
+  "_ORIGINAL_STRUCTURE": "{ schema_version: string, paper: object, question_sets: object, questions: object }",
+  "schema_version": "v3.0",
+  "paper": {
+    "paper_key": "CAT_2025_SLOT3",
+    "title": "CAT 2025 Slot 3",
+    "slug": "cat-2025-slot-3",
+    "description": "Converted from PDF. Advertisements removed. Tables converted to Markdown. Answers mapped from key.",
+    "year": 2025,
+    "total_questions": 68,
+    "total_marks": 198,
+    "duration_minutes": 120,
+    "sections": [
+      "VARC",
+      "DILR",
+      "QA"
+    ],
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "difficulty_level": "cat-level",
+    "is_free": true,
+    "published": false,
+    "allow_pause": true,
+    "attempt_limit": 0
+  },
+  "question_sets": [
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_PJ_01",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          2
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SUM_02",
+      "set_type": "ATOMIC",
+      "display_order": 2,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          2
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_01",
+      "set_type": "VARC",
+      "display_order": 3,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_MS_03",
+      "set_type": "ATOMIC",
+      "display_order": 4,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          4
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_PJ_04",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          4
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_02",
+      "set_type": "VARC",
+      "display_order": 6,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_PJ_05",
+      "set_type": "ATOMIC",
+      "display_order": 7,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          6
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_PJ_06",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          6,
+          7
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_MS_07",
+      "set_type": "ATOMIC",
+      "display_order": 9,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          7
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_03",
+      "set_type": "VARC",
+      "display_order": 10,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          7,
+          8
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SUM_08",
+      "set_type": "ATOMIC",
+      "display_order": 11,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          9
+        ]
+      }
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_04",
+      "set_type": "VARC",
+      "display_order": 12,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          9,
+          10
+        ]
+      }
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_CIRCULAR_01",
+      "set_type": "DILR",
+      "display_order": 1,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_TRAVEL_02",
+      "set_type": "DILR",
+      "display_order": 2,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          13
+        ]
+      }
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_PUZZLE_03",
+      "set_type": "DILR",
+      "display_order": 3,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          14
+        ]
+      }
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_TRADE_04",
+      "set_type": "DILR",
+      "display_order": 4,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          15
+        ]
+      }
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_MOBILE_05",
+      "set_type": "DILR",
+      "display_order": 5,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          16
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_47",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          16,
+          17
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_48",
+      "set_type": "ATOMIC",
+      "display_order": 2,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          17
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_49",
+      "set_type": "ATOMIC",
+      "display_order": 3,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          18
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_50",
+      "set_type": "ATOMIC",
+      "display_order": 4,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          18
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_51",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          18
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_52",
+      "set_type": "ATOMIC",
+      "display_order": 6,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          19
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_53",
+      "set_type": "ATOMIC",
+      "display_order": 7,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          19
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_54",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          19
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_55",
+      "set_type": "ATOMIC",
+      "display_order": 9,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          20
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_56",
+      "set_type": "ATOMIC",
+      "display_order": 10,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          20
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_57",
+      "set_type": "ATOMIC",
+      "display_order": 11,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          21
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_58",
+      "set_type": "ATOMIC",
+      "display_order": 12,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          21
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_59",
+      "set_type": "ATOMIC",
+      "display_order": 13,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          21
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_60",
+      "set_type": "ATOMIC",
+      "display_order": 14,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          22
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_61",
+      "set_type": "ATOMIC",
+      "display_order": 15,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          22
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_62",
+      "set_type": "ATOMIC",
+      "display_order": 16,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          22
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_63",
+      "set_type": "ATOMIC",
+      "display_order": 17,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          23
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_64",
+      "set_type": "ATOMIC",
+      "display_order": 18,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          23
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_65",
+      "set_type": "ATOMIC",
+      "display_order": 19,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          23
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_66",
+      "set_type": "ATOMIC",
+      "display_order": 20,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          23
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_67",
+      "set_type": "ATOMIC",
+      "display_order": 21,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          24
+        ]
+      }
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_68",
+      "set_type": "ATOMIC",
+      "display_order": 22,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>",
+      "metadata": {
+        "source_pages": [
+          24
+        ]
+      }
+    }
+  ],
+  "questions": [
+    {
+      "set_ref": "VARC_PJ_01",
+      "section": "VARC",
+      "client_question_id": "VARC_PJ_01_Q01",
+      "question_number": 1,
+      "sequence_order": 1,
+      "question_type": "TITA",
+      "question_text": "<QUESTION_TEXT_OMITTED>",
+      "options": null,
+      "correct_answer": "<ANSWER_OMITTED>",
+      "solution_text": "<SOLUTION_TEXT_OMITTED>",
+      "topic": "Verbal Ability",
+      "subtopic": "Odd One Out",
+      "difficulty": "medium",
+      "positive_marks": 3,
+      "negative_marks": 0
+    },
+    {
+      "_NOTE": "... 67 more items omitted (total: 68) ..."
+    }
+  ]
+}

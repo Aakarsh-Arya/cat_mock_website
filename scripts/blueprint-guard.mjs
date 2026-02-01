@@ -8,7 +8,7 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
 
-const BLUEPRINT_FILE = 'Docs/BLUEPRINT.md';
+const BLUEPRINT_FILE = 'docs/BLUEPRINT.md';
 const SRC_DIR = 'src';
 
 // Extract anchors from blueprint

@@ -1,0 +1,397 @@
+{
+  "_SCHEMA_NOTE": "This file has been sanitized. Question text, options, answers, and passages have been replaced with placeholders.",
+  "_ORIGINAL_STRUCTURE": "{ schema_version: string, paper: object, question_sets: object, questions: object }",
+  "schema_version": "v3.0",
+  "paper": {
+    "paper_key": "CAT_2023_SLOT2",
+    "title": "CAT 2023 Slot 2",
+    "slug": "cat-2023-slot-2",
+    "description": "Converted from PDF to structured markdown",
+    "year": 2023,
+    "total_questions": 66,
+    "total_marks": 198,
+    "duration_minutes": 120,
+    "sections": [
+      "VARC",
+      "DILR",
+      "QA"
+    ],
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "difficulty_level": "cat-level",
+    "is_free": true,
+    "published": false,
+    "allow_pause": true,
+    "attempt_limit": 0
+  },
+  "question_sets": [
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_01",
+      "set_type": "VARC",
+      "display_order": 1,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_02",
+      "set_type": "VARC",
+      "display_order": 2,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_03",
+      "set_type": "VARC",
+      "display_order": 3,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_RC_04",
+      "set_type": "VARC",
+      "display_order": 4,
+      "content_layout": "split_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SA_01",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SA_02",
+      "set_type": "ATOMIC",
+      "display_order": 6,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SA_03",
+      "set_type": "ATOMIC",
+      "display_order": 7,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SA_04",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SA_05",
+      "set_type": "ATOMIC",
+      "display_order": 9,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SA_06",
+      "set_type": "ATOMIC",
+      "display_order": 10,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "VARC",
+      "client_set_id": "VARC_SA_07",
+      "set_type": "ATOMIC",
+      "display_order": 11,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_SET_01",
+      "set_type": "DILR",
+      "display_order": 1,
+      "content_layout": "single_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_SET_02",
+      "set_type": "DILR",
+      "display_order": 2,
+      "content_layout": "single_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_SET_03",
+      "set_type": "DILR",
+      "display_order": 3,
+      "content_layout": "single_focus",
+      "context_type": "<CONTEXT_TYPE_OMITTED>",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "DILR",
+      "client_set_id": "DILR_SET_04",
+      "set_type": "DILR",
+      "display_order": 4,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_01",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_02",
+      "set_type": "ATOMIC",
+      "display_order": 2,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_03",
+      "set_type": "ATOMIC",
+      "display_order": 3,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_04",
+      "set_type": "ATOMIC",
+      "display_order": 4,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_05",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_06",
+      "set_type": "ATOMIC",
+      "display_order": 6,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_07",
+      "set_type": "ATOMIC",
+      "display_order": 7,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_08",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_09",
+      "set_type": "ATOMIC",
+      "display_order": 9,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_10",
+      "set_type": "ATOMIC",
+      "display_order": 10,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_11",
+      "set_type": "ATOMIC",
+      "display_order": 11,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_12",
+      "set_type": "ATOMIC",
+      "display_order": 12,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_13",
+      "set_type": "ATOMIC",
+      "display_order": 13,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_14",
+      "set_type": "ATOMIC",
+      "display_order": 14,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_15",
+      "set_type": "ATOMIC",
+      "display_order": 15,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_16",
+      "set_type": "ATOMIC",
+      "display_order": 16,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_17",
+      "set_type": "ATOMIC",
+      "display_order": 17,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_18",
+      "set_type": "ATOMIC",
+      "display_order": 18,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_19",
+      "set_type": "ATOMIC",
+      "display_order": 19,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_20",
+      "set_type": "ATOMIC",
+      "display_order": 20,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_21",
+      "set_type": "ATOMIC",
+      "display_order": 21,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "section": "QA",
+      "client_set_id": "QA_ATOMIC_22",
+      "set_type": "ATOMIC",
+      "display_order": 22,
+      "content_layout": "single_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    }
+  ],
+  "questions": [
+    {
+      "set_ref": "VARC_RC_01",
+      "section": "VARC",
+      "client_question_id": "VARC_RC_01_Q1",
+      "question_number": 1,
+      "sequence_order": 1,
+      "question_type": "MCQ",
+      "question_text": "<QUESTION_TEXT_OMITTED>",
+      "options": [
+        "Archaeology helps historians to locate the oldest civilisations in history.",
+        "Archaeology helps historians to ascertain factual accuracy.",
+        "Archaeology helps historians to carry out their primary duty.",
+        "Archaeology helps historians to interpret historical facts."
+      ],
+      "correct_answer": "<ANSWER_OMITTED>",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference",
+      "difficulty": "medium",
+      "difficulty_rationale": "Requires identifying the role of auxiliary sciences as described in the passage.",
+      "solution_text": "<SOLUTION_TEXT_OMITTED>",
+      "positive_marks": 3,
+      "negative_marks": 1
+    },
+    {
+      "_NOTE": "... 65 more items omitted (total: 66) ..."
+    }
+  ]
+}

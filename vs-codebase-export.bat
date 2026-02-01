@@ -11,7 +11,7 @@ del /Q gemini_*.md 2>nul
 
 REM Generate complete codebase export in Markdown format
 echo 📦 Running repomix...
-npx repomix --style markdown --split-output 900kb --ignore "node_modules/**,.next/**,dist/**,build/**,.git/**"
+npx repomix --style markdown --split-output 900kb --ignore ".env.local,.env.*.local"
 
 REM Rename the split files to gemini_XX.md format
 echo 📋 Renaming chunks...

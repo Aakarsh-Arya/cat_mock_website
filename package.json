@@ -6,19 +6,28 @@
     "dev": "cross-env NEXT_DISABLE_TURBOPACK=1 next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "lint:unused": "eslint --max-warnings=0",
+    "test": "vitest run",
+    "knip": "knip",
+    "depcheck": "depcheck",
+    "ts-prune": "ts-prune -p tsconfig.json",
+    "export:vs_codebase": "node scripts/export-vs-codebase.mjs",
+    "export:vs_codebase:v2": "node scripts/export-vs-codebase-v2.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.4.1",
     "@supabase/supabase-js": "^2.75.0",
-    "class-variance-authority": "^0.7.1",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^2.1.1",
     "jwt-decode": "^4.0.0",
     "katex": "^0.16.25",
     "next": "16.1.3",
-    "next-safe-action": "^8.0.11",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-katex": "^3.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "zod": "^4.3.5",
     "zustand": "^5.0.10"
   },
@@ -32,13 +41,20 @@
     "@typescript-eslint/parser": "^8.53.0",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
+    "depcheck": "^1.4.7",
+    "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.3",
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "knip": "^5.51.0",
     "netlify-cli": "^23.9.1",
     "postcss": "^8.5.6",
     "source-map-explorer": "^2.5.3",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5"
+    "ts-prune": "^0.10.3",
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^1.6.0"
   },
   "engines": {
     "node": ">=20"

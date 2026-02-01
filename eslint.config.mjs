@@ -1,6 +1,7 @@
 import nextPlugin from "@next/eslint-plugin-next";
 import tsPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
+import unusedImports from "eslint-plugin-unused-imports";
 
 const eslintConfig = [
   {
@@ -17,6 +18,7 @@ const eslintConfig = [
     plugins: {
       "@next/next": nextPlugin,
       "@typescript-eslint": tsPlugin,
+      "unused-imports": unusedImports,
     },
     languageOptions: {
       parser: tsParser,
@@ -31,6 +33,8 @@ const eslintConfig = [
       ...nextPlugin.configs["core-web-vitals"].rules,
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
       "@typescript-eslint/no-explicit-any": "error",
+      "unused-imports/no-unused-imports": "warn",
+      "unused-imports/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },
   },
 ];

@@ -21,7 +21,7 @@ Secrets/keys stored in **Netlify Env** (never in repo).
 - `/result/[attemptId]` — Post-submit analytics
 - `/dashboard` *(protected)* — My attempts & progress
 - `/auth/sign-in`, `/auth/callback` — Supabase OAuth/email
-- `/api/submit` — server action/function to finalize attempt
+- `/api/submit` — server action/function to submit + score via TypeScript (no SQL finalize_attempt)
 - `/api/webhooks/supabase` — optional (events), future
 - 404/500 error routes as defaults
 
@@ -129,6 +129,19 @@ All tables `uuid` PK; `created_at timestamptz default now()`. **RLS ON** by defa
 
 ### Migration SQL
 See `docs/MIGRATION_M6_RBAC.sql` for complete implementation.
+
+---
+
+## 4b) RBAC Hook Verification
+
+**Enable JWT Hook (Supabase Dashboard)**
+1. Go to **Authentication → Hooks**.
+2. Enable **Customize Access Token (JWT)**.
+3. Select the function **public.custom_access_token_hook**.
+
+**Sanity Check (after sign-in)**
+- In the app, call `supabase.auth.getSession()` and confirm `session.user.app_metadata.user_role` is set.
+- Optionally decode the JWT and confirm `user_role` exists at the root claim.
 
 ---
 

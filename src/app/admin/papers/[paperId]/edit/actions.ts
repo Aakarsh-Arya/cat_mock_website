@@ -1,5 +1,7 @@
 'use server';
 
+import 'server-only';
+
 /**
  * @fileoverview Admin Server Actions for Paper/Question Management
  * @description Uses service role key to bypass RLS for admin operations
@@ -8,7 +10,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import type { QuestionWithAnswer, QuestionContext, Paper } from '@/types/exam';
+import type { QuestionWithAnswer, QuestionContext, Paper, QuestionSet } from '@/types/exam';
 
 // Create admin client with service role key (bypasses RLS)
 function getAdminClient() {
@@ -57,12 +59,9 @@ async function verifyAdmin(): Promise<{ userId: string; email: string }> {
     const supabase = await createActionClient();
     const { data: { user }, error } = await supabase.auth.getUser();
 
-    console.log('[verifyAdmin] getUser result:', { user: user?.email, error: error?.message });
-
     if (error || !user) {
         // Try getSession as fallback
         const { data: { session } } = await supabase.auth.getSession();
-        console.log('[verifyAdmin] getSession fallback:', { session: !!session, user: session?.user?.email });
 
         if (session?.user) {
             return { userId: session.user.id, email: session.user.email || '' };
@@ -70,14 +69,29 @@ async function verifyAdmin(): Promise<{ userId: string; email: string }> {
         throw new Error('Not authenticated');
     }
 
-    // Check admin role - skip check if SKIP_ADMIN_CHECK is set (dev mode)
-    if (process.env.SKIP_ADMIN_CHECK !== 'true') {
-        const isAdmin = user.email?.includes('@admin') ||
-            user.app_metadata?.role === 'admin' ||
-            user.user_metadata?.role === 'admin';
+    // Check admin role - SKIP_ADMIN_CHECK only allowed in non-production (dev mode)
+    const skipAdminCheck = process.env.SKIP_ADMIN_CHECK === 'true' && process.env.NODE_ENV !== 'production';
+    if (!skipAdminCheck) {
+        const { data: { session } } = await supabase.auth.getSession();
+        let role: string | null = session?.user?.app_metadata?.user_role ?? null;
 
-        if (!isAdmin) {
-            throw new Error('Unauthorized: Admin access required');
+        if (!role && session?.access_token) {
+            try {
+                const payload = JSON.parse(Buffer.from(session.access_token.split('.')[1], 'base64').toString('utf-8')) as {
+                    user_role?: string;
+                    app_metadata?: { user_role?: string };
+                };
+                role = payload.user_role ?? payload.app_metadata?.user_role ?? null;
+            } catch {
+                role = null;
+            }
+        }
+
+        if (role !== 'admin') {
+            const { data: isAdmin, error: rpcError } = await supabase.rpc('is_admin');
+            if (rpcError || !isAdmin) {
+                throw new Error('Unauthorized: Admin access required');
+            }
         }
     }
 
@@ -91,12 +105,17 @@ export async function updateQuestion(
     try {
         await verifyAdmin();
         const adminClient = getAdminClient();
+        const resolvedQuestionFormat = questionData.question_format ?? questionData.question_type;
 
         const { data, error } = await adminClient
             .from('questions')
             .update({
                 question_text: questionData.question_text,
-                question_type: questionData.question_type,
+                question_type: questionData.question_type ?? resolvedQuestionFormat,
+                question_format: resolvedQuestionFormat,
+                taxonomy_type: questionData.taxonomy_type ?? null,
+                topic_tag: questionData.topic_tag ?? null,
+                difficulty_rationale: questionData.difficulty_rationale ?? null,
                 options: questionData.options,
                 correct_answer: questionData.correct_answer,
                 positive_marks: questionData.positive_marks,
@@ -105,6 +124,8 @@ export async function updateQuestion(
                 question_image_url: questionData.question_image_url,
                 topic: questionData.topic,
                 difficulty: questionData.difficulty,
+                set_id: questionData.set_id ?? null,
+                sequence_order: questionData.sequence_order ?? null,
                 context_id: questionData.context_id,
                 is_active: true,
                 updated_at: new Date().toISOString(),
@@ -132,6 +153,7 @@ export async function createQuestion(
     try {
         await verifyAdmin();
         const adminClient = getAdminClient();
+        const resolvedQuestionFormat = questionData.question_format ?? questionData.question_type;
 
         const { data, error } = await adminClient
             .from('questions')
@@ -140,7 +162,11 @@ export async function createQuestion(
                 section: questionData.section,
                 question_number: questionData.question_number,
                 question_text: questionData.question_text,
-                question_type: questionData.question_type,
+                question_type: questionData.question_type ?? resolvedQuestionFormat,
+                question_format: resolvedQuestionFormat,
+                taxonomy_type: questionData.taxonomy_type ?? null,
+                topic_tag: questionData.topic_tag ?? null,
+                difficulty_rationale: questionData.difficulty_rationale ?? null,
                 options: questionData.options,
                 correct_answer: questionData.correct_answer,
                 positive_marks: questionData.positive_marks ?? 3,
@@ -149,6 +175,8 @@ export async function createQuestion(
                 question_image_url: questionData.question_image_url,
                 topic: questionData.topic,
                 difficulty: questionData.difficulty,
+                set_id: questionData.set_id ?? null,
+                sequence_order: questionData.sequence_order ?? null,
                 context_id: questionData.context_id,
                 is_active: true,
             })
@@ -235,6 +263,111 @@ export async function createContext(
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('Admin createContext exception:', message);
+        return { success: false, error: message };
+    }
+}
+
+export async function updateQuestionSet(
+    questionSetId: string,
+    setData: Partial<QuestionSet>
+): Promise<{ success: boolean; data?: QuestionSet; error?: string }> {
+    try {
+        await verifyAdmin();
+        const adminClient = getAdminClient();
+
+        const { data, error } = await adminClient
+            .from('question_sets')
+            .update({
+                context_title: setData.context_title,
+                context_body: setData.context_body,
+                context_image_url: setData.context_image_url,
+                context_additional_images: setData.context_additional_images,
+                content_layout: setData.content_layout,
+                context_type: setData.context_type,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', questionSetId)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Admin updateQuestionSet error:', error);
+            return { success: false, error: error.message || 'Failed to update question set' };
+        }
+
+        return { success: true, data: data as QuestionSet };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        console.error('Admin updateQuestionSet exception:', message);
+        return { success: false, error: message };
+    }
+}
+
+export async function createQuestionSet(
+    setData: Partial<QuestionSet>
+): Promise<{ success: boolean; data?: QuestionSet; error?: string }> {
+    try {
+        await verifyAdmin();
+        const adminClient = getAdminClient();
+
+        const { data, error } = await adminClient
+            .from('question_sets')
+            .insert({
+                paper_id: setData.paper_id,
+                section: setData.section,
+                set_type: setData.set_type,
+                content_layout: setData.content_layout,
+                context_type: setData.context_type ?? null,
+                context_title: setData.context_title ?? null,
+                context_body: setData.context_body ?? null,
+                context_image_url: setData.context_image_url ?? null,
+                context_additional_images: setData.context_additional_images ?? null,
+                display_order: setData.display_order ?? 0,
+                question_count: setData.question_count ?? 0,
+                metadata: setData.metadata ?? {},
+                is_active: true,
+                is_published: false,
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Admin createQuestionSet error:', error);
+            return { success: false, error: error.message || 'Failed to create question set' };
+        }
+
+        return { success: true, data: data as QuestionSet };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        console.error('Admin createQuestionSet exception:', message);
+        return { success: false, error: message };
+    }
+}
+
+export async function deleteContext(
+    contextId: string
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        await verifyAdmin();
+        const adminClient = getAdminClient();
+
+        const { error } = await adminClient
+            .from('question_contexts')
+            .update({
+                is_active: false,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', contextId);
+
+        if (error) {
+            console.error('Admin deleteContext error:', error);
+            return { success: false, error: error.message || 'Failed to delete context' };
+        }
+
+        return { success: true };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        console.error('Admin deleteContext exception:', message);
         return { success: false, error: message };
     }
 }

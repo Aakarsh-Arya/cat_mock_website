@@ -14,7 +14,7 @@
 
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type {
     QuestionSet,
     QuestionSetType,
@@ -23,6 +23,7 @@ import type {
     SectionName,
     QuestionType,
     QuestionSetMetadata,
+    ContextType,
 } from '@/types/exam';
 import { isCompositeSet } from '@/types/exam';
 
@@ -77,6 +78,22 @@ const LAYOUT_OPTIONS: { value: ContentLayoutType; label: string }[] = [
     { value: 'image_top', label: 'Image on Top' },
 ];
 
+const CONTEXT_TYPE_OPTIONS: { value: ContextType; label: string }[] = [
+    { value: 'rc_passage', label: 'RC Passage' },
+    { value: 'dilr_set', label: 'DILR Set' },
+    { value: 'caselet', label: 'Caselet' },
+    { value: 'data_table', label: 'Data Table' },
+    { value: 'graph', label: 'Graph' },
+    { value: 'other_shared_stimulus', label: 'Other Shared Stimulus' },
+];
+
+function inferContextType(setType: QuestionSetType): ContextType | '' {
+    if (setType === 'VARC') return 'rc_passage';
+    if (setType === 'DILR') return 'dilr_set';
+    if (setType === 'CASELET') return 'caselet';
+    return '';
+}
+
 const EMPTY_QUESTION: QuestionDraft = {
     sequence_order: 1,
     question_text: '',
@@ -114,6 +131,9 @@ export function QuestionSetEditor({
     const [contentLayout, setContentLayout] = useState<ContentLayoutType>(
         questionSet?.content_layout ?? 'split_passage'
     );
+    const [contextType, setContextType] = useState<ContextType | ''>(
+        questionSet?.context_type ?? inferContextType(questionSet?.set_type ?? 'VARC')
+    );
     const [contextTitle, setContextTitle] = useState(questionSet?.context_title ?? '');
     const [contextBody, setContextBody] = useState(questionSet?.context_body ?? '');
     const [contextImageUrl, setContextImageUrl] = useState(questionSet?.context_image_url ?? '');
@@ -150,6 +170,7 @@ export function QuestionSetEditor({
         if (newMode === 'single') {
             setSetType('ATOMIC');
             setContentLayout('single_focus');
+            setContextType('');
             // Keep only first question for atomic
             setQuestions(prev => [prev[0] ?? { ...EMPTY_QUESTION }]);
         } else {
@@ -157,9 +178,21 @@ export function QuestionSetEditor({
             if (setType === 'ATOMIC') {
                 setSetType('VARC');
                 setContentLayout('split_passage');
+                setContextType(inferContextType('VARC'));
             }
         }
     }, [setType]);
+
+    useEffect(() => {
+        if (setType === 'ATOMIC') {
+            setContextType('');
+            return;
+        }
+
+        if (!contextType) {
+            setContextType(inferContextType(setType));
+        }
+    }, [setType, contextType]);
 
     // ==========================================================================
     // QUESTION MANAGEMENT
@@ -264,6 +297,7 @@ export function QuestionSetEditor({
                 section,
                 set_type: setType,
                 content_layout: contentLayout,
+                context_type: contextType || undefined,
                 context_title: contextTitle || undefined,
                 context_body: contextBody || undefined,
                 context_image_url: contextImageUrl || undefined,
@@ -296,7 +330,7 @@ export function QuestionSetEditor({
         }
     }, [
         validate, questionSet?.id, paperId, section, setType, contentLayout,
-        contextTitle, contextBody, contextImageUrl, metadata, questions, onSave
+        contextType, contextTitle, contextBody, contextImageUrl, metadata, questions, onSave
     ]);
 
     // ==========================================================================
@@ -320,8 +354,8 @@ export function QuestionSetEditor({
                             <button
                                 onClick={() => handleModeChange('set')}
                                 className={`px-4 py-2 text-sm font-medium transition-colors ${mode === 'set'
-                                        ? 'bg-section-varc text-white'
-                                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                                    ? 'bg-section-varc text-white'
+                                    : 'bg-white text-gray-600 hover:bg-gray-50'
                                     }`}
                             >
                                 📚 Create Set (RC/DI)
@@ -329,8 +363,8 @@ export function QuestionSetEditor({
                             <button
                                 onClick={() => handleModeChange('single')}
                                 className={`px-4 py-2 text-sm font-medium transition-colors ${mode === 'single'
-                                        ? 'bg-section-qa text-white'
-                                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                                    ? 'bg-section-qa text-white'
+                                    : 'bg-white text-gray-600 hover:bg-gray-50'
                                     }`}
                             >
                                 📝 Single Question
@@ -359,8 +393,8 @@ export function QuestionSetEditor({
                 {errors.length > 0 && (
                     <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                         <ul className="list-disc list-inside text-sm text-red-600">
-                            {errors.map((error, idx) => (
-                                <li key={idx}>{error}</li>
+                            {errors.map((error) => (
+                                <li key={error}>{error}</li>
                             ))}
                         </ul>
                     </div>
@@ -415,6 +449,22 @@ export function QuestionSetEditor({
                         {/* Context Content (for composite sets) */}
                         {isCompositeSet(setType) && (
                             <>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Context Type
+                                    </label>
+                                    <select
+                                        value={contextType}
+                                        onChange={(e) => setContextType(e.target.value as ContextType)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-section-varc outline-none"
+                                    >
+                                        {CONTEXT_TYPE_OPTIONS.map(opt => (
+                                            <option key={opt.value} value={opt.value}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">
                                         Context Title (optional)
@@ -728,5 +778,3 @@ function QuestionEditor({
         </div>
     );
 }
-
-export default QuestionSetEditor;

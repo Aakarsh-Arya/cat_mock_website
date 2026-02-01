@@ -69,6 +69,14 @@ export type DifficultyLevel = 'easy' | 'medium' | 'hard';
  */
 export type QuestionSetType = 'VARC' | 'DILR' | 'CASELET' | 'ATOMIC';
 
+export type ContextType =
+    | 'rc_passage'
+    | 'dilr_set'
+    | 'caselet'
+    | 'data_table'
+    | 'graph'
+    | 'other_shared_stimulus';
+
 /**
  * Content Layout Types - determines how to render the context
  * - split_passage: Left pane = scrollable text passage, Right pane = questions
@@ -108,6 +116,7 @@ export interface QuestionSet {
     // Set classification
     set_type: QuestionSetType;
     content_layout: ContentLayoutType;
+    context_type?: ContextType | null;
 
     // Context content (The passage, chart, data table)
     context_title?: string;        // e.g., "Passage 1", "Data Set A"
@@ -235,9 +244,18 @@ export interface Question {
     section: SectionName;
     question_number: number;
 
+    // Question Set relationship (Phase D normalization)
+    set_id?: string | null;      // FK to question_sets (null for legacy/orphan questions)
+    sequence_order?: number | null; // Order within the set (1, 2, 3...)
+    exam_order?: number;         // Computed display order within section
+
     // Content
     question_text: string;
     question_type: QuestionType;
+    question_format?: QuestionType;
+    taxonomy_type?: string;
+    topic_tag?: string;
+    difficulty_rationale?: string;
     options: string[] | null;  // For MCQ: ["Option A", "Option B", "Option C", "Option D"]
     context_id?: string;       // Reference to shared passage/context
     context?: QuestionContext; // Populated context (joined from contexts table)
@@ -323,6 +341,7 @@ export interface Paper {
     difficulty_level?: PaperDifficulty;
     is_free: boolean;
     attempt_limit?: number;
+    allow_pause?: boolean;
 
     created_at: string;
     updated_at: string;
@@ -354,6 +373,7 @@ export interface Response {
     // State tracking
     status: QuestionStatus;
     is_marked_for_review: boolean;
+    is_visited: boolean;
 
     // Time analytics
     time_spent_seconds: number;
@@ -370,6 +390,7 @@ export interface ResponseInput {
     answer: string | null;
     status: QuestionStatus;
     is_marked_for_review: boolean;
+    is_visited: boolean;
     time_spent_seconds: number;
     visit_count: number;
 }
@@ -454,6 +475,7 @@ export interface ExamData {
     paper: Paper;
     questions: Question[];
     attempt: Attempt;
+    responses?: Response[];
 }
 
 /** Response state in Zustand store (indexed by question_id) */
@@ -494,6 +516,10 @@ export interface ExamEngineState {
     // Responses (keyed by question_id)
     responses: Record<string, ResponseState>;
 
+    // Pending sync queue (local-first responses awaiting backend sync)
+    pendingSyncResponses: Record<string, { answer: string | null; timestamp: number }>;
+    lastSyncTimestamp: number;
+
     // Timer state per section
     sectionTimers: Record<SectionName, SectionTimerState>;
 
@@ -511,6 +537,7 @@ export interface ExamEngineActions {
     // Initialization
     initializeExam: (data: ExamData) => void;
     setHasHydrated: (hydrated: boolean) => void;
+    setSessionToken: (sessionToken: string | null) => void;
 
     // Navigation
     goToQuestion: (questionId: string, sectionIndex: number, questionIndex: number) => void;
@@ -518,9 +545,18 @@ export interface ExamEngineActions {
     goToPreviousQuestion: () => void;
 
     // Answer management
+    /** Store answer locally without changing status - used when clicking options */
+    setLocalAnswer: (questionId: string, answer: string | null) => void;
+    /** Save answer AND set status to answered - used on "Save and Next" */
+    saveAnswer: (questionId: string, answer: string | null) => void;
+    /** @deprecated Use setLocalAnswer or saveAnswer instead */
     setAnswer: (questionId: string, answer: string | null) => void;
     clearAnswer: (questionId: string) => void;
+    setResponseStatus: (questionId: string, status: QuestionStatus, isMarkedForReview?: boolean) => void;
     toggleMarkForReview: (questionId: string) => void;
+    queuePendingSync: (questionId: string, answer: string | null) => void;
+    clearPendingSync: (questionIds?: string[]) => void;
+    setLastSyncTimestamp: (timestamp: number) => void;
 
     // Status updates
     markQuestionVisited: (questionId: string) => void;

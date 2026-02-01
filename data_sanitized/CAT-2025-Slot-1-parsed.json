@@ -1,0 +1,338 @@
+{
+  "_SCHEMA_NOTE": "This file has been sanitized. Question text, options, answers, and passages have been replaced with placeholders.",
+  "_ORIGINAL_STRUCTURE": "{ schema_version: string, paper: object, question_sets: object, questions: object }",
+  "schema_version": "v3.0",
+  "paper": {
+    "paper_key": "CAT_2025_SLOT1",
+    "slug": "cat-2025-slot-1",
+    "title": "CAT 2025 Slot 1 Question Paper",
+    "year": 2025,
+    "duration_minutes": 120,
+    "total_questions": 68,
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "total_marks": 204,
+    "sections": [
+      "VARC",
+      "DILR",
+      "QA"
+    ],
+    "available_from": "2025-11-24T00:00:00Z",
+    "difficulty_level": "Hard",
+    "is_free": false
+  },
+  "question_sets": [
+    {
+      "client_set_id": "VARC_PJ_01",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_RC_01",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 2,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_PJ_02",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 3,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_PC_01",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 4,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_PC_02",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_RC_02",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 6,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_PJ_03",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 7,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_SUM_01",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_RC_03",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 9,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_PJ_04",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 10,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "VARC_RC_04",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 11,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "VARC_SUM_02",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 12,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "LRDI_SET_01",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 1,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_02",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 2,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_03",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 3,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_04",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 4,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "LRDI_SET_05",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 5,
+      "content_layout": "split_focus",
+      "context_title": "<CONTEXT_TITLE_OMITTED>",
+      "context_body": "<CONTEXT_BODY_OMITTED>"
+    },
+    {
+      "client_set_id": "QA_SET_01",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_02",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 2,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_03",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 3,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_04",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 4,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_05",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 5,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_06",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 6,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_07",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 7,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_08",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 8,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_09",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 9,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_10",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 10,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_11",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 11,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_12",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 12,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_13",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 13,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_14",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 14,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_15",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 15,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_16",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 16,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_17",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 17,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_18",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 18,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_19",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 19,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_20",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 20,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_21",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 21,
+      "content_layout": "single_focus"
+    },
+    {
+      "client_set_id": "QA_SET_22",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 22,
+      "content_layout": "single_focus"
+    }
+  ],
+  "questions": [
+    {
+      "client_question_id": "VARC_Q01",
+      "question_number": 1,
+      "sequence_order": 1,
+      "question_type": "TITA",
+      "question_text": "<QUESTION_TEXT_OMITTED>",
+      "correct_answer": "<ANSWER_OMITTED>",
+      "negative_marks": 0,
+      "topic": "Verbal Ability",
+      "subtopic": "Para Jumbles (Odd One Out)",
+      "difficulty": "medium",
+      "difficulty_rationale": "Sentences 5, 1, 2, and 3 form a philosophical argument about the concept of freedom over death. Sentence 4 is descriptive about public opinion and breaks the philosophical flow.",
+      "solution_text": "<SOLUTION_TEXT_OMITTED>",
+      "set_ref": "VARC_PJ_01",
+      "section": "VARC"
+    },
+    {
+      "_NOTE": "... 67 more items omitted (total: 68) ..."
+    }
+  ]
+}

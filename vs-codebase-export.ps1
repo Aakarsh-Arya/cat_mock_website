@@ -10,7 +10,7 @@ Remove-Item gemini_*.md -ErrorAction SilentlyContinue
 
 # Generate complete codebase export in Markdown format
 Write-Host "📦 Running repomix..." -ForegroundColor Yellow
-& "npx.cmd" repomix --style markdown --split-output 900kb --ignore "node_modules/**,.next/**,dist/**,build/**,.git/**"
+& "npx.cmd" repomix --style markdown --split-output 900kb --ignore ".env.local,.env.*.local"
 
 # Rename the split files to gemini_XX.md format
 Write-Host "📋 Renaming chunks..." -ForegroundColor Yellow
@@ -32,9 +32,10 @@ if ($geminiFiles) {
     $totalSize = ($geminiFiles | Measure-Object -Property Length -Sum).Sum
     $totalSizeMB = [math]::Round($totalSize / 1MB, 2)
     Write-Host ("  Total: " + $totalSizeMB + " MB across " + $geminiFiles.Count + " files") -ForegroundColor Gray
-} else {
+}
+else {
     Write-Host "  No gemini_*.md files found! Repomix may have failed." -ForegroundColor Red
-    Write-Host "  Try running manually: npx repomix --style markdown --split-output 900kb --ignore ""node_modules/**,.next/**,dist/**,build/**,.git/**""" -ForegroundColor Yellow
+    Write-Host "  Try running manually: npx repomix --style markdown --split-output 900kb --ignore "".env.local,.env.*.local""" -ForegroundColor Yellow
 }
 
 Write-Host ""

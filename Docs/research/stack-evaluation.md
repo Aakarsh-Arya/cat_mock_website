@@ -1,7 +1,9 @@
 # Stack Evaluation (SSOT Export)
 
+> **Note:** This document captures initial stack research. Deployment platform is now **Vercel** (not Netlify as originally considered).
+
 ## Primary: Next.js + Supabase (Free Tier)
-- Netlify serves the Next.js App Router with SSR/ISR; Supabase provides Auth, Postgres, and Storage.
+- Vercel serves the Next.js App Router with SSR/ISR; Supabase provides Auth, Postgres, and Storage.
 - Free tier covers 50k MAU, 500 MB database, 1 GB storage, and 5 GB egress, which supports roughly 200 concurrent exam takers.
 - Row-Level Security and signed URLs secure exam data while the JS SDK avoids maintaining custom servers.
 

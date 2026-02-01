@@ -5,13 +5,64 @@
 
 import { sbSSR } from '@/lib/supabase/server';
 import { adminLogger } from '@/lib/logger';
+import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+
+function getAdminClient() {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!url || !serviceKey) {
+        throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY. Admin pages require service role access.');
+    }
+
+    return createClient(url, serviceKey, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+        },
+    });
+}
 
 export default async function QuestionsPage() {
     const supabase = await sbSSR();
 
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+        redirect('/auth/sign-in');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    let role: string | null = session?.user?.app_metadata?.user_role ?? null;
+
+    if (!role && session?.access_token) {
+        try {
+            const payload = JSON.parse(Buffer.from(session.access_token.split('.')[1], 'base64').toString('utf-8')) as {
+                user_role?: string;
+                app_metadata?: { user_role?: string };
+            };
+            role = payload.user_role ?? payload.app_metadata?.user_role ?? null;
+        } catch {
+            role = null;
+        }
+    }
+
+    let isAdmin = role === 'admin';
+
+    if (!isAdmin) {
+        const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin');
+        isAdmin = !rpcError && Boolean(isAdminRpc);
+    }
+
+    if (!isAdmin) {
+        redirect('/dashboard?error=unauthorized');
+    }
+
+    const adminClient = getAdminClient();
+
     // Fetch questions with their paper info
-    const { data: questions, error } = await supabase
+    const { data: questions, error } = await adminClient
         .from('questions')
         .select(`
             *,
@@ -100,10 +151,10 @@ export default async function QuestionsPage() {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <Link
-                                            href={`/admin/questions/${question.id}`}
+                                            href={`/admin/papers/${question.paper_id}/edit`}
                                             className="text-blue-600 hover:text-blue-900"
                                         >
-                                            Edit
+                                            Edit in Paper
                                         </Link>
                                     </td>
                                 </tr>

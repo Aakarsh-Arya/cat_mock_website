@@ -6,17 +6,22 @@
 
 'use client';
 
-import { useMemo, useCallback } from 'react';
-import {
-    useExamStore,
-    useExamTimer,
-    selectCurrentSection,
-} from '@/features/exam-engine';
+import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
+import { useExamStore, useExamTimer, selectCurrentSection } from '@/features/exam-engine';
+import { QuestionPalette } from './QuestionPalette';
+import { ExamFooter } from './ExamFooter';
 import { MCQRenderer } from './MCQRenderer';
 import { TITARenderer } from './TITARenderer';
+import { Calculator } from './Calculator';
 import { MathText } from './MathText';
-import type { Paper, Question, SectionName, QuestionStatus } from '@/types/exam';
+import type { Paper, Question, SectionName } from '@/types/exam';
 import { getQuestionsForSection } from '@/types/exam';
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+const SECTIONS = ['VARC', 'DILR', 'QA'] as const;
 
 // =============================================================================
 // TYPES
@@ -25,41 +30,146 @@ import { getQuestionsForSection } from '@/types/exam';
 interface ExamLayoutProps {
     paper: Paper;
     questions: Question[];
-    onSaveResponse?: (questionId: string, answer: string | null) => Promise<void>;
-    onSubmitExam?: () => Promise<void>;
-    onSectionExpire?: (sectionName: SectionName) => void;
-    onPauseExam?: () => Promise<void>;
+    onSaveResponse?: (questionId: string, answer: string | null) => void | Promise<void>;
+    onSubmitExam?: () => void | Promise<void>;
+    onSectionExpire?: (sectionName: SectionName) => void | Promise<void>;
+    onPauseExam?: () => void | Promise<void>;
+    layoutMode?: 'current' | 'three-column';
 }
 
 // =============================================================================
-// TCS iON HEADER (60px height, gradient background)
+// TCS iON HEADER
 // =============================================================================
 
 interface ExamHeaderProps {
     paper: Paper;
     candidateName?: string;
+    candidatePhotoUrl?: string;
+    onSectionSelect: (section: SectionName) => void;
+    onToggleCalculator: () => void;
+    isCalculatorVisible: boolean;
+    hasPendingSync: boolean;
+    isSyncing: boolean;
+    onSyncNow?: () => void;
+    onPauseExam?: () => void | Promise<void>;
+    allowPause: boolean;
+    timeLeftDisplay: string;
 }
 
-function ExamHeader({ paper, candidateName = 'Candidate' }: ExamHeaderProps) {
-    const { timerData } = useExamTimer();
+function ExamHeader({
+    paper,
+    candidateName = 'Candidate',
+    candidatePhotoUrl,
+    onSectionSelect,
+    onToggleCalculator,
+    isCalculatorVisible,
+    hasPendingSync,
+    isSyncing,
+    onSyncNow,
+    onPauseExam,
+    allowPause,
+    timeLeftDisplay,
+}: ExamHeaderProps) {
+    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
+
+    const initials = useMemo(
+        () =>
+            candidateName
+                .split(' ')
+                .filter(Boolean)
+                .map((n) => n[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2),
+        [candidateName]
+    );
 
     return (
-        <header className="sticky top-0 z-50 h-header flex items-center justify-between px-5 bg-gradient-to-r from-exam-header-from to-exam-header-to border-b-2 border-exam-header-border">
-            {/* Left: Exam Title */}
-            <h1 className="text-lg font-semibold text-white">
-                {paper.title}
-            </h1>
+        <header className="h-16 flex items-center justify-between px-5 bg-gradient-to-r from-exam-header-from to-exam-header-to border-b-2 border-exam-header-border">
+            {/* Left: Section Tabs (CAT sections are LOCKED; keep tabs for UI, disable navigation) */}
+            <div className="flex items-center gap-1" role="tablist" aria-label="Exam sections">
+                {SECTIONS.map((section, index) => {
+                    const isActive = index === currentSectionIndex;
+                    const displayName = section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section;
 
-            {/* Right: Candidate + Timer */}
-            <div className="flex items-center gap-7.5">
-                {/* Candidate Name */}
-                <div className="px-4 py-2 rounded text-white text-base bg-white/10">
-                    {candidateName}
+                    return (
+                        <button
+                            key={section}
+                            type="button"
+                            role="tab"
+                            aria-selected={isActive}
+                            aria-controls={`section-panel-${section}`}
+                            disabled={!isActive}
+                            className={`px-4 py-2 text-sm font-semibold rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b3d91] ${isActive
+                                ? 'bg-[#2D89EF] text-white'
+                                : 'bg-white/10 text-white/60 opacity-70 cursor-not-allowed'
+                                }`}
+                            onClick={() => {
+                                // Prevent accidental calls into store navigation that is intentionally restricted
+                                if (isActive) onSectionSelect(section);
+                            }}
+                        >
+                            {displayName}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* Center: Exam Title */}
+            <h1 className="text-lg font-semibold text-white">{paper.title}</h1>
+
+            {/* Right: Profile + Timer */}
+            <div className="flex items-center gap-5">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-white/10">
+                    {candidatePhotoUrl ? (
+                        <img
+                            src={candidatePhotoUrl}
+                            alt=""
+                            aria-hidden="true"
+                            className="w-8 h-8 rounded-full object-cover border border-white/30"
+                        />
+                    ) : (
+                        <div
+                            className="w-8 h-8 rounded-full bg-[#2D89EF] flex items-center justify-center text-xs font-semibold text-white border border-white/30"
+                            aria-hidden="true"
+                        >
+                            {initials}
+                        </div>
+                    )}
+                    <span className="text-white text-sm">{candidateName}</span>
                 </div>
 
-                {/* Timer */}
-                <div className="text-base font-bold text-timer font-mono">
-                    Time Left: {timerData.displayTime}
+                <div className="text-base font-bold text-timer font-mono">Time Left : {timeLeftDisplay}</div>
+
+                <div className="flex items-center gap-2">
+                    {onSyncNow && hasPendingSync && (
+                        <button
+                            type="button"
+                            onClick={onSyncNow}
+                            disabled={isSyncing}
+                            className="px-2.5 py-1 rounded bg-white/10 text-white text-xs font-semibold hover:bg-white/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                            {isSyncing ? 'Syncing...' : 'Sync'}
+                        </button>
+                    )}
+                    {!hasPendingSync && isSyncing && <span className="text-xs text-white/80">Syncing...</span>}
+                    {allowPause && onPauseExam && (
+                        <button
+                            type="button"
+                            onClick={onPauseExam}
+                            className="px-2.5 py-1 rounded bg-white/10 text-white text-xs font-semibold hover:bg-white/20"
+                        >
+                            Pause
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        onClick={onToggleCalculator}
+                        className={`px-2.5 py-1 rounded text-xs font-semibold ${isCalculatorVisible ? 'bg-white text-[#0b3d91]' : 'bg-white/10 text-white hover:bg-white/20'
+                            }`}
+                    >
+                        Calculator
+                    </button>
                 </div>
             </div>
         </header>
@@ -67,47 +177,7 @@ function ExamHeader({ paper, candidateName = 'Candidate' }: ExamHeaderProps) {
 }
 
 // =============================================================================
-// SECTION INDICATOR BAR (48px height)
-// =============================================================================
-
-function SectionIndicatorBar() {
-    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
-    const sections = ['VARC', 'DILR', 'QA'] as const;
-
-    // Dynamic Tailwind classes for section colors
-    const getSectionClasses = (section: typeof sections[number], isActive: boolean) => {
-        const baseClasses = 'flex-1 flex items-center justify-center text-base font-semibold cursor-pointer transition-colors duration-300';
-        if (!isActive) {
-            return `${baseClasses} bg-section-inactive text-exam-text-muted hover:bg-gray-200`;
-        }
-        switch (section) {
-            case 'VARC': return `${baseClasses} bg-section-varc text-white`;
-            case 'DILR': return `${baseClasses} bg-section-dilr text-white`;
-            case 'QA': return `${baseClasses} bg-section-qa text-white`;
-            default: return baseClasses;
-        }
-    };
-
-    return (
-        <div className="sticky top-header z-40 h-section-bar flex bg-white border-b border-gray-300">
-            {sections.map((section, index) => {
-                const isActive = index === currentSectionIndex;
-
-                return (
-                    <div
-                        key={section}
-                        className={getSectionClasses(section, isActive)}
-                    >
-                        {section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section}
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
-
-// =============================================================================
-// QUESTION METADATA BAR (40px height)
+// QUESTION METADATA BAR
 // =============================================================================
 
 interface QuestionMetadataBarProps {
@@ -116,24 +186,23 @@ interface QuestionMetadataBarProps {
 }
 
 function QuestionMetadataBar({ question, questionNumber }: QuestionMetadataBarProps) {
-    const marks = question.negative_marks > 0
-        ? `+${question.positive_marks} -${question.negative_marks}`
-        : `+${question.positive_marks} -0`;
+    const marks =
+        question.negative_marks > 0
+            ? `+${question.positive_marks} / -${question.negative_marks}`
+            : `+${question.positive_marks} / -0`;
 
     return (
         <div className="h-metadata-bar flex items-center justify-between px-5 bg-exam-bg-pane border-y border-exam-bg-border-light">
+            <span className="text-[15px] font-semibold text-exam-text-primary">Question No. {questionNumber}</span>
             <span className="text-sm text-exam-text-secondary">
-                Type: {question.question_type} | Marks: {marks}
-            </span>
-            <span className="text-[15px] font-semibold text-exam-text-primary">
-                Question No. {questionNumber}
+                Type : {question.question_type} | Marks : {marks}
             </span>
         </div>
     );
 }
 
 // =============================================================================
-// QUESTION PANE (Left Column - 65%)
+// QUESTION PANE
 // =============================================================================
 
 interface QuestionPaneProps {
@@ -142,231 +211,66 @@ interface QuestionPaneProps {
 
 function QuestionPane({ question }: QuestionPaneProps) {
     return (
-        <div className="w-2/3 overflow-y-auto bg-exam-bg-white px-10 py-8 border-r border-exam-bg-border">
-            {/* Context/Passage if exists */}
-            {question.context && (
-                <div className="mb-6 pb-6 border-b border-gray-200">
-                    {question.context.title && (
-                        <h3 className="text-[15px] font-semibold text-exam-header-from mb-3">
-                            {question.context.title}
-                        </h3>
-                    )}
-                    {question.context.image_url && (
-                        <div className="mb-4">
-                            <img
-                                src={question.context.image_url}
-                                alt="Context diagram"
-                                className="max-w-full h-auto rounded border border-gray-200"
-                            />
-                        </div>
-                    )}
-                    <div className="text-[15px] leading-exam text-exam-text-body whitespace-pre-wrap mb-5">
-                        <MathText text={question.context.content} />
-                    </div>
-                </div>
-            )}
-
-            {/* Question Image */}
+        <div className="w-full bg-exam-bg-white px-6 py-6">
             {question.question_image_url && (
                 <div className="mb-5">
                     <img
                         src={question.question_image_url}
                         alt="Question diagram"
-                        className="max-w-full h-auto rounded border border-gray-200"
+                        className="max-w-full max-h-64 w-auto h-auto object-contain rounded border border-gray-200"
                     />
                 </div>
             )}
 
-            {/* Question Text */}
             <div className="text-[15px] leading-exam text-exam-text-body mb-5">
                 <MathText text={question.question_text} />
             </div>
 
-            {/* Answer Options */}
-            {question.question_type === 'MCQ' ? (
-                <MCQRenderer question={question} />
-            ) : (
-                <TITARenderer question={question} />
-            )}
+            {question.question_type === 'MCQ' ? <MCQRenderer question={question} /> : <TITARenderer question={question} />}
         </div>
     );
 }
 
 // =============================================================================
-// NAVIGATION PANE (Right Column - 35%)
+// CONTEXT PANE
 // =============================================================================
 
-interface NavigationPaneProps {
-    questions: Question[];
-    sectionQuestions: Question[];
-    currentQuestionIndex: number;
-    onSaveResponse?: (questionId: string, answer: string | null) => Promise<void>;
+interface ContextPaneProps {
+    question: Question;
+    sectionLabel: string;
 }
 
-function NavigationPane({
-    questions,
-    sectionQuestions,
-    currentQuestionIndex,
-    onSaveResponse,
-}: NavigationPaneProps) {
-    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
-    const responses = useExamStore((s) => s.responses);
-    const goToQuestion = useExamStore((s) => s.goToQuestion);
-    const toggleMarkForReview = useExamStore((s) => s.toggleMarkForReview);
-    const clearAnswer = useExamStore((s) => s.clearAnswer);
-    const setAnswer = useExamStore((s) => s.setAnswer);
-
-    const currentQuestion = sectionQuestions[currentQuestionIndex];
-
-    // Handle question grid click
-    const handleQuestionClick = useCallback((question: Question, index: number) => {
-        goToQuestion(question.id, currentSectionIndex, index);
-    }, [goToQuestion, currentSectionIndex]);
-
-    // Handle Mark for Review & Next
-    const handleMarkForReview = useCallback(() => {
-        if (!currentQuestion) return;
-        toggleMarkForReview(currentQuestion.id);
-        // Move to next question
-        if (currentQuestionIndex < sectionQuestions.length - 1) {
-            const nextQ = sectionQuestions[currentQuestionIndex + 1];
-            goToQuestion(nextQ.id, currentSectionIndex, currentQuestionIndex + 1);
-        }
-    }, [currentQuestion, currentQuestionIndex, sectionQuestions, toggleMarkForReview, goToQuestion, currentSectionIndex]);
-
-    // Handle Clear Response
-    const handleClearResponse = useCallback(() => {
-        if (!currentQuestion) return;
-        clearAnswer(currentQuestion.id);
-    }, [currentQuestion, clearAnswer]);
-
-    // Handle Save & Next
-    const handleSaveNext = useCallback(async () => {
-        if (!currentQuestion) return;
-
-        const response = responses[currentQuestion.id];
-        if (response?.answer) {
-            // Mark as answered
-            setAnswer(currentQuestion.id, response.answer);
-            // Persist to server
-            await onSaveResponse?.(currentQuestion.id, response.answer);
-        }
-
-        // Move to next question
-        if (currentQuestionIndex < sectionQuestions.length - 1) {
-            const nextQ = sectionQuestions[currentQuestionIndex + 1];
-            goToQuestion(nextQ.id, currentSectionIndex, currentQuestionIndex + 1);
-        }
-    }, [currentQuestion, currentQuestionIndex, sectionQuestions, responses, setAnswer, goToQuestion, currentSectionIndex, onSaveResponse]);
+function ContextPane({ question, sectionLabel }: ContextPaneProps) {
+    const context = question.context;
 
     return (
-        <div className="w-1/3 flex flex-col h-full bg-exam-bg-pane p-6">
-            {/* Title */}
-            <h3 className="text-base font-semibold text-exam-header-from text-center mb-5">
-                Choose a Question
-            </h3>
-
-            {/* Question Grid - 6 columns */}
-            <div className="grid grid-cols-6 gap-2 mb-auto">
-                {sectionQuestions.map((question, index) => {
-                    const response = responses[question.id];
-                    const status: QuestionStatus = response?.status ?? 'not_visited';
-                    const isCurrent = index === currentQuestionIndex;
-
-                    // Determine button classes based on status using Tailwind
-                    const getButtonClasses = () => {
-                        const baseClasses = 'w-q-btn h-q-btn flex items-center justify-center text-base font-medium cursor-pointer transition-all duration-200 hover:opacity-80 rounded';
-                        if (isCurrent) {
-                            return `${baseClasses} bg-status-current text-white border-2 border-status-current-dark`;
-                        }
-                        if (status === 'answered' || status === 'answered_marked') {
-                            return `${baseClasses} bg-status-answered text-white border border-status-answered-dark`;
-                        }
-                        if (status === 'marked') {
-                            return `${baseClasses} bg-status-marked text-white border border-status-marked-dark`;
-                        }
-                        if (status === 'visited') {
-                            return `${baseClasses} bg-status-visited text-white border border-status-visited-dark`;
-                        }
-                        // Not visited - default white
-                        return `${baseClasses} bg-status-not-visited text-exam-header-from border border-status-border`;
-                    };
-
-                    return (
-                        <button
-                            key={question.id}
-                            type="button"
-                            onClick={() => handleQuestionClick(question, index)}
-                            className={getButtonClasses()}
-                            title={`Question ${index + 1}`}
-                        >
-                            {index + 1}
-                        </button>
-                    );
-                })}
+        <div className="w-full h-full bg-exam-bg-white px-6 py-6 overflow-y-auto">
+            <div className="mb-4">
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-600 text-white">
+                    {sectionLabel}
+                </span>
             </div>
 
-            {/* Legend */}
-            <div className="mt-4 pt-4 border-t border-gray-300">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-status-answered" />
-                        <span className="text-gray-600">Answered</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-status-visited" />
-                        <span className="text-gray-600">Not Answered</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-white border border-status-border" />
-                        <span className="text-gray-600">Not Visited</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 rounded bg-status-marked" />
-                        <span className="text-gray-600">Marked</span>
+            {context ? (
+                <div>
+                    {context.title && <h3 className="text-[15px] font-semibold text-exam-header-from mb-3">{context.title}</h3>}
+                    {context.image_url && (
+                        <div className="mb-4">
+                            <img
+                                src={context.image_url}
+                                alt="Context diagram"
+                                className="max-w-full max-h-64 w-auto h-auto object-contain rounded border border-gray-200"
+                            />
+                        </div>
+                    )}
+                    <div className="text-[15px] leading-exam text-exam-text-body whitespace-pre-wrap mb-5">
+                        <MathText text={context.content} />
                     </div>
                 </div>
-            </div>
-
-            {/* Bottom Buttons */}
-            <div className="flex justify-between gap-2 mt-8 pt-4 border-t border-gray-300">
-                <button
-                    type="button"
-                    onClick={handleMarkForReview}
-                    className="flex-1 h-btn text-sm font-semibold text-white rounded cursor-pointer transition-colors duration-200 hover:opacity-90 bg-section-varc border-none"
-                >
-                    Mark for Review & Next
-                </button>
-                <button
-                    type="button"
-                    onClick={handleClearResponse}
-                    className="flex-1 h-btn text-sm font-semibold text-white rounded cursor-pointer transition-colors duration-200 hover:opacity-90 bg-gray-400 border-none"
-                >
-                    Clear Response
-                </button>
-                <button
-                    type="button"
-                    onClick={handleSaveNext}
-                    className="flex-1 h-btn text-sm font-semibold text-white rounded cursor-pointer transition-colors duration-200 hover:opacity-90 bg-emerald-600 border-none"
-                >
-                    Save & Next
-                </button>
-            </div>
+            ) : (
+                <div className="text-sm text-gray-500">No passage for this question.</div>
+            )}
         </div>
-    );
-}
-
-// =============================================================================
-// FOOTER (50px height)
-// =============================================================================
-
-function ExamFooter() {
-    return (
-        <footer className="h-footer flex items-center px-8 bg-exam-header-from border-t border-exam-header-border">
-            <span className="text-sm text-section-inactive">
-                © CAT 2025 - Mock Exam Platform
-            </span>
-        </footer>
     );
 }
 
@@ -381,27 +285,283 @@ export function ExamLayout({
     onSubmitExam,
     onSectionExpire,
     onPauseExam,
+    layoutMode = 'current',
 }: ExamLayoutProps) {
     const currentSection = useExamStore(selectCurrentSection);
     const currentQuestionIndex = useExamStore((s) => s.currentQuestionIndex);
+    const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
+    const responses = useExamStore((s) => s.responses);
+
+    const goToQuestion = useExamStore((s) => s.goToQuestion);
+    const toggleMarkForReview = useExamStore((s) => s.toggleMarkForReview);
+    const clearAnswer = useExamStore((s) => s.clearAnswer);
+    const saveAnswer = useExamStore((s) => s.saveAnswer);
+    const setResponseStatus = useExamStore((s) => s.setResponseStatus);
+
+    const queuePendingSync = useExamStore((s) => s.queuePendingSync);
+    const pendingSyncResponses = useExamStore((s) => s.pendingSyncResponses);
+    const clearPendingSync = useExamStore((s) => s.clearPendingSync);
+    const setLastSyncTimestamp = useExamStore((s) => s.setLastSyncTimestamp);
+
     const hasHydrated = useExamStore((s) => s.hasHydrated);
     const isSubmitting = useExamStore((s) => s.isSubmitting);
 
-    // Initialize timer with callbacks
-    const { isAutoSubmitting } = useExamTimer({
-        onSectionExpire: onSectionExpire,
-        onExamComplete: onSubmitExam,
+    // Persist sidebar visibility to localStorage (prevents “lost sidebar” after refresh)
+    const [isSidebarVisible, setIsSidebarVisible] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('exam-sidebar-visible');
+            return saved !== null ? saved === 'true' : true;
+        }
+        return true;
+    });
+    const [isCalculatorVisible, setIsCalculatorVisible] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('exam-sidebar-visible', String(isSidebarVisible));
+        }
+    }, [isSidebarVisible]);
+
+    const hasPendingSync = useMemo(() => Object.keys(pendingSyncResponses).length > 0, [pendingSyncResponses]);
+
+    const syncInFlight = useRef(false);
+    const pendingSyncRef = useRef(pendingSyncResponses);
+
+    // Keep ref in sync for unload handler / async flows
+    useEffect(() => {
+        pendingSyncRef.current = pendingSyncResponses;
+    }, [pendingSyncResponses]);
+
+    // Sync Logic
+    const syncPendingResponses = useCallback(async () => {
+        if (!onSaveResponse) return;
+        if (syncInFlight.current) return;
+
+        const entries = Object.entries(pendingSyncRef.current);
+        if (entries.length === 0) return;
+
+        syncInFlight.current = true;
+        setIsSyncing(true);
+
+        const succeeded: string[] = [];
+        try {
+            for (const [questionId, payload] of entries) {
+                // Normalize empty-string to null (backend usually expects null for “no answer”)
+                const answer = payload?.answer === '' ? null : (payload?.answer ?? null);
+
+                try {
+                    await onSaveResponse(questionId, answer);
+                    succeeded.push(questionId);
+                } catch {
+                    // keep it pending; next sync attempt will retry
+                }
+            }
+
+            if (succeeded.length > 0) {
+                clearPendingSync(succeeded);
+                setLastSyncTimestamp(Date.now());
+            }
+        } finally {
+            syncInFlight.current = false;
+            setIsSyncing(false);
+        }
+    }, [onSaveResponse, clearPendingSync, setLastSyncTimestamp]);
+
+    // Ref to coordinate auto-submit vs manual submit
+    const autoSubmitInProgressRef = useRef(false);
+
+    const handleAutoSubmitExam = useCallback(async () => {
+        // RACE CONDITION FIX: Check if manual submit already in progress
+        if (isSubmitting) {
+            // Manual submit is already running, skip auto-submit
+            console.log('[ExamLayout] Auto-submit skipped: manual submit in progress');
+            return;
+        }
+
+        // Prevent duplicate auto-submit calls
+        if (autoSubmitInProgressRef.current) {
+            console.log('[ExamLayout] Auto-submit skipped: already in progress');
+            return;
+        }
+        autoSubmitInProgressRef.current = true;
+
+        try {
+            await syncPendingResponses();
+        } catch {
+            // best-effort; still submit
+        }
+        try {
+            await onSubmitExam?.();
+        } finally {
+            autoSubmitInProgressRef.current = false;
+        }
+    }, [syncPendingResponses, onSubmitExam, isSubmitting]);
+
+    const handleSectionExpire = useCallback(
+        async (sectionName: SectionName) => {
+            try {
+                await syncPendingResponses();
+            } catch {
+                // best-effort
+            }
+            await onSectionExpire?.(sectionName);
+        },
+        [syncPendingResponses, onSectionExpire]
+    );
+
+    // IMPORTANT: only call useExamTimer ONCE in this layout to avoid duplicate intervals/expiry triggers.
+    const { isAutoSubmitting, timerData } = useExamTimer({
+        onSectionExpire: handleSectionExpire,
+        onExamComplete: handleAutoSubmitExam,
     });
 
-    // Get questions for current section
-    const sectionQuestions = useMemo(() => {
-        return getQuestionsForSection(questions, currentSection);
-    }, [questions, currentSection]);
+    const handleManualSubmitExam = useCallback(async () => {
+        if (isSyncing || isSubmitting || isAutoSubmitting) return;
 
-    // Current question
+        const confirmed = window.confirm('Are you sure you want to submit the exam? This action cannot be undone.');
+        if (!confirmed) return;
+
+        try {
+            await syncPendingResponses();
+        } catch {
+            // best-effort; still submit
+        }
+        await onSubmitExam?.();
+    }, [isSyncing, isSubmitting, isAutoSubmitting, syncPendingResponses, onSubmitExam]);
+
+    const sectionQuestions = useMemo(() => getQuestionsForSection(questions, currentSection), [questions, currentSection]);
     const currentQuestion = sectionQuestions[currentQuestionIndex];
 
-    // Show loading state while hydrating
+    // Tabs are disabled, but keep handler in case you later allow same-section jumps.
+    const handleSectionSelect = useCallback(
+        (section: SectionName) => {
+            const sectionIndex = SECTIONS.indexOf(section);
+            const sectionQs = getQuestionsForSection(questions, section);
+            const firstQuestion = sectionQs[0];
+
+            if (firstQuestion) {
+                goToQuestion(firstQuestion.id, sectionIndex, 0);
+            }
+        },
+        [questions, goToQuestion]
+    );
+
+    const handleSaveNext = useCallback(() => {
+        if (!currentQuestion) return;
+        if (isSyncing || isSubmitting || isAutoSubmitting) return;
+
+        const response = responses[currentQuestion.id];
+
+        if (response) {
+            const hasAnswer = response.answer !== null && response.answer !== undefined && response.answer !== '';
+            const answer = hasAnswer ? response.answer : null;
+
+            if (hasAnswer) {
+                saveAnswer(currentQuestion.id, response.answer);
+            } else {
+                setResponseStatus(currentQuestion.id, 'visited', false);
+            }
+
+            // Always queue the latest answer on Save & Next (prevents “saved locally but never synced”)
+            queuePendingSync(currentQuestion.id, answer);
+        }
+
+        if (currentQuestionIndex < sectionQuestions.length - 1) {
+            const nextQ = sectionQuestions[currentQuestionIndex + 1];
+            goToQuestion(nextQ.id, currentSectionIndex, currentQuestionIndex + 1);
+        }
+    }, [
+        currentQuestion,
+        responses,
+        saveAnswer,
+        setResponseStatus,
+        queuePendingSync,
+        currentQuestionIndex,
+        sectionQuestions,
+        goToQuestion,
+        currentSectionIndex,
+        isSyncing,
+        isSubmitting,
+        isAutoSubmitting,
+    ]);
+
+    const handleClearResponse = useCallback(() => {
+        if (!currentQuestion) return;
+        if (isSyncing || isSubmitting || isAutoSubmitting) return;
+        clearAnswer(currentQuestion.id);
+        // clearAnswer action already queues pending sync in the store
+    }, [currentQuestion, clearAnswer, isSyncing, isSubmitting, isAutoSubmitting]);
+
+    const handleMarkForReview = useCallback(() => {
+        if (!currentQuestion) return;
+        if (isSyncing || isSubmitting || isAutoSubmitting) return;
+
+        const response = responses[currentQuestion.id];
+        const hasLocalAnswer = response?.answer !== null && response?.answer !== '' && response?.answer !== undefined;
+
+        if (hasLocalAnswer) {
+            toggleMarkForReview(currentQuestion.id);
+            saveAnswer(currentQuestion.id, response!.answer);
+            queuePendingSync(currentQuestion.id, response!.answer ?? null);
+        } else {
+            toggleMarkForReview(currentQuestion.id);
+            setResponseStatus(currentQuestion.id, 'marked', true);
+            queuePendingSync(currentQuestion.id, null);
+        }
+
+        if (currentQuestionIndex < sectionQuestions.length - 1) {
+            const nextQ = sectionQuestions[currentQuestionIndex + 1];
+            goToQuestion(nextQ.id, currentSectionIndex, currentQuestionIndex + 1);
+        }
+    }, [
+        currentQuestion,
+        responses,
+        toggleMarkForReview,
+        saveAnswer,
+        setResponseStatus,
+        queuePendingSync,
+        currentQuestionIndex,
+        sectionQuestions,
+        goToQuestion,
+        currentSectionIndex,
+        isSyncing,
+        isSubmitting,
+        isAutoSubmitting,
+    ]);
+
+    // Try to sync before unload if anything is pending (best-effort)
+    useEffect(() => {
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            if (Object.keys(pendingSyncRef.current).length === 0) return;
+            void syncPendingResponses();
+            event.preventDefault();
+            event.returnValue = '';
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [syncPendingResponses]);
+
+    // Calculator hotkey: Ctrl+Shift+C
+    // Sidebar toggle hotkey: Ctrl+B
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c') {
+                event.preventDefault();
+                setIsCalculatorVisible((prev) => !prev);
+            }
+            if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'b') {
+                event.preventDefault();
+                setIsSidebarVisible((prev) => !prev);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
+
+    // Loading State
     if (!hasHydrated) {
         return (
             <div className="min-h-screen bg-exam-bg-page flex items-center justify-center">
@@ -413,15 +573,13 @@ export function ExamLayout({
         );
     }
 
-    // Show submitting state
+    // Submitting State
     if (isSubmitting || isAutoSubmitting) {
         return (
             <div className="min-h-screen bg-exam-bg-page flex items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4" />
-                    <p className="text-exam-text-muted">
-                        {isAutoSubmitting ? 'Auto-submitting section...' : 'Submitting exam...'}
-                    </p>
+                    <p className="text-exam-text-muted">{isAutoSubmitting ? 'Auto-submitting section...' : 'Submitting exam...'}</p>
                 </div>
             </div>
         );
@@ -437,41 +595,104 @@ export function ExamLayout({
         );
     }
 
+    const isLastSection = currentSectionIndex === 2;
+
+    const hasContext = Boolean(
+        currentQuestion.context &&
+        (currentQuestion.context.title || currentQuestion.context.content || currentQuestion.context.image_url)
+    );
+
+    const sectionLabel = currentSection === 'DILR' ? 'LRDI' : currentSection === 'QA' ? 'Quant' : currentSection;
+
+    const getGridCols = () => {
+        if (layoutMode === 'three-column') {
+            if (isSidebarVisible) return 'grid-cols-[48%_33%_19%]';
+            return hasContext ? 'grid-cols-[48%_52%]' : 'grid-cols-1';
+        }
+        if (!hasContext) {
+            return isSidebarVisible ? 'grid-cols-[81%_19%]' : 'grid-cols-1';
+        }
+        return isSidebarVisible ? 'grid-cols-[48%_33%_19%]' : 'grid-cols-[48%_52%]';
+    };
+
+    const questionPaneColSpan = layoutMode === 'three-column' && !hasContext && isSidebarVisible ? 'col-span-2' : '';
+
     return (
-        <div className="min-h-screen flex flex-col w-full font-exam text-sm leading-normal bg-exam-bg-page">
-            {/* Full width container - no margins */}
-            <div className="flex flex-col min-h-screen w-full overflow-hidden">
-                {/* Header - 60px (sticky) */}
-                <ExamHeader paper={paper} />
+        <div className="relative h-screen w-screen overflow-hidden flex flex-col min-h-0 min-w-0 font-exam text-sm leading-normal bg-exam-bg-page">
+            <ExamHeader
+                paper={paper}
+                onSectionSelect={handleSectionSelect}
+                onToggleCalculator={() => setIsCalculatorVisible((prev) => !prev)}
+                isCalculatorVisible={isCalculatorVisible}
+                hasPendingSync={hasPendingSync}
+                isSyncing={isSyncing}
+                onSyncNow={onSaveResponse ? () => void syncPendingResponses() : undefined}
+                onPauseExam={onPauseExam}
+                allowPause={paper.allow_pause !== false}
+                timeLeftDisplay={timerData?.displayTime ?? '00:00:00'}
+            />
 
-                {/* Section Indicator Bar - 48px (sticky) */}
-                <SectionIndicatorBar />
+            {!isSidebarVisible && (
+                <button
+                    type="button"
+                    onClick={() => setIsSidebarVisible(true)}
+                    className="absolute z-30 top-24 right-2 px-3 py-2 rounded-full bg-slate-900 text-white text-xs shadow-lg hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2D89EF]"
+                    aria-label="Open navigation"
+                >
+                    Open Navigation
+                </button>
+            )}
 
-                {/* Question Metadata Bar - 40px */}
-                <QuestionMetadataBar
-                    question={currentQuestion}
-                    questionNumber={currentQuestionIndex + 1}
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+                <div className={`flex-1 grid overflow-hidden min-h-0 min-w-0 ${getGridCols()}`}>
+                    {hasContext && (
+                        <div className="border-r border-exam-bg-border-light min-h-0">
+                            <ContextPane question={currentQuestion} sectionLabel={sectionLabel} />
+                        </div>
+                    )}
+
+                    <div className={`relative flex flex-col bg-exam-bg-white min-h-0 min-w-0 ${questionPaneColSpan}`}>
+                        <QuestionMetadataBar question={currentQuestion} questionNumber={currentQuestionIndex + 1} />
+
+                        <div className="flex-1 overflow-y-auto min-h-0">
+                            <QuestionPane question={currentQuestion} />
+                        </div>
+
+                        {/* Sidebar toggle kept INSIDE pane (no negative right), so it never gets clipped by overflow-hidden parents */}
+                        <button
+                            type="button"
+                            onClick={() => setIsSidebarVisible((prev) => !prev)}
+                            className="absolute z-20 top-1/2 right-0 -translate-y-1/2 w-6 h-12 rounded-r bg-slate-200 border border-slate-300 shadow-sm flex items-center justify-center text-xs text-slate-600 hover:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2D89EF]"
+                            aria-label={isSidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+                        >
+                            {isSidebarVisible ? '›' : '‹'}
+                        </button>
+                    </div>
+
+                    {isSidebarVisible && (
+                        <aside className="border-l border-exam-bg-border-light flex flex-col bg-slate-50 overflow-y-auto min-h-0 min-w-0">
+                            <QuestionPalette
+                                questions={questions}
+                                className="h-full rounded-none shadow-none border-0 bg-transparent sticky top-0"
+                            />
+                        </aside>
+                    )}
+                </div>
+
+                <ExamFooter
+                    onSaveNext={handleSaveNext}
+                    onClear={handleClearResponse}
+                    onMarkReview={handleMarkForReview}
+                    onSubmit={handleManualSubmitExam}
+                    isLastSection={isLastSection}
+                    isSaving={isSyncing}
+                    isSubmitting={isSubmitting}
+                    isAutoSubmitting={isAutoSubmitting}
+                    isSidebarVisible={isSidebarVisible}
                 />
-
-                {/* Main Content Area - Two Column Layout */}
-                <main className="flex flex-1 h-[calc(100vh-60px-48px-40px-50px)]">
-                    {/* Left Column: Question Pane (65%) */}
-                    <QuestionPane question={currentQuestion} />
-
-                    {/* Right Column: Navigation Pane (35%) */}
-                    <NavigationPane
-                        questions={questions}
-                        sectionQuestions={sectionQuestions}
-                        currentQuestionIndex={currentQuestionIndex}
-                        onSaveResponse={onSaveResponse}
-                    />
-                </main>
-
-                {/* Footer - 50px */}
-                <ExamFooter />
             </div>
+
+            <Calculator isVisible={isCalculatorVisible} onClose={() => setIsCalculatorVisible(false)} />
         </div>
     );
 }
-
-export default ExamLayout;

@@ -1,3 +1,5 @@
+'use server';
+
 /**
  * @fileoverview Exam Engine Server Actions
  * @description Server-side actions for fetching, saving, and submitting exams
@@ -5,7 +7,7 @@
  * @blueprint M6+ Architecture - Structured Logging
  */
 
-'use server';
+import 'server-only';
 
 import { sbSSR } from '@/lib/supabase/server';
 import { logger, examLogger } from '@/lib/logger';
@@ -20,10 +22,6 @@ import {
 import type { Paper, Question, Attempt, SectionName, TimeRemaining, QuestionContext } from '@/types/exam';
 import { getSectionDurationSecondsMap, getPaperTotalDurationSeconds } from '@/types/exam';
 
-// =============================================================================
-// ERROR TYPES
-// =============================================================================
-
 export interface ActionResult<T> {
     success: boolean;
     data?: T;
@@ -34,30 +32,19 @@ export interface ActionResult<T> {
 // FETCH PAPER WITH QUESTIONS
 // =============================================================================
 
-/**
- * Fetch a paper with its questions and create/resume an attempt
- * @param paperId - UUID of the paper to fetch
- * @returns Paper, questions, and attempt data
- */
-export async function fetchPaperForExam(
-    paperId: string
-): Promise<ActionResult<FetchPaperResponse>> {
+export async function fetchPaperForExam(paperId: string): Promise<ActionResult<FetchPaperResponse>> {
     try {
-        // Validate input
         const parsed = FetchPaperRequestSchema.safeParse({ paperId });
-        if (!parsed.success) {
-            return { success: false, error: 'Invalid paper ID' };
-        }
+        if (!parsed.success) return { success: false, error: 'Invalid paper ID' };
 
         const supabase = await sbSSR();
 
-        // Get current user
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            return { success: false, error: 'Authentication required' };
-        }
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
 
-        // Fetch paper
         const { data: paper, error: paperError } = await supabase
             .from('papers')
             .select('*')
@@ -65,12 +52,9 @@ export async function fetchPaperForExam(
             .eq('published', true)
             .single();
 
-        if (paperError || !paper) {
-            return { success: false, error: 'Paper not found' };
-        }
+        if (paperError || !paper) return { success: false, error: 'Paper not found' };
 
-        // Fetch questions using the secure view (excludes correct_answer).
-        // Fail fast if the view isn't deployed to avoid leaking correct answers.
+        // Secure view (excludes correct_answer). Fail fast if view isn't deployed.
         const { data: questionsData, error: questionsError } = await supabase
             .from('questions_exam')
             .select('*')
@@ -84,56 +68,103 @@ export async function fetchPaperForExam(
             return { success: false, error: 'Failed to fetch questions' };
         }
 
-        let questions: Question[] = questionsData as unknown as Question[];
+        let questions = questionsData as unknown as Question[];
 
-        // Fetch question contexts for questions that have context_id
-        const contextIds = [...new Set(
-            questions
-                .map(q => (q as { context_id?: string }).context_id)
-                .filter((id): id is string => Boolean(id))
-        )];
+        // Phase D: set-aware ordering
+        const setIds = Array.from(
+            new Set(
+                questions
+                    .map((q) => (q as { set_id?: string | null }).set_id)
+                    .filter((id): id is string => Boolean(id))
+            )
+        );
 
-        if (contextIds.length > 0) {
+        const setById = new Map<string, { display_order: number }>();
+        if (setIds.length) {
+            const { data: sets, error: setsError } = await supabase
+                .from('question_sets')
+                .select('id, display_order')
+                .in('id', setIds);
+
+            if (!setsError && sets) {
+                for (const s of sets) setById.set(s.id, { display_order: s.display_order ?? 9999 });
+            }
+        }
+
+        // Attach contexts (if any)
+        const contextIds = Array.from(
+            new Set(
+                questions
+                    .map((q) => (q as { context_id?: string | null }).context_id)
+                    .filter((id): id is string => Boolean(id))
+            )
+        );
+
+        if (contextIds.length) {
             const { data: contexts, error: contextsError } = await supabase
                 .from('question_contexts')
                 .select('id, title, section, content, context_type, paper_id, display_order, is_active')
                 .in('id', contextIds);
 
             if (!contextsError && contexts) {
-                // Create a map for quick lookup
-                const contextMap = new Map(
-                    contexts.map(c => [c.id, c as QuestionContext])
-                );
-
-                // Attach contexts to questions
-                questions = questions.map(q => {
-                    const ctxId = (q as { context_id?: string }).context_id;
-                    if (ctxId && contextMap.has(ctxId)) {
-                        return { ...q, context: contextMap.get(ctxId) } as Question;
-                    }
-                    return q;
+                const contextMap = new Map(contexts.map((c) => [c.id, c as QuestionContext]));
+                questions = questions.map((q) => {
+                    const ctxId = (q as { context_id?: string | null }).context_id;
+                    const ctx = ctxId ? contextMap.get(ctxId) : undefined;
+                    return ctx ? ({ ...q, context: ctx } as Question) : q;
                 });
             } else {
                 logger.warn('Failed to fetch question contexts', contextsError, { contextIds });
             }
         }
 
-        // Check for existing in-progress attempt
-        const { data: existingAttempt } = await supabase
+        // Deterministic ordering: section → set.display_order → sequence_order/question_number
+        const sectionOrder: Record<SectionName, number> = { VARC: 0, DILR: 1, QA: 2 };
+        questions.sort((a, b) => {
+            const sectionDiff = (sectionOrder[a.section] ?? 99) - (sectionOrder[b.section] ?? 99);
+            if (sectionDiff) return sectionDiff;
+
+            const aSetOrder = a.set_id ? (setById.get(a.set_id)?.display_order ?? 9999) : 9999;
+            const bSetOrder = b.set_id ? (setById.get(b.set_id)?.display_order ?? 9999) : 9999;
+            const setDiff = aSetOrder - bSetOrder;
+            if (setDiff) return setDiff;
+
+            const aSeq = a.sequence_order ?? a.question_number;
+            const bSeq = b.sequence_order ?? b.question_number;
+            return aSeq - bSeq;
+        });
+
+        // Compute exam_order per section for stable palette navigation
+        let curSection: SectionName | null = null;
+        let examOrderInSection = 0;
+        questions = questions.map((q) => {
+            if (q.section !== curSection) {
+                curSection = q.section;
+                examOrderInSection = 0;
+            }
+            examOrderInSection += 1;
+            return { ...q, exam_order: examOrderInSection };
+        });
+
+        // Resume existing in-progress attempt (if any)
+        // BUG FIX: .single() would throw when 0 rows; use maybeSingle() to safely detect absence.
+        const { data: existingAttempt, error: existingAttemptError } = await supabase
             .from('attempts')
             .select('*')
             .eq('user_id', user.id)
             .eq('paper_id', paperId)
             .eq('status', 'in_progress')
-            .single();
+            .maybeSingle();
+
+        if (existingAttemptError) {
+            logger.warn('Failed to check existing attempt', existingAttemptError, { paperId, userId: user.id });
+        }
 
         let attempt: Attempt;
 
         if (existingAttempt) {
-            // Resume existing attempt
             attempt = existingAttempt as Attempt;
         } else {
-            // Create new attempt
             const durations = getSectionDurationSecondsMap(paper.sections);
             const initialTimeRemaining: TimeRemaining = {
                 VARC: durations.VARC,
@@ -154,43 +185,63 @@ export async function fetchPaperForExam(
                 .select()
                 .single();
 
-            if (attemptError || !newAttempt) {
-                return { success: false, error: 'Failed to create attempt' };
-            }
+            if (attemptError || !newAttempt) return { success: false, error: 'Failed to create attempt' };
 
             attempt = newAttempt as Attempt;
 
-            // Create initial response records for all questions
             const responseInserts = questions.map((q) => ({
                 attempt_id: attempt.id,
                 question_id: q.id,
                 answer: null,
                 status: 'not_visited',
                 is_marked_for_review: false,
+                is_visited: false,
                 time_spent_seconds: 0,
                 visit_count: 0,
             }));
 
-            const { error: responsesError } = await supabase
-                .from('responses')
-                .insert(responseInserts);
-
+            const { error: responsesError } = await supabase.from('responses').insert(responseInserts);
             if (responsesError) {
                 logger.warn('Failed to create initial responses', responsesError, { attemptId: attempt.id });
-                // Non-fatal - continue without initial responses
             }
         }
 
-        return {
-            success: true,
-            data: {
-                paper: paper as Paper,
-                questions,
-                attempt,
-            },
-        };
+        return { success: true, data: { paper: paper as Paper, questions, attempt } };
     } catch (error) {
         logger.error('fetchPaperForExam error', error, { paperId });
+        return { success: false, error: 'An unexpected error occurred' };
+    }
+}
+
+// =============================================================================
+// SESSION INITIALIZATION
+// =============================================================================
+
+export async function initializeExamSession(attemptId: string): Promise<ActionResult<{ sessionToken: string }>> {
+    try {
+        if (!attemptId) return { success: false, error: 'Invalid attempt ID' };
+
+        const supabase = await sbSSR();
+
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
+
+        const { data: token, error: rpcError } = await supabase.rpc('initialize_exam_session', {
+            p_attempt_id: attemptId,
+            p_user_id: user.id,
+        });
+
+        if (rpcError || !token) {
+            logger.error('initializeExamSession RPC error', rpcError, { attemptId });
+            return { success: false, error: 'Failed to initialize session' };
+        }
+
+        return { success: true, data: { sessionToken: token as string } };
+    } catch (error) {
+        logger.error('initializeExamSession error', error, { attemptId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
@@ -199,112 +250,118 @@ export async function fetchPaperForExam(
 // SAVE RESPONSE
 // =============================================================================
 
-/**
- * Save a user's response to a question
- * @param data - Response data to save
- */
 export async function saveResponse(data: {
     attemptId: string;
     questionId: string;
     answer: string | null;
     status: string;
     isMarkedForReview: boolean;
+    isVisited?: boolean;
     timeSpentSeconds: number;
     sessionToken?: string | null;
     force_resume?: boolean;
 }): Promise<ActionResult<void>> {
     try {
-        // Validate input
         const parsed = SaveResponseRequestSchema.safeParse(data);
-        if (!parsed.success) {
-            return { success: false, error: 'Invalid response data' };
-        }
+        if (!parsed.success) return { success: false, error: 'Invalid response data' };
 
         const supabase = await sbSSR();
 
-        // Verify user owns this attempt
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            return { success: false, error: 'Authentication required' };
-        }
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
 
         const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('user_id, status, paper_id, session_token, last_activity_at')
+            .select('user_id, status, paper_id')
             .eq('id', data.attemptId)
             .single();
 
-        if (attemptError || !attempt) {
-            return { success: false, error: 'Attempt not found' };
+        if (attemptError || !attempt) return { success: false, error: 'Attempt not found' };
+        if (attempt.user_id !== user.id) return { success: false, error: 'Unauthorized' };
+        if (attempt.status !== 'in_progress') return { success: false, error: 'Attempt is not in progress' };
+        if (!data.sessionToken) return { success: false, error: 'Missing session token' };
+
+        const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
+            p_attempt_id: data.attemptId,
+            p_session_token: data.sessionToken,
+            p_user_id: user.id,
+        });
+
+        if (validateError) {
+            logger.error('saveResponse validate_session_token error', validateError, { attemptId: data.attemptId });
+            return { success: false, error: 'Failed to validate session' };
         }
 
-        if (attempt.user_id !== user.id) {
-            return { success: false, error: 'Unauthorized' };
-        }
-
-        if (attempt.status !== 'in_progress') {
-            return { success: false, error: 'Attempt is not in progress' };
-        }
-
-        // Session conflict check (multi-device/tab prevention)
-        if (attempt.session_token && data.sessionToken && attempt.session_token !== data.sessionToken) {
+        if (!isValidSession) {
             if (data.force_resume === true) {
-                const lastActivityAt = attempt.last_activity_at ? new Date(attempt.last_activity_at).getTime() : null;
-                const isStale = !lastActivityAt || (Date.now() - lastActivityAt) > 5 * 60 * 1000;
+                examLogger.securityEvent('Force resume (saveResponse)', { attemptId: data.attemptId });
 
-                if (isStale) {
-                    examLogger.securityEvent('Force resume rejected (stale) (saveResponse)', {
+                const { error: forceResumeError } = await supabase.rpc('force_resume_exam_session', {
+                    p_attempt_id: data.attemptId,
+                    p_new_session_token: data.sessionToken,
+                });
+
+                if (forceResumeError) {
+                    if (
+                        forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
+                        forceResumeError.message?.includes('stale')
+                    ) {
+                        return { success: false, error: 'FORCE_RESUME_STALE' };
+                    }
+                    logger.error('saveResponse force_resume_exam_session error', forceResumeError, {
                         attemptId: data.attemptId,
-                        oldToken: attempt.session_token,
-                        lastActivityAt: attempt.last_activity_at,
                     });
-                    return { success: false, error: 'FORCE_RESUME_STALE' };
+                    return { success: false, error: 'Failed to force resume session' };
                 }
-
-                examLogger.securityEvent('Force resume (saveResponse)', { attemptId: data.attemptId, oldToken: attempt.session_token });
-                await supabase
-                    .from('attempts')
-                    .update({ session_token: data.sessionToken })
-                    .eq('id', data.attemptId);
             } else {
                 examLogger.securityEvent('Session conflict (saveResponse)', { attemptId: data.attemptId });
                 return { success: false, error: 'SESSION_CONFLICT' };
             }
         }
 
-        // P0 FIX: Verify questionId belongs to the attempt's paper (integrity check)
+        // Integrity check: questionId must belong to attempt's paper (safe view)
         const { data: question, error: questionError } = await supabase
-            .from('questions')
-            .select('id')
+            .from('questions_exam')
+            .select('id, paper_id')
             .eq('id', data.questionId)
             .eq('paper_id', attempt.paper_id)
             .eq('is_active', true)
             .maybeSingle();
 
         if (questionError || !question) {
-            examLogger.validationError('Invalid questionId for attempt', { attemptId: data.attemptId, questionId: data.questionId });
+            examLogger.validationError('Invalid questionId for attempt', {
+                attemptId: data.attemptId,
+                userId: user.id,
+                questionId: data.questionId,
+                paperId: attempt.paper_id,
+            });
             return { success: false, error: 'Invalid question' };
         }
 
-        // Upsert response
-        const { error: upsertError } = await supabase
-            .from('responses')
-            .upsert(
-                {
-                    attempt_id: data.attemptId,
-                    question_id: data.questionId,
-                    answer: data.answer,
-                    status: data.status,
-                    is_marked_for_review: data.isMarkedForReview,
-                    time_spent_seconds: data.timeSpentSeconds,
-                },
-                {
-                    onConflict: 'attempt_id,question_id',
-                }
-            );
+        const inferredVisited =
+            data.isVisited ?? (data.status !== 'not_visited' || (data.answer !== null && data.answer !== ''));
+
+        const { error: upsertError } = await supabase.from('responses').upsert(
+            {
+                attempt_id: data.attemptId,
+                question_id: data.questionId,
+                answer: data.answer,
+                status: data.status,
+                is_marked_for_review: data.isMarkedForReview,
+                is_visited: inferredVisited,
+                time_spent_seconds: data.timeSpentSeconds,
+            },
+            { onConflict: 'attempt_id,question_id' }
+        );
 
         if (upsertError) {
-            logger.error('saveResponse upsert error', upsertError, { attemptId: data.attemptId, questionId: data.questionId });
+            logger.error('saveResponse upsert error', upsertError, {
+                attemptId: data.attemptId,
+                questionId: data.questionId,
+            });
             return { success: false, error: 'Failed to save response' };
         }
 
@@ -319,10 +376,6 @@ export async function saveResponse(data: {
 // UPDATE TIMER / PROGRESS
 // =============================================================================
 
-/**
- * Update attempt progress (timer, current section/question)
- * @param data - Timer and navigation data
- */
 export async function updateAttemptProgress(data: {
     attemptId: string;
     timeRemaining: TimeRemaining;
@@ -330,37 +383,43 @@ export async function updateAttemptProgress(data: {
     currentQuestion: number;
 }): Promise<ActionResult<void>> {
     try {
-        // Validate input
         const parsed = UpdateTimerRequestSchema.safeParse(data);
-        if (!parsed.success) {
-            return { success: false, error: 'Invalid timer data' };
-        }
+        if (!parsed.success) return { success: false, error: 'Invalid timer data' };
 
         const supabase = await sbSSR();
 
-        // Verify user owns this attempt
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            return { success: false, error: 'Authentication required' };
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
+
+        const { error: rpcError } = await supabase.rpc('save_attempt_state', {
+            p_attempt_id: data.attemptId,
+            p_time_remaining: data.timeRemaining,
+            p_current_section: data.currentSection,
+            p_current_question: data.currentQuestion,
+            p_client_now: new Date().toISOString(),
+        });
+
+        if (!rpcError) return { success: true };
+
+        const msg = rpcError.message || 'Failed to update progress';
+
+        if (msg.includes('Unauthorized')) return { success: false, error: 'Unauthorized' };
+        if (msg.includes('not in progress')) return { success: false, error: 'Attempt is not in progress' };
+        if (msg.includes('not found')) return { success: false, error: 'Attempt not found' };
+
+        if (msg.includes('time cannot increase')) {
+            examLogger.securityEvent('Progress update rejected: time inflation attempt', {
+                attemptId: data.attemptId,
+                userId: user.id,
+            });
+            return { success: false, error: 'Invalid timer state' };
         }
 
-        const { error: updateError } = await supabase
-            .from('attempts')
-            .update({
-                time_remaining: data.timeRemaining,
-                current_section: data.currentSection,
-                current_question: data.currentQuestion,
-            })
-            .eq('id', data.attemptId)
-            .eq('user_id', user.id)
-            .eq('status', 'in_progress');
-
-        if (updateError) {
-            logger.error('updateAttemptProgress error', updateError, { attemptId: data.attemptId });
-            return { success: false, error: 'Failed to update progress' };
-        }
-
-        return { success: true };
+        logger.error('updateAttemptProgress RPC error', rpcError, { attemptId: data.attemptId });
+        return { success: false, error: 'Failed to update progress' };
     } catch (error) {
         logger.error('updateAttemptProgress error', error, { attemptId: data.attemptId });
         return { success: false, error: 'An unexpected error occurred' };
@@ -371,146 +430,241 @@ export async function updateAttemptProgress(data: {
 // SUBMIT EXAM
 // =============================================================================
 
-/**
- * Submit the exam and calculate scores using TypeScript scoring engine
- * @blueprint Milestone 5 - Milestone_Change_Log.md - Change 001
- * @blueprint Security Audit - P0 Fix - Server-side timer validation
- * @param attemptId - UUID of the attempt to submit
- */
+// Overloads to support BOTH calling conventions safely:
+// 1) submitExam(attemptId, options?)
+// 2) submitExam({ attemptId, sessionToken, force_resume, submissionId })
 export async function submitExam(
     attemptId: string,
     options?: { sessionToken?: string | null; force_resume?: boolean; submissionId?: string }
+): Promise<ActionResult<SubmitExamResponse>>;
+export async function submitExam(data: {
+    attemptId: string;
+    sessionToken?: string | null;
+    force_resume?: boolean;
+    submissionId?: string;
+}): Promise<ActionResult<SubmitExamResponse>>;
+export async function submitExam(
+    arg1:
+        | string
+        | {
+            attemptId: string;
+            sessionToken?: string | null;
+            force_resume?: boolean;
+            submissionId?: string;
+        },
+    arg2?: { sessionToken?: string | null; force_resume?: boolean; submissionId?: string }
 ): Promise<ActionResult<SubmitExamResponse>> {
+    // Normalize inputs
+    const normalizedAttemptId = typeof arg1 === 'string' ? arg1 : arg1.attemptId;
+    const options =
+        typeof arg1 === 'string'
+            ? arg2
+            : {
+                sessionToken: arg1.sessionToken,
+                force_resume: arg1.force_resume,
+                submissionId: arg1.submissionId,
+            };
+
     try {
-        // Validate input
         const parsed = SubmitExamRequestSchema.safeParse({
-            attemptId,
+            attemptId: normalizedAttemptId,
             sessionToken: options?.sessionToken,
             force_resume: options?.force_resume,
             submissionId: options?.submissionId,
         });
-        if (!parsed.success) {
-            return { success: false, error: 'Invalid attempt ID' };
-        }
+        if (!parsed.success) return { success: false, error: 'Invalid attempt ID' };
 
         const supabase = await sbSSR();
+        const { getServiceRoleClient } = await import('@/lib/supabase/service-role');
+        const adminClient = getServiceRoleClient();
 
-        // Verify user owns this attempt
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            return { success: false, error: 'Authentication required' };
-        }
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
 
-        // Fetch attempt with paper_id, started_at, and session_token
-        const { data: attempt, error: attemptError } = await supabase
+        let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('user_id, status, paper_id, started_at, session_token, last_activity_at, submission_id')
-            .eq('id', attemptId)
-            .single();
+            .select('user_id, status, paper_id, started_at, submission_id')
+            .eq('id', normalizedAttemptId)
+            .maybeSingle();
 
         if (attemptError || !attempt) {
-            return { success: false, error: 'Attempt not found' };
-        }
+            const reason = attemptError ? `error:${attemptError.code ?? 'unknown'}` : 'no_rows';
+            logger.error('submitExam attempt lookup failed', attemptError, {
+                attemptId: normalizedAttemptId,
+                userId: user.id,
+                reason,
+            });
 
-        if (attempt.user_id !== user.id) {
-            return { success: false, error: 'Unauthorized' };
-        }
+            const { data: fallbackAttempt, error: fallbackError } = await adminClient
+                .from('attempts')
+                .select('user_id, status, paper_id, started_at, submission_id')
+                .eq('user_id', user.id)
+                .eq('status', 'in_progress')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
 
-        // P0 FIX: Prevent double submission with strict status check
-        if (attempt.status === 'completed' || attempt.status === 'submitted') {
-            return { success: false, error: 'Attempt already submitted' };
-        }
-
-        if (attempt.status !== 'in_progress') {
-            return { success: false, error: 'Attempt is not in progress' };
-        }
-
-        // Session conflict check (multi-device/tab prevention)
-        if (attempt.session_token && options?.sessionToken && attempt.session_token !== options.sessionToken) {
-            if (options.force_resume === true) {
-                const lastActivityAt = attempt.last_activity_at ? new Date(attempt.last_activity_at).getTime() : null;
-                const isStale = !lastActivityAt || (Date.now() - lastActivityAt) > 5 * 60 * 1000;
-
-                if (isStale) {
-                    examLogger.securityEvent('Force resume rejected (stale) (submitExam)', {
-                        attemptId,
-                        oldToken: attempt.session_token,
-                        lastActivityAt: attempt.last_activity_at,
-                    });
-                    return { success: false, error: 'FORCE_RESUME_STALE' };
-                }
-
-                examLogger.securityEvent('Force resume (submitExam)', { attemptId, oldToken: attempt.session_token });
-                await supabase
-                    .from('attempts')
-                    .update({ session_token: options.sessionToken })
-                    .eq('id', attemptId);
+            if (fallbackAttempt && !fallbackError) {
+                logger.error('submitExam using fallback attempt', {
+                    attemptId: normalizedAttemptId,
+                    userId: user.id,
+                    fallbackAttemptId: fallbackAttempt.submission_id ? '[submission_id_present]' : 'unknown',
+                });
+                attempt = fallbackAttempt;
             } else {
-                examLogger.securityEvent('Session conflict (submitExam)', { attemptId });
+                const { data: recentAttempts, error: recentError } = await adminClient
+                    .from('attempts')
+                    .select('id, status, user_id, paper_id, created_at')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(5);
+                logger.error('submitExam recent attempts for user', recentError, {
+                    attemptId: normalizedAttemptId,
+                    userId: user.id,
+                    recentAttempts,
+                });
+                return { success: false, error: 'Attempt not found' };
+            }
+        }
+        if (attempt.user_id !== user.id) return { success: false, error: 'Unauthorized' };
+
+        // Phase 5: Treat already-submitted as success (idempotent)
+        if (attempt.status === 'completed' || attempt.status === 'submitted') {
+            return { success: true, data: { success: true, already_submitted: true } as unknown as SubmitExamResponse };
+        }
+        if (attempt.status !== 'in_progress') return { success: false, error: 'Attempt is not in progress' };
+        if (!options?.sessionToken) return { success: false, error: 'Missing session token' };
+
+        const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
+            p_attempt_id: normalizedAttemptId,
+            p_session_token: options.sessionToken,
+            p_user_id: user.id,
+        });
+
+        const tryForceResume = async () => {
+            examLogger.securityEvent('Force resume (submitExam)', { attemptId: normalizedAttemptId });
+            return supabase.rpc('force_resume_exam_session', {
+                p_attempt_id: normalizedAttemptId,
+                p_new_session_token: options.sessionToken,
+            });
+        };
+
+        if (validateError) {
+            logger.error('submitExam validate_session_token error', validateError, { attemptId: normalizedAttemptId });
+
+            if (options.force_resume === true) {
+                examLogger.securityEvent('Force resume on RPC error (submitExam)', { attemptId: normalizedAttemptId });
+
+                const { error: forceResumeError } = await tryForceResume();
+                if (forceResumeError) {
+                    if (
+                        forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
+                        forceResumeError.message?.includes('stale')
+                    ) {
+                        return { success: false, error: 'FORCE_RESUME_STALE' };
+                    }
+                    logger.error('submitExam force_resume_exam_session error (after RPC error)', forceResumeError, {
+                        attemptId: normalizedAttemptId,
+                    });
+                    return { success: false, error: 'SESSION_CONFLICT' };
+                }
+            } else {
+                return { success: false, error: 'SESSION_CONFLICT' };
+            }
+        } else if (!isValidSession) {
+            if (options.force_resume === true) {
+                const { error: forceResumeError } = await tryForceResume();
+                if (forceResumeError) {
+                    if (
+                        forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
+                        forceResumeError.message?.includes('stale')
+                    ) {
+                        return { success: false, error: 'FORCE_RESUME_STALE' };
+                    }
+                    logger.error('submitExam force_resume_exam_session error', forceResumeError, {
+                        attemptId: normalizedAttemptId,
+                    });
+                    return { success: false, error: 'Failed to force resume session' };
+                }
+            } else {
+                examLogger.securityEvent('Session conflict (submitExam)', { attemptId: normalizedAttemptId });
                 return { success: false, error: 'SESSION_CONFLICT' };
             }
         }
 
-        // P0 FIX: Server-side timer validation (dynamic per paper)
-        const { data: paperTiming } = await supabase
+        // Server-side timer validation (dynamic per paper)
+        const { data: paperTiming, error: paperTimingError } = await supabase
             .from('papers')
             .select('sections')
             .eq('id', attempt.paper_id)
             .maybeSingle();
 
+        if (paperTimingError) {
+            logger.warn('Failed to fetch paper timing for submitExam', paperTimingError, {
+                attemptId: normalizedAttemptId,
+                paperId: attempt.paper_id,
+            });
+        }
+
         const MAX_EXAM_DURATION_SECONDS = getPaperTotalDurationSeconds(paperTiming?.sections);
-        const GRACE_PERIOD_SECONDS = 120; // 2 minutes grace for network latency
+        const GRACE_PERIOD_SECONDS = 120;
 
-        const startedAt = new Date(attempt.started_at).getTime();
-        const now = Date.now();
-        const elapsedSeconds = Math.floor((now - startedAt) / 1000);
+        // Guard: if timing cannot be computed, skip late-submit rejection rather than breaking valid submits.
+        if (typeof MAX_EXAM_DURATION_SECONDS === 'number' && MAX_EXAM_DURATION_SECONDS > 0) {
+            const startedAtMs = new Date(attempt.started_at).getTime();
+            const elapsedSeconds = Math.floor((Date.now() - startedAtMs) / 1000);
 
-        if (elapsedSeconds > MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS) {
-            examLogger.securityEvent('Late submission rejected', { attemptId, elapsedSeconds, maxAllowed: MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS });
+            if (elapsedSeconds > MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS) {
+                examLogger.securityEvent('Late submission rejected', {
+                    attemptId: normalizedAttemptId,
+                    elapsedSeconds,
+                    maxAllowed: MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS,
+                });
 
-            // Still mark as completed but flag it
-            await supabase
-                .from('attempts')
-                .update({
-                    status: 'completed',
-                    completed_at: new Date().toISOString(),
-                    // Could add a 'late_submission' flag column if needed
-                })
-                .eq('id', attemptId);
+                await adminClient
+                    .from('attempts')
+                    .update({
+                        status: 'completed',
+                        submitted_at: new Date().toISOString(),
+                        completed_at: new Date().toISOString(),
+                    })
+                    .eq('id', normalizedAttemptId);
 
-            return { success: false, error: 'Exam time exceeded. Late submissions are not accepted.' };
+                return { success: false, error: 'Exam time exceeded. Late submissions are not accepted.' };
+            }
         }
 
         const submittedAt = new Date().toISOString();
         const submissionId = options?.submissionId ?? null;
 
-        // P0 FIX: Use atomic status transition to prevent race conditions
-        let updateQuery = supabase
+        // Atomic status transition (prevents races/double submit)
+        let updateQuery = adminClient
             .from('attempts')
             .update({ status: 'submitted', submitted_at: submittedAt, submission_id: submissionId })
-            .eq('id', attemptId)
+            .eq('id', normalizedAttemptId)
             .eq('status', 'in_progress');
 
         if (submissionId) {
+            // Keep your existing behavior (submission_id is generated UUID-like string)
             updateQuery = updateQuery.or(`submission_id.is.null,submission_id.eq.${submissionId}`);
         }
 
-        const { data: updatedAttempt, error: updateStatusError } = await updateQuery
-            .select('id')
-            .maybeSingle();
+        const { data: updatedAttempt, error: updateStatusError } = await updateQuery.select('id').maybeSingle();
 
         if (updateStatusError) {
-            logger.error('Failed to mark attempt as submitted', updateStatusError, { attemptId });
+            logger.error('Failed to mark attempt as submitted', updateStatusError, { attemptId: normalizedAttemptId });
             return { success: false, error: 'Failed to submit exam' };
         }
 
         if (!updatedAttempt) {
-            // Another request already submitted this attempt
             return { success: false, error: 'Attempt already submitted by another request' };
         }
 
-        // Fetch all questions WITH correct_answer (server-side only, secure)
-        const { data: questions, error: questionsError } = await supabase
+        // Fetch all questions WITH correct_answer (server-side only)
+        const { data: questions, error: questionsError } = await adminClient
             .from('questions')
             .select('*')
             .eq('paper_id', attempt.paper_id)
@@ -519,51 +673,43 @@ export async function submitExam(
             .order('question_number');
 
         if (questionsError || !questions) {
-            logger.error('Failed to fetch questions for scoring', questionsError, { attemptId, paperId: attempt.paper_id });
+            logger.error('Failed to fetch questions for scoring', questionsError, {
+                attemptId: normalizedAttemptId,
+                paperId: attempt.paper_id,
+            });
             return { success: false, error: 'Failed to fetch questions for scoring' };
         }
 
-        // Fetch user responses
         const { data: responses, error: responsesError } = await supabase
             .from('responses')
             .select('question_id, answer, time_spent_seconds')
-            .eq('attempt_id', attemptId);
+            .eq('attempt_id', normalizedAttemptId);
 
         if (responsesError) {
-            logger.error('Failed to fetch responses for scoring', responsesError, { attemptId });
+            logger.error('Failed to fetch responses for scoring', responsesError, { attemptId: normalizedAttemptId });
             return { success: false, error: 'Failed to fetch responses' };
         }
 
-        // P0 FIX: Submission integrity check - verify all responses belong to valid questions
-        const validQuestionIds = new Set(questions.map(q => q.id));
-        const invalidResponses = (responses || []).filter(r => !validQuestionIds.has(r.question_id));
+        // Submission integrity check (log-only)
+        const validQuestionIds = new Set(questions.map((q) => q.id));
+        const invalidResponses = (responses || []).filter((r) => !validQuestionIds.has(r.question_id));
 
-        if (invalidResponses.length > 0) {
+        if (invalidResponses.length) {
             examLogger.securityEvent('Invalid responses detected', {
-                attemptId,
-                invalidQuestionIds: invalidResponses.map(r => r.question_id)
+                attemptId: normalizedAttemptId,
+                invalidQuestionIds: invalidResponses.map((r) => r.question_id),
             });
-            // Log but don't block - filter them out for scoring
-            // This could indicate a bug or tampering
         }
 
-        // Only score valid responses
-        const validResponses = (responses || []).filter(r => validQuestionIds.has(r.question_id));
+        const validResponses = (responses || []).filter((r) => validQuestionIds.has(r.question_id));
 
-        // Import scoring function dynamically to avoid circular deps
         const { calculateScore, calculateTimeTaken } = await import('./scoring');
 
-        // Calculate scores using TypeScript scoring engine (only valid responses)
-        const scoringResult = calculateScore(
-            questions as Array<Question & { correct_answer: string }>,
-            validResponses
-        );
+        const scoringResult = calculateScore(questions as Array<Question & { correct_answer: string }>, validResponses);
 
-        // Calculate time taken
         const timeTakenSeconds = calculateTimeTaken(attempt.started_at, submittedAt);
 
-        // Update attempt with scores
-        const { error: scoreUpdateError } = await supabase
+        const { error: scoreUpdateError } = await adminClient
             .from('attempts')
             .update({
                 status: 'completed',
@@ -578,23 +724,19 @@ export async function submitExam(
                 section_scores: scoringResult.section_scores,
                 time_taken_seconds: timeTakenSeconds,
             })
-            .eq('id', attemptId);
+            .eq('id', normalizedAttemptId);
 
         if (scoreUpdateError) {
-            logger.error('Failed to update attempt with scores', scoreUpdateError, { attemptId });
-            // Continue anyway - attempt is submitted, scores may be incomplete
+            logger.error('Failed to update attempt with scores', scoreUpdateError, { attemptId: normalizedAttemptId });
         }
 
-        // Update individual responses with is_correct and marks_obtained
-        for (const questionResult of scoringResult.question_results) {
+        // Update individual responses with is_correct and marks_obtained (same sequential behavior)
+        for (const qr of scoringResult.question_results) {
             await supabase
                 .from('responses')
-                .update({
-                    is_correct: questionResult.is_correct,
-                    marks_obtained: questionResult.marks_obtained,
-                })
-                .eq('attempt_id', attemptId)
-                .eq('question_id', questionResult.question_id);
+                .update({ is_correct: qr.is_correct, marks_obtained: qr.marks_obtained })
+                .eq('attempt_id', normalizedAttemptId)
+                .eq('question_id', qr.question_id);
         }
 
         return {
@@ -612,7 +754,7 @@ export async function submitExam(
             },
         };
     } catch (error) {
-        logger.error('submitExam error', error, { attemptId });
+        logger.error('submitExam error', error, { attemptId: normalizedAttemptId });
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
@@ -621,81 +763,105 @@ export async function submitExam(
 // FETCH RESULTS
 // =============================================================================
 
-/**
- * Fetch completed attempt results with answers
- * @param attemptId - UUID of the attempt
- */
-export async function fetchExamResults(attemptId: string): Promise<ActionResult<{
-    attempt: Attempt;
-    questions: Array<Question & { correct_answer: string }>;
-    responses: Array<{
-        question_id: string;
-        answer: string | null;
-        is_correct: boolean | null;
-        marks_obtained: number | null;
-    }>;
-}>> {
+export async function fetchExamResults(
+    attemptId: string
+): Promise<
+    ActionResult<{
+        attempt: Attempt;
+        questions: Array<Question & { correct_answer: string }>;
+        responses: Array<{
+            question_id: string;
+            answer: string | null;
+            is_correct: boolean | null;
+            marks_obtained: number | null;
+            time_spent_seconds?: number | null;
+            visit_count?: number | null;
+        }>;
+    }>
+> {
     try {
         const supabase = await sbSSR();
 
-        // Verify user owns this attempt
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            return { success: false, error: 'Authentication required' };
-        }
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
 
-        // Fetch attempt
-        const { data: attempt, error: attemptError } = await supabase
-            .from('attempts')
-            .select('*')
-            .eq('id', attemptId)
-            .single();
+        const { data: attempt, error: attemptError } = await supabase.from('attempts').select('*').eq('id', attemptId).single();
 
-        if (attemptError || !attempt) {
-            return { success: false, error: 'Attempt not found' };
-        }
+        if (attemptError || !attempt) return { success: false, error: 'Attempt not found' };
+        if (attempt.user_id !== user.id) return { success: false, error: 'Unauthorized' };
 
-        if (attempt.user_id !== user.id) {
-            return { success: false, error: 'Unauthorized' };
-        }
-
-        if (attempt.status !== 'completed') {
+        if (attempt.status !== 'completed' && attempt.status !== 'submitted') {
             return { success: false, error: 'Attempt not yet completed' };
         }
 
-        // Fetch questions WITH correct answers (only for completed attempts)
         const { data: questions, error: questionsError } = await supabase
-            .from('questions')
+            .from('questions_exam')
             .select('*')
             .eq('paper_id', attempt.paper_id)
             .eq('is_active', true)
             .order('section')
             .order('question_number');
 
-        if (questionsError) {
-            return { success: false, error: 'Failed to fetch questions' };
-        }
+        if (questionsError) return { success: false, error: 'Failed to fetch questions' };
 
-        // Fetch responses
+        const { data: solutionsData, error: solutionsError } = await supabase.rpc('fetch_attempt_solutions', {
+            p_attempt_id: attemptId,
+        });
+
+        if (solutionsError) return { success: false, error: 'Failed to fetch solutions' };
+
+        const solutions = Array.isArray(solutionsData) ? solutionsData : solutionsData ? [solutionsData] : [];
+
+        const solutionMap = new Map(
+            solutions.map(
+                (s: {
+                    question_id: string;
+                    correct_answer: string;
+                    solution_text: string | null;
+                    solution_image_url: string | null;
+                    video_solution_url: string | null;
+                }) => [s.question_id, s]
+            )
+        );
+
+        const mergedQuestions = (questions || []).map((q) => {
+            const solution = solutionMap.get(q.id);
+            return {
+                ...q,
+                correct_answer: solution?.correct_answer ?? '',
+                solution_text: solution?.solution_text ?? null,
+                solution_image_url: solution?.solution_image_url ?? null,
+                video_solution_url: solution?.video_solution_url ?? null,
+            } as Question & {
+                correct_answer: string;
+                solution_text: string | null;
+                solution_image_url: string | null;
+                video_solution_url: string | null;
+            };
+        });
+
         const { data: responses, error: responsesError } = await supabase
             .from('responses')
-            .select('question_id, answer, is_correct, marks_obtained')
+            .select('question_id, answer, is_correct, marks_obtained, time_spent_seconds, visit_count')
             .eq('attempt_id', attemptId);
 
-        if (responsesError) {
-            return { success: false, error: 'Failed to fetch responses' };
-        }
+        if (responsesError) return { success: false, error: 'Failed to fetch responses' };
 
         return {
             success: true,
             data: {
                 attempt: attempt as Attempt,
-                questions: questions as Array<Question & { correct_answer: string }>,
+                questions: mergedQuestions as Array<Question & { correct_answer: string }>,
                 responses: responses as Array<{
                     question_id: string;
                     answer: string | null;
                     is_correct: boolean | null;
                     marks_obtained: number | null;
+                    time_spent_seconds?: number | null;
+                    visit_count?: number | null;
                 }>,
             },
         };
@@ -706,16 +872,9 @@ export async function fetchExamResults(attemptId: string): Promise<ActionResult<
 }
 
 // =============================================================================
-// PAUSE EXAM (Save progress and allow resume later)
+// PAUSE EXAM
 // =============================================================================
 
-/**
- * Pause the exam - saves all progress and allows resuming later
- * @param attemptId - UUID of the attempt to pause
- * @param timeRemaining - Current section timers
- * @param currentSection - Current section name
- * @param currentQuestion - Current question number
- */
 export async function pauseExam(data: {
     attemptId: string;
     timeRemaining: TimeRemaining;
@@ -725,50 +884,30 @@ export async function pauseExam(data: {
     try {
         const supabase = await sbSSR();
 
-        // Verify user owns this attempt
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            return { success: false, error: 'Authentication required' };
-        }
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
 
-        // Get attempt to verify ownership
-        const { data: attempt, error: attemptError } = await supabase
-            .from('attempts')
-            .select('user_id, status')
-            .eq('id', data.attemptId)
-            .single();
+        // Client hint timeRemaining is intentionally unused; RPC is server-authoritative.
+        const { error: rpcError } = await supabase.rpc('pause_exam_state', {
+            p_attempt_id: data.attemptId,
+            p_current_section: data.currentSection,
+            p_current_question: data.currentQuestion,
+        });
 
-        if (attemptError || !attempt) {
-            return { success: false, error: 'Attempt not found' };
-        }
+        if (!rpcError) return { success: true };
 
-        if (attempt.user_id !== user.id) {
-            return { success: false, error: 'Unauthorized' };
-        }
+        const msg = rpcError.message || 'Failed to pause exam';
 
-        if (attempt.status !== 'in_progress') {
-            return { success: false, error: 'Attempt is not in progress' };
-        }
+        if (msg.includes('Unauthorized')) return { success: false, error: 'Unauthorized' };
+        if (msg.includes('not in progress')) return { success: false, error: 'Attempt is not in progress' };
+        if (msg.includes('not allowed')) return { success: false, error: 'Pause is not allowed for this paper' };
+        if (msg.includes('not found')) return { success: false, error: 'Attempt not found' };
 
-        // Update attempt with paused state (save progress)
-        const { error: updateError } = await supabase
-            .from('attempts')
-            .update({
-                time_remaining: data.timeRemaining,
-                current_section: data.currentSection,
-                current_question: data.currentQuestion,
-                // Note: status stays 'in_progress' to allow resume
-                // We just save the progress
-            })
-            .eq('id', data.attemptId)
-            .eq('user_id', user.id);
-
-        if (updateError) {
-            logger.error('pauseExam update error', updateError, { attemptId: data.attemptId });
-            return { success: false, error: 'Failed to pause exam' };
-        }
-
-        return { success: true };
+        logger.error('pauseExam RPC error', rpcError, { attemptId: data.attemptId });
+        return { success: false, error: 'Failed to pause exam' };
     } catch (error) {
         logger.error('pauseExam error', error, { attemptId: data.attemptId });
         return { success: false, error: 'An unexpected error occurred' };

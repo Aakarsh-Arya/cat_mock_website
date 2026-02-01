@@ -3,14 +3,16 @@
  * @description Numeric input component for Type-In-The-Answer questions
  * @blueprint Milestone 4 SOP-SSOT - Phase 3.4
  * @note TITA questions have NO negative marking
+ * 
+ * PHASE 3 FIX: Fixed useEffect loop causing duplicate script execution
  */
 
 'use client';
 
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { useExamStore, selectResponse } from '@/features/exam-engine';
+import { examDebug } from '@/lib/examDebug';
 import type { Question } from '@/types/exam';
-import { MathText } from './MathText';
 
 // =============================================================================
 // TYPES
@@ -41,45 +43,103 @@ export function TITARenderer({
     correctAnswer,
 }: TITARendererProps) {
     const response = useExamStore(selectResponse(question.id));
-    const setAnswer = useExamStore((s) => s.setAnswer);
+    // FIX: Use setLocalAnswer to store answer locally without changing status
+    // Status only changes when user clicks "Save and Next"
+    const setLocalAnswer = useExamStore((s) => s.setLocalAnswer);
 
     // Local state for input (debounced save)
     const [localValue, setLocalValue] = useState(response?.answer ?? '');
 
-    // Sync local state with store on mount and when response changes externally
+    // PHASE 3 FIX: Track if we're updating from store to prevent loops
+    const isUpdatingFromStore = useRef(false);
+
+    // PHASE 3 FIX: Sync local state with store on mount and when response changes externally
+    // Only update if the value is different AND we're not in the middle of a local update
     useEffect(() => {
-        setLocalValue(response?.answer ?? '');
-    }, [response?.answer]);
+        const storeValue = response?.answer ?? '';
+        if (storeValue !== localValue && !isUpdatingFromStore.current) {
+            isUpdatingFromStore.current = true;
+            setLocalValue(storeValue);
+            // Reset flag after state update
+            requestAnimationFrame(() => {
+                isUpdatingFromStore.current = false;
+            });
+        }
+    }, [response?.answer, localValue]);
 
     // Determine if answer is correct (for results view)
     const isCorrect = showCorrectAnswer && localValue === correctAnswer;
     const isIncorrect = showCorrectAnswer && localValue && localValue !== correctAnswer;
 
-    // Handle input change with immediate update
-    const handleChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            const value = e.target.value;
-
-            // Allow only valid numeric input (with optional negative and decimal)
-            // CAT TITA typically allows integers, but some may need decimals
-            if (value === '' || /^-?\d*\.?\d*$/.test(value)) {
-                setLocalValue(value);
-
-                // Save to store immediately for TITA
-                if (!readOnly) {
-                    setAnswer(question.id, value || null);
-                }
-            }
-        },
-        [question.id, readOnly, setAnswer]
-    );
-
-    // Handle blur - ensure value is saved
-    const handleBlur = useCallback(() => {
+    // Commit value to local state + store (local only, no status change)
+    const commitValue = useCallback((value: string) => {
+        const oldValue = localValue;
+        setLocalValue(value);
         if (!readOnly) {
-            setAnswer(question.id, localValue || null);
+            // Use setLocalAnswer - does NOT change status, palette stays same color
+            setLocalAnswer(question.id, value || null);
+
+            // PHASE 3: Debug logging for TITA input
+            examDebug.titaInput({
+                questionId: question.id,
+                key: 'commit',
+                oldValue,
+                newValue: value,
+            });
         }
-    }, [question.id, localValue, readOnly, setAnswer]);
+    }, [question.id, readOnly, setLocalAnswer, localValue]);
+
+    // Block physical keyboard input (TITA keypad-only)
+    const blockPhysicalInput = useCallback((e: React.SyntheticEvent) => {
+        e.preventDefault();
+    }, []);
+
+    // Apply keypad input with numeric validity rules
+    const applyKeypadInput = useCallback((key: string) => {
+        if (readOnly) return;
+
+        const current = localValue;
+
+        // PHASE 3: Debug logging for keypad input
+        examDebug.titaInput({
+            questionId: question.id,
+            key,
+            oldValue: current,
+            newValue: '(pending)',
+        });
+
+        if (key === 'BACKSPACE') {
+            commitValue(current.slice(0, -1));
+            return;
+        }
+
+        if (key === 'CLEAR') {
+            commitValue('');
+            return;
+        }
+
+        if (key === '-') {
+            if (current.startsWith('-') || current.length > 0) return;
+            commitValue('-');
+            return;
+        }
+
+        if (key === '.') {
+            if (current.includes('.')) return;
+            if (current === '') {
+                commitValue('0.');
+            } else if (current === '-') {
+                commitValue('-0.');
+            } else {
+                commitValue(`${current}.`);
+            }
+            return;
+        }
+
+        if (/^[0-9]$/.test(key)) {
+            commitValue(`${current}${key}`);
+        }
+    }, [commitValue, localValue, readOnly]);
 
     // Get input styles based on state
     let inputStyles = 'border-gray-300 focus:border-blue-500 focus:ring-blue-500';
@@ -91,11 +151,6 @@ export function TITARenderer({
 
     return (
         <div className={`space-y-6 ${className}`}>
-            {/* Question Text */}
-            <div className="prose prose-lg max-w-none">
-                <MathText text={question.question_text} className="text-gray-800" />
-            </div>
-
             {/* Answer Input */}
             <div className="space-y-2">
                 <label
@@ -110,19 +165,23 @@ export function TITARenderer({
                         type="text"
                         id={`tita-${question.id}`}
                         value={localValue}
-                        onChange={handleChange}
-                        onBlur={handleBlur}
-                        disabled={readOnly}
+                        readOnly
                         placeholder="Enter your answer"
                         className={`
-              w-full px-4 py-3 text-lg font-mono rounded-lg border-2
-              transition-colors
-              ${inputStyles}
-              ${readOnly ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}
-            `}
+                            w-full px-4 py-3 text-lg font-mono rounded-lg border-2
+                            transition-colors
+                            ${inputStyles}
+                            ${readOnly ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}
+                        `}
                         inputMode="decimal"
                         autoComplete="off"
+                        aria-readonly={true}
                         aria-describedby={`tita-help-${question.id}`}
+                        onKeyDown={blockPhysicalInput}
+                        onKeyPress={blockPhysicalInput}
+                        onBeforeInput={blockPhysicalInput}
+                        onPaste={blockPhysicalInput}
+                        onDrop={blockPhysicalInput}
                     />
 
                     {/* Correct/Incorrect Icon */}
@@ -151,8 +210,79 @@ export function TITARenderer({
 
                 {/* Help Text */}
                 <p id={`tita-help-${question.id}`} className="text-sm text-gray-500">
-                    Enter a numeric value. Decimals are allowed if needed.
+                    Use the keypad below. Decimals are allowed if needed.
                 </p>
+            </div>
+
+            {/* TITA Keypad (keypad-only input) */}
+            <div className="max-w-xs" role="group" aria-label="TITA keypad">
+                <div className="grid grid-cols-3 gap-2">
+                    {[
+                        '1', '2', '3',
+                        '4', '5', '6',
+                        '7', '8', '9',
+                    ].map((digit) => (
+                        <button
+                            key={digit}
+                            type="button"
+                            disabled={readOnly}
+                            onClick={() => applyKeypadInput(digit)}
+                            className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                            aria-label={`Digit ${digit}`}
+                        >
+                            {digit}
+                        </button>
+                    ))}
+
+                    <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => applyKeypadInput('0')}
+                        className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                        aria-label="Digit 0"
+                    >
+                        0
+                    </button>
+                    <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => applyKeypadInput('.')}
+                        className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                        aria-label="Decimal point"
+                    >
+                        .
+                    </button>
+                    <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => applyKeypadInput('-')}
+                        className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                        aria-label="Minus sign"
+                    >
+                        -
+                    </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => applyKeypadInput('BACKSPACE')}
+                        className="h-12 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                        aria-label="Backspace"
+                    >
+                        Backspace
+                    </button>
+                    <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => applyKeypadInput('CLEAR')}
+                        className="h-12 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                        aria-label="Clear all"
+                    >
+                        Clear All
+                    </button>
+                </div>
             </div>
 
             {/* Show correct answer in results */}
@@ -171,5 +301,3 @@ export function TITARenderer({
         </div>
     );
 }
-
-export default TITARenderer;

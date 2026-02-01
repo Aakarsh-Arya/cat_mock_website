@@ -46,3 +46,8 @@ next-env.d.ts
 # Question data files (keep only sample)
 data/cat-2024-*.json
 !data/sample-paper-template.json
+# Export artifacts (generated) - data_sanitized NOT ignored (needed for VS_Codebase export)
+.export_sanitized/
+.export_tmp/
+VS_Codebase.md
+gemini_*.md

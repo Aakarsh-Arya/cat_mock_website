@@ -6,9 +6,44 @@
 import { sbSSR } from '@/lib/supabase/server';
 import { adminLogger } from '@/lib/logger';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import PaperActions from './PaperActions';
+import ImportPaperButton from './ImportPaperButton';
 
 export default async function PapersPage() {
     const supabase = await sbSSR();
+
+    // Server-side admin verification
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+        redirect('/auth/sign-in');
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    let role: string | null = session?.user?.app_metadata?.user_role ?? null;
+
+    if (!role && session?.access_token) {
+        try {
+            const payload = JSON.parse(Buffer.from(session.access_token.split('.')[1], 'base64').toString('utf-8')) as {
+                user_role?: string;
+                app_metadata?: { user_role?: string };
+            };
+            role = payload.user_role ?? payload.app_metadata?.user_role ?? null;
+        } catch {
+            role = null;
+        }
+    }
+
+    let isAdmin = role === 'admin';
+
+    if (!isAdmin) {
+        const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin');
+        isAdmin = !rpcError && Boolean(isAdminRpc);
+    }
+
+    if (!isAdmin) {
+        redirect('/dashboard?error=unauthorized');
+    }
 
     const { data: papers, error } = await supabase
         .from('papers')
@@ -23,15 +58,18 @@ export default async function PapersPage() {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold text-gray-900">Papers</h1>
-                <Link
-                    href="/admin/papers/new"
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-                >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    New Paper
-                </Link>
+                <div className="flex items-center gap-3">
+                    <ImportPaperButton />
+                    <Link
+                        href="/admin/papers/new"
+                        className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        New Paper
+                    </Link>
+                </div>
             </div>
 
             <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -86,29 +124,7 @@ export default async function PapersPage() {
                                         {new Date(paper.created_at).toLocaleDateString()}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
-                                        <Link
-                                            href={`/admin/papers/${paper.id}/edit`}
-                                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-900"
-                                            title="Mirror Principle Editor"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                            </svg>
-                                            Live Edit
-                                        </Link>
-                                        <Link
-                                            href={`/admin/papers/${paper.id}`}
-                                            className="text-blue-600 hover:text-blue-900"
-                                        >
-                                            Settings
-                                        </Link>
-                                        <Link
-                                            href={`/admin/papers/${paper.id}/questions`}
-                                            className="text-green-600 hover:text-green-900"
-                                        >
-                                            Questions
-                                        </Link>
+                                        <PaperActions paperId={paper.id} />
                                     </td>
                                 </tr>
                             ))

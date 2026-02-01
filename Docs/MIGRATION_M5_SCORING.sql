@@ -133,7 +133,12 @@ CREATE POLICY "Users can update own attempts"
 ON public.attempts FOR UPDATE
 TO authenticated
 USING (auth.uid() = user_id)
-WITH CHECK (auth.uid() = user_id);
+WITH CHECK (
+  auth.uid() = user_id
+  AND status = (SELECT status FROM public.attempts a WHERE a.id = attempts.id)
+  AND submitted_at IS NOT DISTINCT FROM (SELECT submitted_at FROM public.attempts a WHERE a.id = attempts.id)
+  AND completed_at IS NOT DISTINCT FROM (SELECT completed_at FROM public.attempts a WHERE a.id = attempts.id)
+);
 
 -- Allow authenticated users to update their own responses
 CREATE POLICY "Users can update own responses"
@@ -153,13 +158,22 @@ TO authenticated
 USING (
   paper_id IN (
     SELECT paper_id FROM public.attempts 
-    WHERE user_id = auth.uid() AND status = 'completed'
-  )
-  OR paper_id IN (
-    SELECT paper_id FROM public.attempts 
-    WHERE user_id = auth.uid() AND status = 'in_progress'
+    WHERE user_id = auth.uid()
+      AND status IN ('submitted', 'completed')
+      AND submitted_at IS NOT NULL
   )
 );
+
+-- -----------------------------------------------------------------------------
+-- SECTION 5.5: Legacy scoring cleanup (optional, after verification)
+-- -----------------------------------------------------------------------------
+-- If TypeScript scoring is the single source of truth, retire legacy DB scoring.
+-- Checklist before dropping:
+-- 1) Confirm no API route, trigger, or cron calls public.finalize_attempt
+-- 2) Confirm results page uses fetch_attempt_solutions RPC + questions_exam
+-- 3) Confirm scoring happens only in TypeScript submit path
+--
+-- DROP FUNCTION IF EXISTS public.finalize_attempt(UUID);
 
 -- -----------------------------------------------------------------------------
 -- SECTION 6: Verification Queries
@@ -184,6 +198,28 @@ USING (
 -- FROM information_schema.columns 
 -- WHERE table_name = 'questions' AND table_schema = 'public'
 -- ORDER BY ordinal_position;
+
+-- -----------------------------------------------------------------------------
+-- VERIFICATION SQL (RLS safety check)
+-- -----------------------------------------------------------------------------
+-- 1) Should return rows for a submitted/completed attempt:
+-- SELECT q.id
+-- FROM public.questions q
+-- WHERE q.paper_id IN (
+--   SELECT paper_id FROM public.attempts
+--   WHERE user_id = auth.uid()
+--     AND status IN ('submitted','completed')
+--     AND submitted_at IS NOT NULL
+-- );
+
+-- 2) Should return 0 rows for an in_progress attempt:
+-- SELECT q.id
+-- FROM public.questions q
+-- WHERE q.paper_id IN (
+--   SELECT paper_id FROM public.attempts
+--   WHERE user_id = auth.uid()
+--     AND status = 'in_progress'
+-- );
 
 -- =============================================================================
 -- END OF MIGRATION

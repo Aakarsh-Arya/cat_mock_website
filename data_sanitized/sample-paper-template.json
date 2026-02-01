@@ -1,0 +1,64 @@
+{
+  "_SCHEMA_NOTE": "This file has been sanitized. Question text, options, answers, and passages have been replaced with placeholders.",
+  "_ORIGINAL_STRUCTURE": "{ paper: object, questions: object }",
+  "paper": {
+    "slug": "cat-2024-mock-2",
+    "title": "CAT 2024 Mock Test 2",
+    "description": "Full-length CAT mock test following the 2024 pattern with 66 questions across VARC, DILR, and QA sections.",
+    "year": 2024,
+    "total_questions": 66,
+    "total_marks": 198,
+    "duration_minutes": 120,
+    "sections": [
+      {
+        "name": "VARC",
+        "questions": 24,
+        "time": 40,
+        "marks": 72
+      },
+      {
+        "name": "DILR",
+        "questions": 20,
+        "time": 40,
+        "marks": 60
+      },
+      {
+        "name": "QA",
+        "questions": 22,
+        "time": 40,
+        "marks": 66
+      }
+    ],
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "difficulty_level": "cat-level",
+    "is_free": true,
+    "published": false,
+    "available_from": null,
+    "available_until": null
+  },
+  "questions": [
+    {
+      "section": "VARC",
+      "question_number": 1,
+      "question_text": "<QUESTION_TEXT_OMITTED>",
+      "question_type": "MCQ",
+      "options": [
+        "Option A text",
+        "Option B text",
+        "Option C text",
+        "Option D text"
+      ],
+      "correct_answer": "<ANSWER_OMITTED>",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "difficulty": "medium",
+      "topic": "Reading Comprehension",
+      "subtopic": "Main Idea",
+      "solution_text": "<SOLUTION_TEXT_OMITTED>"
+    },
+    {
+      "_NOTE": "... 5 more items omitted (total: 6) ..."
+    }
+  ]
+}

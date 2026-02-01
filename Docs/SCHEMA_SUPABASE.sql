@@ -8,7 +8,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ============================================================================
 -- USERS TABLE (extends Supabase auth.users)
 -- ============================================================================
-CREATE TABLE public.users (
+CREATE TABLE IF NOT EXISTS public.users (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   name TEXT,
@@ -24,7 +24,7 @@ CREATE TABLE public.users (
 -- ============================================================================
 -- PAPERS TABLE (exam papers)
 -- ============================================================================
-CREATE TABLE public.papers (
+CREATE TABLE IF NOT EXISTS public.papers (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   slug TEXT UNIQUE,                   -- URL-friendly identifier (e.g., 'cat-2024-mock-1')
   title TEXT NOT NULL,
@@ -55,6 +55,7 @@ CREATE TABLE public.papers (
   difficulty_level TEXT CHECK (difficulty_level IN ('easy', 'medium', 'hard', 'cat-level')),
   is_free BOOLEAN DEFAULT TRUE,       -- For monetization later
   attempt_limit INTEGER,              -- NULL = unlimited attempts
+  allow_pause BOOLEAN DEFAULT FALSE,  -- Whether this paper allows pausing attempts
   
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
@@ -63,7 +64,7 @@ CREATE TABLE public.papers (
 -- ============================================================================
 -- QUESTIONS TABLE
 -- ============================================================================
-CREATE TABLE public.questions (
+CREATE TABLE IF NOT EXISTS public.questions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   paper_id UUID REFERENCES public.papers(id) ON DELETE CASCADE NOT NULL,
   section TEXT NOT NULL CHECK (section IN ('VARC', 'DILR', 'QA')), -- CAT sections
@@ -101,7 +102,7 @@ CREATE TABLE public.questions (
 -- ============================================================================
 -- ATTEMPTS TABLE (user attempts at papers)
 -- ============================================================================
-CREATE TABLE public.attempts (
+CREATE TABLE IF NOT EXISTS public.attempts (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
   paper_id UUID REFERENCES public.papers(id) ON DELETE CASCADE NOT NULL,
@@ -144,7 +145,7 @@ CREATE TABLE public.attempts (
 -- ============================================================================
 -- RESPONSES TABLE (user answers)
 -- ============================================================================
-CREATE TABLE public.responses (
+CREATE TABLE IF NOT EXISTS public.responses (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   attempt_id UUID REFERENCES public.attempts(id) ON DELETE CASCADE NOT NULL,
   question_id UUID REFERENCES public.questions(id) ON DELETE CASCADE NOT NULL,
@@ -171,7 +172,7 @@ CREATE TABLE public.responses (
 -- ============================================================================
 -- LEADERBOARD TABLE (for efficient ranking queries)
 -- ============================================================================
-CREATE TABLE public.leaderboard (
+CREATE TABLE IF NOT EXISTS public.leaderboard (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   paper_id UUID REFERENCES public.papers(id) ON DELETE CASCADE NOT NULL,
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
@@ -190,7 +191,7 @@ CREATE TABLE public.leaderboard (
 -- ============================================================================
 -- ANALYTICS TABLE (for tracking user progress over time)
 -- ============================================================================
-CREATE TABLE public.user_analytics (
+CREATE TABLE IF NOT EXISTS public.user_analytics (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
   
@@ -251,7 +252,7 @@ CREATE POLICY "Authenticated users can view available papers" ON public.papers
   FOR SELECT TO authenticated 
   USING (
     -- Admins can see everything
-    auth.uid() IN (SELECT id FROM public.users WHERE email LIKE '%@admin%')
+    public.is_admin()
     OR (
       -- Published papers within availability window
       published = true
@@ -260,20 +261,19 @@ CREATE POLICY "Authenticated users can view available papers" ON public.papers
     )
   );
 
--- Questions policies (active questions for papers that are available)
--- SECURITY NOTE: This policy allows SELECT on all columns including correct_answer.
--- Use the questions_exam view (defined below) for exam runtime to exclude correct_answer.
--- For result/solution views, use questions_with_answers view (admin or post-submission only).
-CREATE POLICY "Authenticated users can view active questions" ON public.questions
+-- Questions policies (SECURITY HARDENED - Step 0.8)
+-- Users can ONLY read questions (including correct_answer) for COMPLETED attempts.
+-- This prevents answer leakage during in_progress exams.
+-- For exam runtime, use the questions_exam view which excludes correct_answer.
+CREATE POLICY "Users can read questions for their completed attempts" ON public.questions
   FOR SELECT TO authenticated 
   USING (
     is_active = true
-    AND EXISTS (
-      SELECT 1 FROM public.papers p
-      WHERE p.id = paper_id
-      AND p.published = true
-      AND (p.available_from IS NULL OR p.available_from <= NOW())
-      AND (p.available_until IS NULL OR p.available_until >= NOW())
+    AND paper_id IN (
+      SELECT paper_id FROM public.attempts
+      WHERE user_id = auth.uid()
+        AND status IN ('submitted', 'completed')
+        AND submitted_at IS NOT NULL
     )
   );
 
@@ -281,17 +281,53 @@ CREATE POLICY "Authenticated users can view active questions" ON public.question
 CREATE POLICY "Users can view their own attempts" ON public.attempts
   FOR SELECT USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can create their own attempts" ON public.attempts
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can create attempts within limit" ON public.attempts
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id) IS NULL
+      OR (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id) <= 0
+      OR (
+        SELECT COUNT(*)
+        FROM public.attempts a
+        WHERE a.user_id = auth.uid()
+          AND a.paper_id = attempts.paper_id
+          AND a.status <> 'expired'
+      ) < (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id)
+    )
+  );
 
 CREATE POLICY "Users can update their own attempts" ON public.attempts
-  FOR UPDATE USING (auth.uid() = user_id);
+  FOR UPDATE USING (auth.uid() = user_id)
+  WITH CHECK (
+    auth.uid() = user_id
+    AND (
+      (
+        status = (SELECT status FROM public.attempts a WHERE a.id = attempts.id)
+        AND submitted_at IS NOT DISTINCT FROM (SELECT submitted_at FROM public.attempts a WHERE a.id = attempts.id)
+        AND completed_at IS NOT DISTINCT FROM (SELECT completed_at FROM public.attempts a WHERE a.id = attempts.id)
+      )
+      OR
+      (
+        (SELECT status FROM public.attempts a WHERE a.id = attempts.id) = 'in_progress'
+        AND status = 'submitted'
+        AND submitted_at IS NOT NULL
+        AND completed_at IS NOT DISTINCT FROM (SELECT completed_at FROM public.attempts a WHERE a.id = attempts.id)
+      )
+    )
+  );
 
 -- Responses policies
 CREATE POLICY "Users can view their own responses" ON public.responses
   FOR SELECT USING (
     auth.uid() = (SELECT user_id FROM public.attempts WHERE id = attempt_id)
   );
+
+-- Column-level security (restrict sensitive fields from direct client access)
+REVOKE SELECT (correct_answer) ON public.questions FROM authenticated;
+REVOKE SELECT (session_token) ON public.attempts FROM authenticated;
+REVOKE UPDATE (session_token) ON public.attempts FROM authenticated;
 
 CREATE POLICY "Users can create their own responses" ON public.responses
   FOR INSERT WITH CHECK (
@@ -341,8 +377,14 @@ WHERE is_active = true;
 -- Grant access to authenticated users
 GRANT SELECT ON public.questions_exam TO authenticated;
 
+-- ============================================================================
+-- DEPRECATED — do not apply after MIGRATION_RLS_VIEWS.sql
+-- The safe perimeter is enforced via questions_exam + fetch_attempt_solutions RPC.
+-- Any solution-bearing view must NOT be granted to authenticated users.
+-- ============================================================================
+
 -- View for results/solutions: questions WITH answers (for post-submission review)
--- This can be used after an attempt is completed
+-- NOTE: This view is deprecated; do NOT grant to authenticated. Use RPC instead.
 CREATE OR REPLACE VIEW public.questions_with_solutions AS
 SELECT 
   q.id,
@@ -364,8 +406,10 @@ SELECT
 FROM public.questions q
 WHERE q.is_active = true;
 
--- Grant access to authenticated users (RLS on base table still applies)
-GRANT SELECT ON public.questions_with_solutions TO authenticated;
+-- REVOKE ALL and rely on fetch_attempt_solutions RPC (see migrations/004_fetch_attempt_solutions.sql)
+REVOKE ALL ON public.questions_with_solutions FROM PUBLIC;
+REVOKE ALL ON public.questions_with_solutions FROM anon;
+REVOKE ALL ON public.questions_with_solutions FROM authenticated;
 
 -- ============================================================================
 -- FUNCTIONS & TRIGGERS
@@ -414,7 +458,7 @@ BEGIN
   );
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog;
 
 -- Trigger to create user profile
 CREATE TRIGGER on_auth_user_created
@@ -422,153 +466,11 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ============================================================================
--- SCORING FUNCTION (Called on exam submission)
+-- SCORING FUNCTION (DEPRECATED)
 -- ============================================================================
-CREATE OR REPLACE FUNCTION public.finalize_attempt(attempt_id UUID)
-RETURNS JSONB AS $$
-DECLARE
-  v_attempt RECORD;
-  v_response RECORD;
-  v_question RECORD;
-  v_total_score DECIMAL(6,2) := 0;
-  v_correct_count INTEGER := 0;
-  v_incorrect_count INTEGER := 0;
-  v_unanswered_count INTEGER := 0;
-  v_section_scores JSONB := '{}'::jsonb;
-  v_current_section TEXT;
-  v_section_score DECIMAL(6,2);
-  v_section_correct INTEGER;
-  v_section_incorrect INTEGER;
-  v_section_unanswered INTEGER;
-  v_total_attempted INTEGER;
-  v_total_questions INTEGER;
-  v_accuracy DECIMAL(5,2);
-  v_attempt_rate DECIMAL(5,2);
-  v_max_score DECIMAL(6,2);
-BEGIN
-  -- Get the attempt
-  SELECT * INTO v_attempt FROM public.attempts WHERE id = attempt_id;
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object('error', 'Attempt not found');
-  END IF;
-
-  -- Get max possible score from paper
-  SELECT total_marks INTO v_max_score FROM public.papers WHERE id = v_attempt.paper_id;
-
-  -- Process each response
-  FOR v_response IN 
-    SELECT r.*, q.correct_answer, q.positive_marks, q.negative_marks, q.question_type, q.section
-    FROM public.responses r
-    JOIN public.questions q ON r.question_id = q.id
-    WHERE r.attempt_id = attempt_id
-  LOOP
-    -- Determine if answer is correct
-    IF v_response.answer IS NULL OR v_response.answer = '' THEN
-      -- Unanswered
-      v_unanswered_count := v_unanswered_count + 1;
-      UPDATE public.responses 
-      SET is_correct = NULL, marks_obtained = 0 
-      WHERE id = v_response.id;
-    ELSIF LOWER(TRIM(v_response.answer)) = LOWER(TRIM(v_response.correct_answer)) THEN
-      -- Correct
-      v_correct_count := v_correct_count + 1;
-      v_total_score := v_total_score + v_response.positive_marks;
-      UPDATE public.responses 
-      SET is_correct = true, marks_obtained = v_response.positive_marks 
-      WHERE id = v_response.id;
-    ELSE
-      -- Incorrect
-      v_incorrect_count := v_incorrect_count + 1;
-      -- TITA questions have no negative marking
-      IF v_response.question_type = 'TITA' THEN
-        UPDATE public.responses 
-        SET is_correct = false, marks_obtained = 0 
-        WHERE id = v_response.id;
-      ELSE
-        v_total_score := v_total_score - v_response.negative_marks;
-        UPDATE public.responses 
-        SET is_correct = false, marks_obtained = -v_response.negative_marks 
-        WHERE id = v_response.id;
-      END IF;
-    END IF;
-  END LOOP;
-
-  -- Calculate section-wise scores
-  FOR v_current_section IN SELECT DISTINCT section FROM public.questions WHERE paper_id = v_attempt.paper_id
-  LOOP
-    SELECT 
-      COALESCE(SUM(CASE WHEN r.is_correct = true THEN q.positive_marks ELSE 0 END), 0) -
-      COALESCE(SUM(CASE WHEN r.is_correct = false AND q.question_type = 'MCQ' THEN q.negative_marks ELSE 0 END), 0),
-      COALESCE(SUM(CASE WHEN r.is_correct = true THEN 1 ELSE 0 END), 0),
-      COALESCE(SUM(CASE WHEN r.is_correct = false THEN 1 ELSE 0 END), 0),
-      COALESCE(SUM(CASE WHEN r.is_correct IS NULL THEN 1 ELSE 0 END), 0)
-    INTO v_section_score, v_section_correct, v_section_incorrect, v_section_unanswered
-    FROM public.responses r
-    JOIN public.questions q ON r.question_id = q.id
-    WHERE r.attempt_id = attempt_id AND q.section = v_current_section;
-
-    v_section_scores := v_section_scores || jsonb_build_object(
-      v_current_section, jsonb_build_object(
-        'score', v_section_score,
-        'correct', v_section_correct,
-        'incorrect', v_section_incorrect,
-        'unanswered', v_section_unanswered
-      )
-    );
-  END LOOP;
-
-  -- Calculate accuracy and attempt rate
-  v_total_attempted := v_correct_count + v_incorrect_count;
-  v_total_questions := v_correct_count + v_incorrect_count + v_unanswered_count;
-  
-  IF v_total_attempted > 0 THEN
-    v_accuracy := (v_correct_count::DECIMAL / v_total_attempted) * 100;
-  ELSE
-    v_accuracy := 0;
-  END IF;
-  
-  IF v_total_questions > 0 THEN
-    v_attempt_rate := (v_total_attempted::DECIMAL / v_total_questions) * 100;
-  ELSE
-    v_attempt_rate := 0;
-  END IF;
-
-  -- Update the attempt with final scores
-  UPDATE public.attempts SET
-    status = 'completed',
-    submitted_at = COALESCE(submitted_at, NOW()),
-    completed_at = NOW(),
-    total_score = v_total_score,
-    max_possible_score = v_max_score,
-    correct_count = v_correct_count,
-    incorrect_count = v_incorrect_count,
-    unanswered_count = v_unanswered_count,
-    accuracy = v_accuracy,
-    attempt_rate = v_attempt_rate,
-    section_scores = v_section_scores,
-    time_taken_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER
-  WHERE id = attempt_id;
-
-  -- Insert/update leaderboard entry
-  INSERT INTO public.leaderboard (paper_id, user_id, attempt_id, score, submitted_at)
-  VALUES (v_attempt.paper_id, v_attempt.user_id, attempt_id, v_total_score, NOW())
-  ON CONFLICT (paper_id, user_id, attempt_id) 
-  DO UPDATE SET score = v_total_score, submitted_at = NOW();
-
-  -- Return summary
-  RETURN jsonb_build_object(
-    'success', true,
-    'total_score', v_total_score,
-    'max_score', v_max_score,
-    'correct', v_correct_count,
-    'incorrect', v_incorrect_count,
-    'unanswered', v_unanswered_count,
-    'accuracy', v_accuracy,
-    'attempt_rate', v_attempt_rate,
-    'section_scores', v_section_scores
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+-- Legacy SQL scoring via public.finalize_attempt(attempt_id) is deprecated.
+-- Scoring is now handled by the TypeScript scoring engine in submitExam().
+-- If present in your database, drop it via migration 012_phase1_security_hardening.sql.
 
 -- ============================================================================
 -- PERCENTILE CALCULATION FUNCTION (Run periodically or on-demand)
@@ -611,7 +513,7 @@ BEGIN
     WHERE attempt_id = v_record.id;
   END LOOP;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog;
 
 -- ============================================================================
 -- SEED DATA: Sample CAT Mock Test

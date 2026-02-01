@@ -4,7 +4,7 @@ Convert a CAT paper metadata DOCX into the JSON schema used by scripts/import-pa
 and optionally upload it to Supabase.
 
 Usage:
-  python scripts/convert_paper_metadata.py --docx "/path/to/PAPER METADATA_CAT2024_slot1.docx" --out data/cat-2024-slot1.json --publish
+  python docs/research/convert_paper_metadata.py --docx "/path/to/PAPER METADATA_CAT2024_slot1.docx" --out data/cat-2024-slot1.json --publish
 
 Dependencies:
   pip install python-docx supabase python-dotenv

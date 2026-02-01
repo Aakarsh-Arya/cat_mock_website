@@ -1,0 +1,24 @@
+{
+    "$schema": "https://unpkg.com/knip@5/schema.json",
+    "project": [
+        "tsconfig.json"
+    ],
+    "entry": [
+        "middleware.ts",
+        "src/app/**/*.{ts,tsx}",
+        "src/features/**/*.{ts,tsx}",
+        "src/lib/**/*.ts",
+        "src/types/**/*.ts"
+    ],
+    "ignore": [
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/node_modules/**",
+        ".next/**",
+        "dist/**",
+        "build/**"
+    ],
+    "ignoreDependencies": [
+        "@types/*"
+    ]
+}

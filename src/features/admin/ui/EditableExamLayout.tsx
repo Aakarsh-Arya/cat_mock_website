@@ -6,11 +6,20 @@
 
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, useId } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { Paper, QuestionWithAnswer, SectionName, QuestionContext, QuestionType } from '@/types/exam';
+import type {
+    Paper,
+    QuestionWithAnswer,
+    SectionName,
+    QuestionContext,
+    QuestionType,
+    QuestionSet,
+    ContentLayoutType,
+} from '@/types/exam';
 import { uploadToCloudinary } from '@/lib/cloudinary';
+import { PaletteShell } from '@/features/shared/ui/PaletteShell';
 
 // =============================================================================
 // TYPES
@@ -19,14 +28,35 @@ import { uploadToCloudinary } from '@/lib/cloudinary';
 interface EditableExamLayoutProps {
     paper: Paper;
     questions: QuestionWithAnswer[];
+    questionSets: QuestionSet[];
     contexts: QuestionContext[];
     onSaveQuestion: (question: Partial<QuestionWithAnswer>) => Promise<void>;
+    onSaveQuestionSet: (set: Partial<QuestionSet>) => Promise<void>;
+    onCreateQuestionSet: (set: Partial<QuestionSet>) => Promise<QuestionSet | null>;
     onSaveContext?: (context: Partial<QuestionContext>) => Promise<void>;
     onDeleteContext?: (contextId: string) => Promise<void>;
+    onUpdatePaperTitle?: (title: string) => Promise<{ success: boolean; error?: string }>;
+    initialNavigation?: EditorNavigationState | null;
+    onNavigate?: (navigation: EditorNavigationUpdate) => void;
+}
+
+export interface EditorNavigationState {
+    section?: SectionName;
+    qid?: string | null;
+    setId?: string | null;
+    q?: number | null;
+}
+
+export interface EditorNavigationUpdate {
+    section: SectionName;
+    qid?: string | null;
+    setId?: string | null;
+    q: number;
 }
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'] as const;
 const SECTIONS: SectionName[] = ['VARC', 'DILR', 'QA'];
+const SECTION_TOTALS: Record<SectionName, number> = { VARC: 24, DILR: 20, QA: 22 };
 
 // =============================================================================
 // EDITABLE HEADER (Mirrors ExamHeader)
@@ -36,10 +66,60 @@ interface EditableHeaderProps {
     paper: Paper;
     currentSectionIndex: number;
     onSectionChange: (index: number) => void;
+    onUpdatePaperTitle?: (title: string) => Promise<{ success: boolean; error?: string }>;
 }
 
-function EditableHeader({ paper, currentSectionIndex, onSectionChange }: EditableHeaderProps) {
+function EditableHeader({ paper, currentSectionIndex, onSectionChange, onUpdatePaperTitle }: EditableHeaderProps) {
     const router = useRouter();
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const [titleDraft, setTitleDraft] = useState(paper.title);
+    const [titleError, setTitleError] = useState<string | null>(null);
+    const [isSavingTitle, setIsSavingTitle] = useState(false);
+    const editButtonRef = useRef<HTMLButtonElement | null>(null);
+    const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+    useEffect(() => {
+        if (isEditingTitle) {
+            setTitleDraft(paper.title);
+            setTitleError(null);
+            requestAnimationFrame(() => titleInputRef.current?.focus());
+        }
+    }, [isEditingTitle, paper.title]);
+
+    const exitEditMode = useCallback(() => {
+        setIsEditingTitle(false);
+        setTitleError(null);
+        requestAnimationFrame(() => editButtonRef.current?.focus());
+    }, []);
+
+    const handleSaveTitle = useCallback(async () => {
+        if (isSavingTitle) return;
+
+        const trimmed = titleDraft.trim();
+        if (!trimmed) {
+            setTitleError('Title cannot be empty.');
+            return;
+        }
+
+        if (!onUpdatePaperTitle) {
+            exitEditMode();
+            return;
+        }
+
+        setIsSavingTitle(true);
+        setTitleError(null);
+
+        try {
+            const result = await onUpdatePaperTitle(trimmed);
+            if (!result.success) {
+                setTitleError(result.error || 'Failed to update title.');
+                return;
+            }
+            exitEditMode();
+        } finally {
+            setIsSavingTitle(false);
+        }
+    }, [exitEditMode, isSavingTitle, onUpdatePaperTitle, titleDraft]);
 
     return (
         <header className="sticky top-0 z-50 bg-gradient-to-r from-exam-header-from to-exam-header-to text-white shadow-md">
@@ -47,14 +127,18 @@ function EditableHeader({ paper, currentSectionIndex, onSectionChange }: Editabl
                 <div className="flex items-center justify-between">
                     {/* Left - Back Button + Paper Info */}
                     <div className="flex items-center gap-4">
-                        {/* Back Button */}
                         <button
                             onClick={() => router.push('/admin/papers')}
                             className="p-2 hover:bg-white/10 rounded-lg transition-colors"
                             title="Back to Papers"
                         >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                                />
                             </svg>
                         </button>
 
@@ -62,8 +146,71 @@ function EditableHeader({ paper, currentSectionIndex, onSectionChange }: Editabl
                             <span className="px-1.5 py-0.5 bg-yellow-500/80 text-gray-900 text-[10px] font-bold rounded tracking-wider">
                                 ✏️ EDIT
                             </span>
-                            <h1 className="text-xl font-bold">{paper.title}</h1>
+
+                            {!isEditingTitle ? (
+                                <div className="flex items-center gap-2">
+                                    <h1 className="text-xl font-bold">{paper.title}</h1>
+                                    <button
+                                        ref={editButtonRef}
+                                        type="button"
+                                        onClick={() => setIsEditingTitle(true)}
+                                        className="px-2 py-1 text-xs font-semibold bg-white/10 hover:bg-white/20 rounded-md transition-colors"
+                                        aria-label="Edit mock test name"
+                                    >
+                                        Edit name
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <label className="sr-only" htmlFor="paper-title-input">
+                                            Mock test name
+                                        </label>
+                                        <input
+                                            ref={titleInputRef}
+                                            id="paper-title-input"
+                                            type="text"
+                                            value={titleDraft}
+                                            onChange={(e) => setTitleDraft(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    handleSaveTitle();
+                                                }
+                                                if (e.key === 'Escape') {
+                                                    e.preventDefault();
+                                                    if (!isSavingTitle) exitEditMode();
+                                                }
+                                            }}
+                                            className="w-64 sm:w-80 px-2 py-1 rounded-md text-sm text-gray-900 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-white"
+                                            aria-invalid={titleError ? 'true' : 'false'}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleSaveTitle}
+                                            disabled={isSavingTitle}
+                                            className="px-3 py-1 text-xs font-semibold bg-white text-exam-header-from rounded-md disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            {isSavingTitle ? 'Saving...' : 'Save'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={exitEditMode}
+                                            disabled={isSavingTitle}
+                                            className="px-3 py-1 text-xs font-semibold bg-white/10 hover:bg-white/20 rounded-md disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                    {titleError && (
+                                        <span className="text-xs text-yellow-200" role="alert">
+                                            {titleError}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                         </div>
+
                         <div className="hidden sm:flex items-center gap-2 text-sm text-blue-100">
                             <span className="px-2 py-1 bg-white/10 rounded border border-white/20">
                                 {paper.total_questions} Questions
@@ -71,27 +218,31 @@ function EditableHeader({ paper, currentSectionIndex, onSectionChange }: Editabl
                         </div>
                     </div>
 
-                    {/* Center - Section Tabs (Clickable in edit mode) */}
+                    {/* Center - Section Tabs */}
                     <div className="hidden md:flex items-center gap-2">
                         {SECTIONS.map((section, index) => {
-                            const getSectionButtonClasses = () => {
-                                const base = 'px-4 py-2 rounded-md text-sm font-semibold transition-colors border cursor-pointer';
-                                if (index !== currentSectionIndex) {
-                                    return `${base} bg-white/10 text-blue-100 border-white/20 hover:bg-white/20`;
-                                }
-                                // Active section - use section color
+                            const base =
+                                'px-4 py-2 rounded-md text-sm font-semibold transition-colors border cursor-pointer';
+                            const inactive = `${base} bg-white/10 text-blue-100 border-white/20 hover:bg-white/20`;
+
+                            const active = (() => {
                                 switch (section) {
-                                    case 'VARC': return `${base} bg-section-varc text-white border-section-varc`;
-                                    case 'DILR': return `${base} bg-section-dilr text-white border-section-dilr`;
-                                    case 'QA': return `${base} bg-section-qa text-white border-section-qa`;
-                                    default: return `${base} bg-white text-exam-header-from border-white`;
+                                    case 'VARC':
+                                        return `${base} bg-section-varc text-white border-section-varc`;
+                                    case 'DILR':
+                                        return `${base} bg-section-dilr text-white border-section-dilr`;
+                                    case 'QA':
+                                        return `${base} bg-section-qa text-white border-section-qa`;
+                                    default:
+                                        return `${base} bg-white text-exam-header-from border-white`;
                                 }
-                            };
+                            })();
+
                             return (
                                 <button
                                     key={section}
                                     onClick={() => onSectionChange(index)}
-                                    className={getSectionButtonClasses()}
+                                    className={index === currentSectionIndex ? active : inactive}
                                 >
                                     {section}
                                 </button>
@@ -99,16 +250,35 @@ function EditableHeader({ paper, currentSectionIndex, onSectionChange }: Editabl
                         })}
                     </div>
 
-                    {/* Right - Exit Button */}
-                    <Link
-                        href="/admin/papers"
-                        className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-md text-sm transition-colors flex items-center gap-1"
-                    >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                        </svg>
-                        <span className="hidden sm:inline">Exit Editor</span>
-                    </Link>
+                    {/* Right - Quick Links + Exit Button */}
+                    <div className="flex items-center gap-2">
+                        <Link
+                            href={`/admin/papers/${paper.id}/questions`}
+                            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-md transition-colors"
+                        >
+                            Questions
+                        </Link>
+                        <Link
+                            href={`/admin/papers/${paper.id}/settings`}
+                            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-md transition-colors"
+                        >
+                            Settings
+                        </Link>
+                        <Link
+                            href="/admin/papers"
+                            className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-md text-sm transition-colors flex items-center gap-1"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                                />
+                            </svg>
+                            <span className="hidden sm:inline">Exit Editor</span>
+                        </Link>
+                    </div>
                 </div>
             </div>
         </header>
@@ -132,13 +302,9 @@ function EditableOption({ label, value, isCorrect, onChange, onMarkCorrect }: Ed
         <div
             className={`
                 w-full flex items-start gap-3 p-4 rounded-lg border-2 transition-all
-                ${isCorrect
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
-                }
+                ${isCorrect ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'}
             `}
         >
-            {/* Option Label - Click to mark correct */}
             <button
                 type="button"
                 onClick={onMarkCorrect}
@@ -148,14 +314,12 @@ function EditableOption({ label, value, isCorrect, onChange, onMarkCorrect }: Ed
                     text-sm font-bold transition-colors cursor-pointer
                     ${isCorrect
                         ? 'bg-green-500 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-600'
-                    }
+                        : 'bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-600'}
                 `}
             >
                 {label}
             </button>
 
-            {/* Editable Option Text (WYSIWYG Mirror Style) */}
             <input
                 type="text"
                 value={value}
@@ -164,10 +328,7 @@ function EditableOption({ label, value, isCorrect, onChange, onMarkCorrect }: Ed
                 className="flex-1 text-left bg-transparent border border-transparent hover:border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded outline-none text-gray-800 transition-colors"
             />
 
-            {/* Correct Indicator */}
-            {isCorrect && (
-                <span className="flex-shrink-0 text-green-500 text-sm font-medium">✓ Correct</span>
-            )}
+            {isCorrect && <span className="flex-shrink-0 text-green-500 text-sm font-medium">✓ Correct</span>}
         </div>
     );
 }
@@ -186,29 +347,34 @@ interface ImageUploadZoneProps {
 
 function ImageUploadZone({ imageUrl, onUpload, onRemove, isUploading, label = 'Diagram/Image' }: ImageUploadZoneProps) {
     const [isDragging, setIsDragging] = useState(false);
+    const inputId = useId();
 
-    const handleDrop = useCallback(async (e: React.DragEvent) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const file = e.dataTransfer.files[0];
-        if (file && file.type.startsWith('image/')) {
-            await onUpload(file);
-        }
-    }, [onUpload]);
+    const handleDrop = useCallback(
+        async (e: React.DragEvent) => {
+            e.preventDefault();
+            setIsDragging(false);
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                await onUpload(file);
+            }
+        },
+        [onUpload]
+    );
 
-    const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            await onUpload(file);
-        }
-    }, [onUpload]);
+    const handleFileSelect = useCallback(
+        async (e: React.ChangeEvent<HTMLInputElement>) => {
+            const file = e.target.files?.[0];
+            if (file) {
+                await onUpload(file);
+            }
+        },
+        [onUpload]
+    );
 
     const handleDragOver = useCallback((e: React.DragEvent) => {
         e.preventDefault();
-        if (!isDragging) {
-            setIsDragging(true);
-        }
-    }, [isDragging]);
+        setIsDragging(true);
+    }, []);
 
     const handleDragLeave = useCallback(() => {
         setIsDragging(false);
@@ -242,14 +408,8 @@ function ImageUploadZone({ imageUrl, onUpload, onRemove, isUploading, label = 'D
                 ${isUploading ? 'opacity-50 pointer-events-none' : ''}
             `}
         >
-            <input
-                type="file"
-                accept="image/*"
-                onChange={handleFileSelect}
-                className="hidden"
-                id="image-upload"
-            />
-            <label htmlFor="image-upload" className="cursor-pointer">
+            <input type="file" accept="image/*" onChange={handleFileSelect} className="hidden" id={inputId} />
+            <label htmlFor={inputId} className="cursor-pointer">
                 {isUploading ? (
                     <div className="flex flex-col items-center gap-2">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
@@ -258,7 +418,12 @@ function ImageUploadZone({ imageUrl, onUpload, onRemove, isUploading, label = 'D
                 ) : (
                     <div className="flex flex-col items-center gap-2">
                         <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={1.5}
+                                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                            />
                         </svg>
                         <span className="text-sm font-medium text-gray-600">{label}</span>
                         <span className="text-xs text-gray-400">Drop image here or click to upload</span>
@@ -273,12 +438,233 @@ function ImageUploadZone({ imageUrl, onUpload, onRemove, isUploading, label = 'D
 // EDITABLE CONTEXT PANE (Mirrors ContextPane from ExamLayout)
 // =============================================================================
 
+interface EditableSetPaneProps {
+    questionSet: QuestionSet | null;
+    questionSets: QuestionSet[];
+    section: SectionName;
+    paperId: string;
+    onSave: (set: Partial<QuestionSet>) => Promise<void>;
+    onCreateSet: (setType: QuestionSet['set_type']) => Promise<QuestionSet | null>;
+    onSelectSet: (setId: string | null) => void;
+    selectedSetId: string | null;
+}
+
+function EditableSetPane({
+    questionSet,
+    questionSets,
+    section,
+    paperId,
+    onSave,
+    onCreateSet,
+    onSelectSet,
+    selectedSetId,
+}: EditableSetPaneProps) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [title, setTitle] = useState(questionSet?.context_title ?? '');
+    const [content, setContent] = useState(questionSet?.context_body ?? '');
+    const [layout, setLayout] = useState<ContentLayoutType>(
+        questionSet?.content_layout ?? (section === 'QA' ? 'single_focus' : 'split_passage')
+    );
+    const [imageUrl, setImageUrl] = useState<string | null>(questionSet?.context_image_url ?? null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        setTitle(questionSet?.context_title ?? '');
+        setContent(questionSet?.context_body ?? '');
+        setLayout(questionSet?.content_layout ?? (section === 'QA' ? 'single_focus' : 'split_passage'));
+        setImageUrl(questionSet?.context_image_url ?? null);
+        setIsEditing(false);
+    }, [questionSet?.id, section]);
+
+    const handleImageUpload = async (file: File) => {
+        setIsUploading(true);
+        try {
+            const url = await uploadToCloudinary(file);
+            setImageUrl(url);
+        } catch (error) {
+            console.error('Failed to upload context image:', error);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    const sectionSets = questionSets.filter((s) => s.section === section);
+    const createLabel =
+        section === 'VARC' ? 'New VARC set (RC passage)' : section === 'DILR' ? 'New DILR set' : 'New ATOMIC set';
+
+    const handleSave = async () => {
+        if (!questionSet?.id) return;
+        setIsSaving(true);
+        try {
+            await onSave({
+                id: questionSet.id,
+                paper_id: paperId,
+                section,
+                set_type: questionSet.set_type,
+                content_layout: layout,
+                context_title: title || undefined,
+                context_body: content || undefined,
+                context_image_url: imageUrl ?? undefined,
+                context_additional_images: questionSet.context_additional_images ?? [],
+                context_type: questionSet.context_type ?? undefined,
+                is_active: true,
+            });
+            setIsEditing(false);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <div className="bg-gray-50 border-r border-gray-200 h-[calc(100vh-220px)] flex flex-col overflow-hidden">
+            <div className="sticky top-0 bg-gray-100 border-b border-gray-200 px-4 py-3 z-10">
+                <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
+                        </svg>
+                        Set Stimulus
+                    </h3>
+                    <div className="flex items-center gap-2">
+                        {!isEditing && questionSet && (
+                            <button onClick={() => setIsEditing(true)} className="text-xs text-blue-600 hover:text-blue-800">
+                                Edit
+                            </button>
+                        )}
+                        {section !== 'QA' && (
+                            <button
+                                onClick={() => onCreateSet(section === 'VARC' ? 'VARC' : 'DILR')}
+                                className="text-xs text-emerald-600 hover:text-emerald-800"
+                            >
+                                {createLabel}
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <select
+                    value={selectedSetId ?? ''}
+                    onChange={(e) => onSelectSet(e.target.value || null)}
+                    className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-white"
+                >
+                    <option value="">— Select Set —</option>
+                    {sectionSets.map((set) => (
+                        <option key={set.id} value={set.id}>
+                            {set.context_title || `Set ${set.display_order}`}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-4">
+                {questionSet ? (
+                    isEditing ? (
+                        <div className="space-y-3">
+                            <select
+                                value={layout}
+                                onChange={(e) => setLayout(e.target.value as ContentLayoutType)}
+                                className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-white"
+                            >
+                                <option value="split_passage">Split Passage</option>
+                                <option value="split_chart">Split Chart</option>
+                                <option value="split_table">Split Table</option>
+                                <option value="single_focus">Single Focus</option>
+                                <option value="image_top">Image Top</option>
+                            </select>
+
+                            <input
+                                type="text"
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                placeholder="Set title (e.g., Passage 1)"
+                                className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+
+                            <textarea
+                                value={content}
+                                onChange={(e) => setContent(e.target.value)}
+                                placeholder="Set stimulus / passage"
+                                rows={12}
+                                className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y font-mono leading-relaxed"
+                            />
+
+                            <div className="space-y-2">
+                                <label className="block text-xs font-medium text-gray-600">Context Image (optional)</label>
+                                <ImageUploadZone
+                                    onUpload={handleImageUpload}
+                                    imageUrl={imageUrl}
+                                    onRemove={() => setImageUrl(null)}
+                                    label="Drop image or click to upload"
+                                    isUploading={isUploading}
+                                />
+                            </div>
+
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditing(false)}
+                                    className="px-3 py-1.5 text-gray-600 hover:bg-gray-200 rounded text-sm transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleSave}
+                                    disabled={isSaving}
+                                    className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm transition-colors disabled:opacity-50"
+                                >
+                                    {isSaving ? 'Saving...' : 'Save Set'}
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {questionSet.context_image_url && (
+                                <div className="rounded-lg overflow-hidden border border-gray-200 bg-white">
+                                    <img
+                                        src={questionSet.context_image_url}
+                                        alt={questionSet.context_title || 'Set image'}
+                                        className="w-full object-contain max-h-80"
+                                    />
+                                </div>
+                            )}
+                            <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                                {questionSet.context_body || 'No set stimulus.'}
+                            </div>
+                        </div>
+                    )
+                ) : (
+                    <div className="text-center py-8 text-gray-400">
+                        <svg className="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={1.5}
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
+                        </svg>
+                        <p className="text-sm">No set selected</p>
+                        <p className="text-xs mt-1">Choose a set to edit stimulus</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 interface EditableContextPaneProps {
     context: QuestionContext | null;
     contexts: QuestionContext[];
     section: SectionName;
     paperId: string;
     onSave: (context: Partial<QuestionContext>) => Promise<void>;
+    onDeleteContext?: (contextId: string) => Promise<void>;
     onSelectContext: (contextId: string | null) => void;
     selectedContextId: string | null;
 }
@@ -289,6 +675,7 @@ function EditableContextPane({
     section,
     paperId,
     onSave,
+    onDeleteContext,
     onSelectContext,
     selectedContextId,
 }: EditableContextPaneProps) {
@@ -301,8 +688,8 @@ function EditableContextPane({
     const [imageUrl, setImageUrl] = useState<string | null>(context?.image_url ?? null);
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
-    // Reset form when context changes
     useEffect(() => {
         setTitle(context?.title ?? '');
         setContent(context?.content ?? '');
@@ -323,7 +710,7 @@ function EditableContextPane({
         }
     };
 
-    const sectionContexts = contexts.filter(c => c.section === section);
+    const sectionContexts = contexts.filter((c) => c.section === section);
 
     const handleSave = async () => {
         setIsSaving(true);
@@ -346,27 +733,53 @@ function EditableContextPane({
     };
 
     return (
-        <div className="bg-gray-50 border-r border-gray-200 h-full flex flex-col">
-            {/* Sticky Header with context selector */}
+        <div className="bg-gray-50 border-r border-gray-200 h-[calc(100vh-220px)] flex flex-col overflow-hidden">
             <div className="sticky top-0 bg-gray-100 border-b border-gray-200 px-4 py-3 z-10">
                 <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                         <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
                         </svg>
                         {section === 'VARC' ? 'Reading Passage' : 'Data Set / Context'}
                     </h3>
-                    {!isEditing && context && (
-                        <button
-                            onClick={() => setIsEditing(true)}
-                            className="text-xs text-blue-600 hover:text-blue-800"
-                        >
-                            Edit
-                        </button>
-                    )}
+
+                    <div className="flex items-center gap-2">
+                        {!isEditing && context && (
+                            <button onClick={() => setIsEditing(true)} className="text-xs text-blue-600 hover:text-blue-800">
+                                Edit
+                            </button>
+                        )}
+                        {!isEditing && context && onDeleteContext && (
+                            <button
+                                onClick={async () => {
+                                    if (!context?.id || isDeleting) return;
+                                    const confirmed = window.confirm(
+                                        'Delete this context? This will hide it from selection.'
+                                    );
+                                    if (!confirmed) return;
+                                    setIsDeleting(true);
+                                    try {
+                                        await onDeleteContext(context.id);
+                                        onSelectContext(null);
+                                        setIsEditing(false);
+                                    } finally {
+                                        setIsDeleting(false);
+                                    }
+                                }}
+                                disabled={isDeleting}
+                                className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
+                            >
+                                {isDeleting ? 'Deleting...' : 'Delete'}
+                            </button>
+                        )}
+                    </div>
                 </div>
 
-                {/* Context Selector Dropdown */}
                 <select
                     value={selectedContextId ?? 'none'}
                     onChange={(e) => onSelectContext(e.target.value === 'none' ? null : e.target.value)}
@@ -374,7 +787,7 @@ function EditableContextPane({
                 >
                     <option value="none">— No Context —</option>
                     <option value="new">+ Create New Context</option>
-                    {sectionContexts.map(c => (
+                    {sectionContexts.map((c) => (
                         <option key={c.id} value={c.id}>
                             {c.title || `Context ${c.display_order}`}
                         </option>
@@ -382,7 +795,6 @@ function EditableContextPane({
                 </select>
             </div>
 
-            {/* Scrollable Content / Edit Form */}
             <div className="flex-1 overflow-y-auto px-4 py-4">
                 {selectedContextId === 'new' || isEditing ? (
                     <div className="space-y-3">
@@ -408,14 +820,15 @@ function EditableContextPane({
                         <textarea
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
-                            placeholder={section === 'VARC'
-                                ? 'Paste the reading passage here...'
-                                : 'Enter the data set, table description, or context...'}
+                            placeholder={
+                                section === 'VARC'
+                                    ? 'Paste the reading passage here...'
+                                    : 'Enter the data set, table description, or context...'
+                            }
                             rows={12}
                             className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y font-mono leading-relaxed"
                         />
 
-                        {/* Context Image Upload (for DILR diagrams, charts, tables) */}
                         <div className="space-y-2">
                             <label className="block text-xs font-medium text-gray-600">
                                 Context Image (Diagrams, Charts, Tables)
@@ -434,9 +847,7 @@ function EditableContextPane({
                                 type="button"
                                 onClick={() => {
                                     setIsEditing(false);
-                                    if (selectedContextId === 'new') {
-                                        onSelectContext(null);
-                                    }
+                                    if (selectedContextId === 'new') onSelectContext(null);
                                 }}
                                 className="px-3 py-1.5 text-gray-600 hover:bg-gray-200 rounded text-sm transition-colors"
                             >
@@ -454,7 +865,6 @@ function EditableContextPane({
                     </div>
                 ) : context ? (
                     <div className="space-y-4">
-                        {/* Context Image */}
                         {context.image_url && (
                             <div className="rounded-lg overflow-hidden border border-gray-200 bg-white">
                                 <img
@@ -464,15 +874,17 @@ function EditableContextPane({
                                 />
                             </div>
                         )}
-                        {/* Context Text */}
-                        <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                            {context.content}
-                        </div>
+                        <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{context.content}</div>
                     </div>
                 ) : (
                     <div className="text-center py-8 text-gray-400">
                         <svg className="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={1.5}
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
                         </svg>
                         <p className="text-sm">No context selected</p>
                         <p className="text-xs mt-1">Select or create a context above</p>
@@ -493,9 +905,9 @@ interface EditableQuestionAreaProps {
     totalQuestions: number;
     section: SectionName;
     paperId: string;
-    contexts: QuestionContext[];
     onSave: (question: Partial<QuestionWithAnswer>) => Promise<void>;
-    onSaveContext: (context: Partial<QuestionContext>) => Promise<void>;
+    selectedSetId: string | null;
+    selectedContextId: string | null;
     isSaving: boolean;
 }
 
@@ -505,12 +917,11 @@ function EditableQuestionArea({
     totalQuestions,
     section,
     paperId,
-    contexts,
     onSave,
-    onSaveContext,
+    selectedSetId,
+    selectedContextId,
     isSaving,
 }: EditableQuestionAreaProps) {
-    // Local state for editing
     const [questionText, setQuestionText] = useState(question?.question_text ?? '');
     const [questionType, setQuestionType] = useState<QuestionType>(question?.question_type ?? 'MCQ');
     const [options, setOptions] = useState<string[]>(question?.options ?? ['', '', '', '']);
@@ -520,9 +931,6 @@ function EditableQuestionArea({
     const [solutionText, setSolutionText] = useState(question?.solution_text ?? '');
     const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
-    const [selectedContextId, setSelectedContextId] = useState<string | null>(
-        question?.context_id ?? null
-    );
     const questionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
     useEffect(() => {
@@ -533,10 +941,8 @@ function EditableQuestionArea({
             setCorrectAnswer('A');
             setPositiveMarks(3);
             setNegativeMarks(1);
-            setSelectedContextId(null);
             setSolutionText('');
             setImageUrl(null);
-            setSelectedContextId(null);
             return;
         }
 
@@ -546,9 +952,8 @@ function EditableQuestionArea({
         setCorrectAnswer(question.correct_answer ?? 'A');
         setPositiveMarks(question.positive_marks ?? 3);
         setNegativeMarks(question.negative_marks ?? 1);
-        setSolutionText(question.solution_text ?? '');
         setImageUrl(question.question_image_url ?? null);
-        setSelectedContextId(question.context_id ?? null);
+        setSolutionText(question.solution_text ?? '');
     }, [question?.id]);
 
     useEffect(() => {
@@ -558,16 +963,14 @@ function EditableQuestionArea({
         textarea.style.height = `${textarea.scrollHeight}px`;
     }, [questionText]);
 
-    // Handle option change
     const handleOptionChange = useCallback((index: number, value: string) => {
-        setOptions(prev => {
-            const newOptions = [...prev];
-            newOptions[index] = value;
-            return newOptions;
+        setOptions((prev) => {
+            const next = [...prev];
+            next[index] = value;
+            return next;
         });
     }, []);
 
-    // Handle image upload to Cloudinary
     const handleImageUpload = useCallback(async (file: File) => {
         setIsUploading(true);
         try {
@@ -580,10 +983,11 @@ function EditableQuestionArea({
         }
     }, []);
 
-    // Handle save - include context_id
     const handleSave = useCallback(async () => {
+        const useSet = Boolean(selectedSetId);
         const questionData: Partial<QuestionWithAnswer> = {
             ...question,
+            id: question?.id,
             paper_id: paperId,
             section,
             question_number: questionNumber,
@@ -595,332 +999,161 @@ function EditableQuestionArea({
             negative_marks: questionType === 'TITA' ? 0 : negativeMarks,
             solution_text: solutionText || undefined,
             question_image_url: imageUrl || undefined,
-            context_id: selectedContextId && selectedContextId !== 'new' ? selectedContextId : undefined,
+            set_id: useSet ? selectedSetId ?? undefined : undefined,
+            context_id: useSet ? undefined : selectedContextId && selectedContextId !== 'new' ? selectedContextId : undefined,
             is_active: true,
         };
 
         await onSave(questionData);
-    }, [question, paperId, section, questionNumber, questionText, questionType, options, correctAnswer, positiveMarks, negativeMarks, solutionText, imageUrl, selectedContextId, onSave]);
-
-    // Get current context object
-    const currentContext = selectedContextId && selectedContextId !== 'new'
-        ? contexts.find(c => c.id === selectedContextId) ?? null
-        : null;
-
-    // Determine if we show split view (VARC/DILR sections typically have contexts)
-    const showSplitView = section === 'VARC' || section === 'DILR';
-
-    // ==========================================================================
-    // SPLIT VIEW: For VARC/DILR with context pane on the left
-    // ==========================================================================
-    if (showSplitView) {
-        return (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-[calc(100vh-220px)] min-h-[500px] rounded-lg overflow-hidden border border-gray-200 shadow-sm">
-                {/* Left Pane: Editable Context/Passage */}
-                <div className="order-1 lg:order-1 h-full overflow-hidden">
-                    <EditableContextPane
-                        context={currentContext}
-                        contexts={contexts}
-                        section={section}
-                        paperId={paperId}
-                        onSave={onSaveContext}
-                        onSelectContext={setSelectedContextId}
-                        selectedContextId={selectedContextId}
-                    />
-                </div>
-
-                {/* Right Pane: Question Editor */}
-                <div className="order-2 lg:order-2 bg-white h-full overflow-y-auto">
-                    <div className="p-6">
-                        {/* Question Header */}
-                        <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-                            <div>
-                                <span className="text-sm text-gray-500">{section}</span>
-                                <h2 className="text-lg font-semibold text-gray-800">
-                                    Question {questionNumber} of {totalQuestions}
-                                </h2>
-                            </div>
-                            {/* Marks - Editable */}
-                            <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1">
-                                    <span className="text-xs text-gray-500">+</span>
-                                    <input
-                                        type="number"
-                                        value={positiveMarks}
-                                        onChange={(e) => setPositiveMarks(Number(e.target.value))}
-                                        className="w-12 px-2 py-1 text-sm border border-green-300 rounded bg-green-50 text-green-700 text-center"
-                                        min={0}
-                                        step={0.5}
-                                    />
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <span className="text-xs text-gray-500">−</span>
-                                    <input
-                                        type="number"
-                                        value={negativeMarks}
-                                        onChange={(e) => setNegativeMarks(Number(e.target.value))}
-                                        className="w-12 px-2 py-1 text-sm border border-red-300 rounded bg-red-50 text-red-700 text-center"
-                                        min={0}
-                                        step={0.25}
-                                    />
-                                </div>
-                                <select
-                                    value={questionType}
-                                    onChange={(e) => setQuestionType(e.target.value as QuestionType)}
-                                    className="px-2 py-1 text-sm border border-gray-300 rounded bg-white"
-                                >
-                                    <option value="MCQ">MCQ</option>
-                                    <option value="TITA">TITA</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        {/* Image Upload Zone */}
-                        <div className="mb-6">
-                            <ImageUploadZone
-                                imageUrl={imageUrl}
-                                onUpload={handleImageUpload}
-                                onRemove={() => setImageUrl(null)}
-                                isUploading={isUploading}
-                                label="Question Diagram/Image"
-                            />
-                        </div>
-
-                        {/* Question Text */}
-                        <div className="mb-6">
-                            <textarea
-                                ref={questionTextareaRef}
-                                value={questionText}
-                                onChange={(e) => setQuestionText(e.target.value)}
-                                placeholder="Enter question text..."
-                                rows={3}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none resize-none text-gray-800"
-                            />
-                        </div>
-
-                        {/* Options - MCQ or TITA */}
-                        {questionType === 'MCQ' ? (
-                            <div className="space-y-3">
-                                {OPTION_LABELS.map((label, index) => (
-                                    <EditableOption
-                                        key={label}
-                                        label={label}
-                                        value={options[index] || ''}
-                                        isCorrect={correctAnswer === label}
-                                        onChange={(value) => handleOptionChange(index, value)}
-                                        onMarkCorrect={() => setCorrectAnswer(label)}
-                                    />
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Correct Answer (Numeric)
-                                </label>
-                                <input
-                                    type="text"
-                                    value={correctAnswer}
-                                    onChange={(e) => setCorrectAnswer(e.target.value)}
-                                    placeholder="Enter the correct numeric answer..."
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                            </div>
-                        )}
-
-                        {/* Solution */}
-                        <details className="mt-6">
-                            <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-800">
-                                Solution (Optional)
-                            </summary>
-                            <textarea
-                                value={solutionText}
-                                onChange={(e) => setSolutionText(e.target.value)}
-                                placeholder="Enter solution explanation..."
-                                rows={3}
-                                className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                            />
-                        </details>
-
-                        {/* Save Button */}
-                        <div className="mt-6 pt-4 border-t border-gray-200 flex justify-end">
-                            <button
-                                onClick={handleSave}
-                                disabled={isSaving}
-                                className={`
-                                    px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2
-                                    ${isSaving
-                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                                    }
-                                `}
-                            >
-                                {isSaving ? (
-                                    <>
-                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                                        Saving...
-                                    </>
-                                ) : (
-                                    <>
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Save Question
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    // ==========================================================================
-    // STANDARD VIEW: Centered card for QA (no context)
-    // ==========================================================================
+    }, [
+        question,
+        paperId,
+        section,
+        questionNumber,
+        questionText,
+        questionType,
+        options,
+        correctAnswer,
+        positiveMarks,
+        negativeMarks,
+        solutionText,
+        imageUrl,
+        selectedSetId,
+        selectedContextId,
+        onSave,
+    ]);
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            {/* Question Header - Mirrors exam exactly */}
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-                <div>
-                    <span className="text-sm text-gray-500">{section}</span>
-                    <h2 className="text-lg font-semibold text-gray-800">
-                        Question {questionNumber} of {totalQuestions}
-                    </h2>
+        <div className="bg-white h-full overflow-y-auto">
+            <div className="p-6">
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+                    <div>
+                        <span className="text-sm text-gray-500">{section}</span>
+                        <h2 className="text-lg font-semibold text-gray-800">
+                            Question {questionNumber} of {totalQuestions}
+                        </h2>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                            <span className="text-xs text-gray-500">+</span>
+                            <input
+                                type="number"
+                                value={positiveMarks}
+                                onChange={(e) => setPositiveMarks(Number(e.target.value))}
+                                className="w-12 px-2 py-1 text-sm border border-green-300 rounded bg-green-50 text-green-700 text-center"
+                                min={0}
+                                step={0.5}
+                            />
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <span className="text-xs text-gray-500">−</span>
+                            <input
+                                type="number"
+                                value={negativeMarks}
+                                onChange={(e) => setNegativeMarks(Number(e.target.value))}
+                                className="w-12 px-2 py-1 text-sm border border-red-300 rounded bg-red-50 text-red-700 text-center"
+                                min={0}
+                                step={0.25}
+                            />
+                        </div>
+                        <select
+                            value={questionType}
+                            onChange={(e) => setQuestionType(e.target.value as QuestionType)}
+                            className="px-2 py-1 text-sm border border-gray-300 rounded bg-white"
+                        >
+                            <option value="MCQ">MCQ</option>
+                            <option value="TITA">TITA</option>
+                        </select>
+                    </div>
                 </div>
 
-                {/* Marks - Editable */}
-                <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1">
-                        <span className="text-xs text-gray-500">+</span>
-                        <input
-                            type="number"
-                            value={positiveMarks}
-                            onChange={(e) => setPositiveMarks(Number(e.target.value))}
-                            className="w-12 px-2 py-1 text-sm border border-green-300 rounded bg-green-50 text-green-700 text-center"
-                            min={0}
-                            step={0.5}
-                        />
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <span className="text-xs text-gray-500">−</span>
-                        <input
-                            type="number"
-                            value={negativeMarks}
-                            onChange={(e) => setNegativeMarks(Number(e.target.value))}
-                            className="w-12 px-2 py-1 text-sm border border-red-300 rounded bg-red-50 text-red-700 text-center"
-                            min={0}
-                            step={0.25}
-                        />
-                    </div>
-                    {/* Question Type Toggle */}
-                    <select
-                        value={questionType}
-                        onChange={(e) => setQuestionType(e.target.value as QuestionType)}
-                        className="px-2 py-1 text-sm border border-gray-300 rounded bg-white"
-                    >
-                        <option value="MCQ">MCQ</option>
-                        <option value="TITA">TITA</option>
-                    </select>
+                <div className="mb-6">
+                    <ImageUploadZone
+                        imageUrl={imageUrl}
+                        onUpload={handleImageUpload}
+                        onRemove={() => setImageUrl(null)}
+                        isUploading={isUploading}
+                        label="Question Diagram/Image"
+                    />
                 </div>
-            </div>
 
-            {/* Image Upload Zone (Where diagram would appear) */}
-            <div className="mb-6">
-                <ImageUploadZone
-                    imageUrl={imageUrl}
-                    onUpload={handleImageUpload}
-                    onRemove={() => setImageUrl(null)}
-                    isUploading={isUploading}
-                    label="Question Diagram/Image"
-                />
-            </div>
+                <div className="mb-6">
+                    <div className="prose prose-lg max-w-none">
+                        <textarea
+                            ref={questionTextareaRef}
+                            value={questionText}
+                            onChange={(e) => setQuestionText(e.target.value)}
+                            placeholder="Enter question text..."
+                            rows={1}
+                            className="w-full bg-transparent border border-transparent hover:border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded-lg outline-none resize-none overflow-hidden text-gray-800 whitespace-pre-wrap transition-colors"
+                        />
+                    </div>
+                </div>
 
-            {/* Question Text - Editable (Mirror Exam Typography) */}
-            <div className="mb-6">
-                <div className="prose prose-lg max-w-none">
+                {questionType === 'MCQ' ? (
+                    <div className="space-y-3">
+                        {OPTION_LABELS.map((label, index) => (
+                            <EditableOption
+                                key={label}
+                                label={label}
+                                value={options[index] || ''}
+                                isCorrect={correctAnswer === label}
+                                onChange={(value) => handleOptionChange(index, value)}
+                                onMarkCorrect={() => setCorrectAnswer(label)}
+                            />
+                        ))}
+                    </div>
+                ) : (
+                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Correct Answer (Numeric)</label>
+                        <input
+                            type="text"
+                            value={correctAnswer}
+                            onChange={(e) => setCorrectAnswer(e.target.value)}
+                            placeholder="Enter the correct numeric answer..."
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        />
+                    </div>
+                )}
+
+                <details className="mt-6">
+                    <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-800">
+                        Solution (Optional)
+                    </summary>
                     <textarea
-                        ref={questionTextareaRef}
-                        value={questionText}
-                        onChange={(e) => setQuestionText(e.target.value)}
-                        placeholder="Enter question text..."
-                        rows={1}
-                        className="w-full bg-transparent border border-transparent hover:border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded-lg outline-none resize-none overflow-hidden text-gray-800 whitespace-pre-wrap transition-colors"
+                        value={solutionText}
+                        onChange={(e) => setSolutionText(e.target.value)}
+                        placeholder="Enter solution explanation..."
+                        rows={3}
+                        className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                     />
-                </div>
-            </div>
+                </details>
 
-            {/* Options - MCQ or TITA */}
-            {questionType === 'MCQ' ? (
-                <div className="space-y-3">
-                    {OPTION_LABELS.map((label, index) => (
-                        <EditableOption
-                            key={label}
-                            label={label}
-                            value={options[index] || ''}
-                            isCorrect={correctAnswer === label}
-                            onChange={(value) => handleOptionChange(index, value)}
-                            onMarkCorrect={() => setCorrectAnswer(label)}
-                        />
-                    ))}
-                </div>
-            ) : (
-                <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Correct Answer (Numeric)
-                    </label>
-                    <input
-                        type="text"
-                        value={correctAnswer}
-                        onChange={(e) => setCorrectAnswer(e.target.value)}
-                        placeholder="Enter the correct numeric answer..."
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                </div>
-            )}
-
-            {/* Solution (Collapsible) */}
-            <details className="mt-6">
-                <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-800">
-                    Solution (Optional)
-                </summary>
-                <textarea
-                    value={solutionText}
-                    onChange={(e) => setSolutionText(e.target.value)}
-                    placeholder="Enter solution explanation..."
-                    rows={3}
-                    className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                />
-            </details>
-
-            {/* Save Button */}
-            <div className="mt-6 pt-4 border-t border-gray-200 flex justify-end">
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className={`
+                <div className="mt-6 pt-4 border-t border-gray-200 flex justify-end">
+                    <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className={`
                         px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2
-                        ${isSaving
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-blue-600 text-white hover:bg-blue-700'
-                        }
+                        ${isSaving ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}
                     `}
-                >
-                    {isSaving ? (
-                        <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                            Saving...
-                        </>
-                    ) : (
-                        <>
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                            Save Question
-                        </>
-                    )}
-                </button>
+                    >
+                        {isSaving ? (
+                            <>
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                                Saving...
+                            </>
+                        ) : (
+                            <>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                Save Question
+                            </>
+                        )}
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -939,19 +1172,18 @@ interface EditablePaletteProps {
 }
 
 function EditablePalette({ questions, section, currentIndex, onSelect, onAddNew }: EditablePaletteProps) {
-    const sectionQuestions = questions.filter(q => q.section === section);
-
-    // Expected count per section
-    const expectedCount = section === 'VARC' ? 24 : section === 'DILR' ? 20 : 22;
+    const sectionQuestions = questions.filter((q) => q.section === section);
+    const expectedCount = SECTION_TOTALS[section];
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+        <PaletteShell>
             <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-800">{section} Questions</h3>
-                <span className="text-sm text-gray-500">{sectionQuestions.length}/{expectedCount}</span>
+                <span className="text-sm text-gray-500">
+                    {sectionQuestions.length}/{expectedCount}
+                </span>
             </div>
 
-            {/* Question Grid */}
             <div className="grid grid-cols-5 gap-2 mb-4">
                 {Array.from({ length: expectedCount }, (_, i) => {
                     const q = sectionQuestions[i];
@@ -977,7 +1209,6 @@ function EditablePalette({ questions, section, currentIndex, onSelect, onAddNew 
                 })}
             </div>
 
-            {/* Add New Button */}
             <button
                 onClick={onAddNew}
                 className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors flex items-center justify-center gap-2"
@@ -988,7 +1219,6 @@ function EditablePalette({ questions, section, currentIndex, onSelect, onAddNew 
                 Add Question
             </button>
 
-            {/* Legend */}
             <div className="mt-4 pt-4 border-t border-gray-200 flex items-center gap-4 text-xs text-gray-500">
                 <div className="flex items-center gap-1">
                     <span className="w-3 h-3 rounded bg-green-100 border border-green-300" />
@@ -999,7 +1229,7 @@ function EditablePalette({ questions, section, currentIndex, onSelect, onAddNew 
                     <span>Empty</span>
                 </div>
             </div>
-        </div>
+        </PaletteShell>
     );
 }
 
@@ -1010,97 +1240,371 @@ function EditablePalette({ questions, section, currentIndex, onSelect, onAddNew 
 export function EditableExamLayout({
     paper,
     questions,
+    questionSets,
     contexts,
     onSaveQuestion,
+    onSaveQuestionSet,
+    onCreateQuestionSet,
     onSaveContext,
+    onDeleteContext,
+    onUpdatePaperTitle,
+    initialNavigation,
+    onNavigate,
 }: EditableExamLayoutProps) {
     const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [isSaving, setIsSaving] = useState(false);
+    const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
+    const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
+    const appliedNavKeyRef = useRef<string | null>(null);
 
     const currentSection = SECTIONS[currentSectionIndex];
 
-    // Get questions for current section
-    const sectionQuestions = useMemo(() =>
-        questions.filter(q => q.section === currentSection),
+    const sectionQuestions = useMemo(
+        () => questions.filter((q) => q.section === currentSection),
         [questions, currentSection]
     );
 
     const currentQuestion = sectionQuestions[currentQuestionIndex] ?? null;
-    const totalExpected = currentSection === 'VARC' ? 24 : currentSection === 'DILR' ? 20 : 22;
+    const totalExpected = SECTION_TOTALS[currentSection];
 
-    // Handle save with loading state
-    const handleSave = useCallback(async (questionData: Partial<QuestionWithAnswer>) => {
-        setIsSaving(true);
-        try {
-            await onSaveQuestion(questionData);
-        } finally {
-            setIsSaving(false);
+    const currentSet = selectedSetId ? questionSets.find((set) => set.id === selectedSetId) ?? null : null;
+    const useSetStimulus = Boolean(currentSet);
+
+    const showContextColumn = useSetStimulus
+        ? currentSet?.set_type !== 'ATOMIC'
+        : currentSection === 'VARC' || currentSection === 'DILR';
+
+    const questionColSpan = showContextColumn ? '' : 'lg:col-span-2';
+
+    const currentContext =
+        selectedContextId && selectedContextId !== 'new'
+            ? contexts.find((c) => c.id === selectedContextId) ?? null
+            : null;
+
+    useEffect(() => {
+        if (currentQuestion?.set_id) setSelectedSetId(currentQuestion.set_id);
+        setSelectedContextId(currentQuestion?.context_id ?? null);
+    }, [currentQuestion?.id, currentQuestion?.set_id, currentQuestion?.context_id]);
+
+    useEffect(() => {
+        if (!initialNavigation) return;
+
+        const navKey = `${initialNavigation.section ?? ''}|${initialNavigation.qid ?? ''}|${initialNavigation.setId ?? ''}|${initialNavigation.q ?? ''}`;
+        if (appliedNavKeyRef.current === navKey) return;
+        appliedNavKeyRef.current = navKey;
+
+        let nextSection = initialNavigation.section;
+
+        const questionFromId = initialNavigation.qid ? questions.find((q) => q.id === initialNavigation.qid) ?? null : null;
+        const setFromId = initialNavigation.setId ? questionSets.find((set) => set.id === initialNavigation.setId) ?? null : null;
+
+        if (questionFromId) nextSection = questionFromId.section;
+        else if (setFromId) nextSection = setFromId.section;
+
+        if (!nextSection || !SECTIONS.includes(nextSection)) nextSection = SECTIONS[0];
+
+        const nextSectionIndex = SECTIONS.indexOf(nextSection);
+        const sectionQuestionsResolved = questions.filter((q) => q.section === nextSection);
+
+        let nextQuestionIndex = 0;
+
+        if (questionFromId && questionFromId.section === nextSection) {
+            const idx = sectionQuestionsResolved.findIndex((q) => q.id === questionFromId.id);
+            if (idx >= 0) nextQuestionIndex = idx;
         }
-    }, [onSaveQuestion]);
 
-    // Handle context save
-    const handleSaveContext = useCallback(async (contextData: Partial<QuestionContext>) => {
-        if (onSaveContext) {
-            await onSaveContext(contextData);
+        if (!questionFromId && initialNavigation.setId) {
+            const idx = sectionQuestionsResolved.findIndex((q) => q.set_id === initialNavigation.setId);
+            if (idx >= 0) nextQuestionIndex = idx;
         }
-    }, [onSaveContext]);
 
-    // Handle section change - reset question index
-    const handleSectionChange = useCallback((index: number) => {
-        setCurrentSectionIndex(index);
-        setCurrentQuestionIndex(0);
-    }, []);
+        if (!questionFromId && typeof initialNavigation.q === 'number' && Number.isFinite(initialNavigation.q)) {
+            const fallbackIndex = Math.max(0, initialNavigation.q - 1);
+            nextQuestionIndex = Math.min(fallbackIndex, Math.max(sectionQuestionsResolved.length - 1, 0));
+        }
+
+        setCurrentSectionIndex(nextSectionIndex);
+        setCurrentQuestionIndex(nextQuestionIndex);
+
+        if (initialNavigation.setId) setSelectedSetId(initialNavigation.setId);
+        else if (questionFromId?.set_id) setSelectedSetId(questionFromId.set_id);
+    }, [initialNavigation, questions, questionSets]);
+
+    const emitNavigation = useCallback(
+        (sectionIndex: number, questionIndex: number, setOverride?: string | null) => {
+            if (!onNavigate) return;
+
+            const sectionName = SECTIONS[Math.max(0, Math.min(sectionIndex, SECTIONS.length - 1))];
+            const sectionQuestionsForNav = questions.filter((q) => q.section === sectionName);
+
+            const maxIndex = Math.max(0, sectionQuestionsForNav.length - 1);
+            const resolvedIndex = Math.max(0, Math.min(questionIndex, maxIndex));
+            const q = sectionQuestionsForNav[resolvedIndex] ?? null;
+
+            onNavigate({
+                section: sectionName,
+                qid: q?.id ?? null,
+                setId: setOverride ?? q?.set_id ?? null,
+                q: resolvedIndex + 1,
+            });
+        },
+        [onNavigate, questions]
+    );
+
+    useEffect(() => {
+        const maxIndex = Math.max(0, sectionQuestions.length - 1);
+        if (currentQuestionIndex > maxIndex) {
+            setCurrentQuestionIndex(maxIndex);
+            emitNavigation(currentSectionIndex, maxIndex, selectedSetId);
+        }
+    }, [sectionQuestions.length, currentQuestionIndex, currentSectionIndex, emitNavigation, selectedSetId]);
+
+    useEffect(() => {
+        if (process.env.NODE_ENV === 'production') return;
+
+        if (sectionQuestions.length === 0 && currentQuestionIndex !== 0) {
+            console.warn('[ExamEditor] Navigation state invalid (section/q/set mismatch)', {
+                section: currentSection,
+                questionIndex: currentQuestionIndex,
+                sectionQuestionCount: sectionQuestions.length,
+            });
+        }
+
+        if (currentQuestion && currentQuestion.section !== currentSection) {
+            console.warn('[ExamEditor] Navigation state invalid (section/q/set mismatch)', {
+                section: currentSection,
+                questionId: currentQuestion.id,
+                questionSection: currentQuestion.section,
+            });
+        }
+
+        if (currentQuestion && selectedSetId && currentQuestion.set_id && currentQuestion.set_id !== selectedSetId) {
+            console.warn('[ExamEditor] Navigation state invalid (section/q/set mismatch)', {
+                section: currentSection,
+                questionId: currentQuestion.id,
+                questionSetId: currentQuestion.set_id,
+                selectedSetId,
+            });
+        }
+    }, [currentSection, currentQuestionIndex, currentQuestion, sectionQuestions.length, selectedSetId]);
+
+    const handleSave = useCallback(
+        async (questionData: Partial<QuestionWithAnswer>) => {
+            setIsSaving(true);
+            try {
+                await onSaveQuestion(questionData);
+            } finally {
+                setIsSaving(false);
+            }
+        },
+        [onSaveQuestion]
+    );
+
+    const handleSaveContext = useCallback(
+        async (contextData: Partial<QuestionContext>) => {
+            if (onSaveContext) await onSaveContext(contextData);
+        },
+        [onSaveContext]
+    );
+
+    const handleCreateSet = useCallback(
+        async (setType: QuestionSet['set_type']) => {
+            const sectionSets = questionSets.filter((set) => set.section === currentSection);
+            const nextOrder = sectionSets.reduce((max, set) => Math.max(max, set.display_order ?? 0), 0) + 1;
+
+            const defaultLayout: Record<QuestionSet['set_type'], ContentLayoutType> = {
+                VARC: 'split_passage',
+                DILR: 'split_chart',
+                CASELET: 'split_table',
+                ATOMIC: 'single_focus',
+            };
+
+            const defaultContextTitle =
+                setType === 'VARC' ? `Passage ${sectionSets.length + 1}` : `Set ${sectionSets.length + 1}`;
+
+            const created = await onCreateQuestionSet({
+                paper_id: paper.id,
+                section: currentSection,
+                set_type: setType,
+                content_layout: defaultLayout[setType],
+                context_title: setType === 'ATOMIC' ? undefined : defaultContextTitle,
+                context_body: setType === 'ATOMIC' ? undefined : '',
+                context_image_url: undefined,
+                context_additional_images: [],
+                display_order: nextOrder,
+                question_count: 0,
+                metadata: {},
+                is_active: true,
+                is_published: false,
+            });
+
+            if (created) setSelectedSetId(created.id);
+            return created;
+        },
+        [questionSets, currentSection, onCreateQuestionSet, paper.id]
+    );
+
+    const handleAddQuestionToSet = useCallback(async () => {
+        let targetSetId = selectedSetId;
+
+        if (!targetSetId) {
+            const autoSetType = currentSection === 'QA' ? 'ATOMIC' : currentSection === 'VARC' ? 'VARC' : 'DILR';
+            const created = await handleCreateSet(autoSetType);
+            if (!created) return;
+            targetSetId = created.id;
+        }
+
+        const nextQuestionNumber =
+            sectionQuestions.reduce((max, q) => Math.max(max, q.question_number ?? 0), 0) + 1;
+
+        const setQuestions = questions.filter((q) => q.set_id === targetSetId);
+        const nextSequence = setQuestions.reduce((max, q) => Math.max(max, q.sequence_order ?? 0), 0) + 1;
+
+        await handleSave({
+            paper_id: paper.id,
+            section: currentSection,
+            question_number: nextQuestionNumber,
+            question_text: '',
+            question_type: 'MCQ',
+            question_format: 'MCQ',
+            options: ['', '', '', ''],
+            correct_answer: 'A',
+            positive_marks: 3,
+            negative_marks: 1,
+            set_id: targetSetId,
+            sequence_order: nextSequence,
+            is_active: true,
+        });
+
+        setSelectedSetId(targetSetId);
+        const nextIndex = sectionQuestions.length;
+        setCurrentQuestionIndex(nextIndex);
+        emitNavigation(currentSectionIndex, nextIndex, targetSetId);
+    }, [
+        selectedSetId,
+        currentSection,
+        handleCreateSet,
+        sectionQuestions,
+        questions,
+        handleSave,
+        paper.id,
+        emitNavigation,
+        currentSectionIndex,
+    ]);
+
+    const handleSectionChange = useCallback(
+        (index: number) => {
+            setCurrentSectionIndex(index);
+            setCurrentQuestionIndex(0);
+            setSelectedSetId(null);
+            emitNavigation(index, 0, null);
+        },
+        [emitNavigation]
+    );
+
+    const handleQuestionSelect = useCallback(
+        (index: number) => {
+            setCurrentQuestionIndex(index);
+            emitNavigation(currentSectionIndex, index, selectedSetId);
+        },
+        [currentSectionIndex, emitNavigation, selectedSetId]
+    );
+
+    const handleSelectSet = useCallback(
+        (setId: string | null) => {
+            setSelectedSetId(setId);
+            emitNavigation(currentSectionIndex, currentQuestionIndex, setId);
+        },
+        [currentSectionIndex, currentQuestionIndex, emitNavigation]
+    );
 
     return (
         <div className="min-h-screen bg-[#f5f7fa] flex flex-col">
-            {/* Header */}
             <EditableHeader
                 paper={paper}
                 currentSectionIndex={currentSectionIndex}
                 onSectionChange={handleSectionChange}
+                onUpdatePaperTitle={onUpdatePaperTitle}
             />
 
-            {/* Main Content - Mirrors Exam Layout exactly */}
             <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 py-6">
-                <div className="flex gap-6">
-                    {/* Question Area */}
-                    <div className="flex-1">
+                <div className="grid grid-cols-1 lg:grid-cols-[48%_33%_19%] gap-6 lg:gap-0 min-h-[calc(100vh-220px)]">
+                    {showContextColumn && (
+                        <div className="border border-gray-200 bg-gray-50 min-h-0 lg:border-r-0">
+                            {useSetStimulus ? (
+                                <EditableSetPane
+                                    questionSet={currentSet}
+                                    questionSets={questionSets}
+                                    section={currentSection}
+                                    paperId={paper.id}
+                                    onSave={onSaveQuestionSet}
+                                    onCreateSet={handleCreateSet}
+                                    onSelectSet={handleSelectSet}
+                                    selectedSetId={selectedSetId}
+                                />
+                            ) : (
+                                <EditableContextPane
+                                    context={currentContext}
+                                    contexts={contexts}
+                                    section={currentSection}
+                                    paperId={paper.id}
+                                    onSave={handleSaveContext}
+                                    onDeleteContext={onDeleteContext}
+                                    onSelectContext={setSelectedContextId}
+                                    selectedContextId={selectedContextId}
+                                />
+                            )}
+                        </div>
+                    )}
+
+                    <div
+                        className={`border border-gray-200 bg-white min-h-0 ${questionColSpan} ${showContextColumn ? 'lg:border-l-0' : ''
+                            }`}
+                    >
                         <EditableQuestionArea
                             question={currentQuestion}
                             questionNumber={currentQuestionIndex + 1}
                             totalQuestions={totalExpected}
                             section={currentSection}
                             paperId={paper.id}
-                            contexts={contexts}
+                            selectedSetId={selectedSetId}
+                            selectedContextId={selectedContextId}
                             onSave={handleSave}
-                            onSaveContext={handleSaveContext}
                             isSaving={isSaving}
                         />
                     </div>
 
-                    {/* Sidebar - Question Palette */}
-                    <aside className="hidden lg:block w-80 flex-shrink-0">
-                        <div className="sticky top-6 space-y-4">
-                            {/* Progress Card */}
+                    <aside className="hidden lg:flex flex-col border border-gray-200 bg-white min-h-0 lg:border-l-0">
+                        <div className="sticky top-6 space-y-4 p-4">
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                                <h3 className="font-semibold text-gray-800 mb-3">Set Actions</h3>
+                                <button
+                                    type="button"
+                                    onClick={handleAddQuestionToSet}
+                                    className="w-full px-3 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-md hover:bg-emerald-700"
+                                >
+                                    Add question to this set
+                                </button>
+                            </div>
+
                             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                                 <h3 className="font-semibold text-gray-800 mb-2">Progress</h3>
                                 <div className="space-y-2">
-                                    {SECTIONS.map((sec, idx) => {
-                                        const count = questions.filter(q => q.section === sec && q.question_text?.trim()).length;
-                                        const total = sec === 'VARC' ? 24 : sec === 'DILR' ? 20 : 22;
+                                    {SECTIONS.map((sec) => {
+                                        const count = questions.filter((q) => q.section === sec && q.question_text?.trim()).length;
+                                        const total = SECTION_TOTALS[sec];
                                         const percent = Math.round((count / total) * 100);
                                         return (
                                             <div key={sec}>
                                                 <div className="flex justify-between text-sm text-gray-600 mb-1">
                                                     <span>{sec}</span>
-                                                    <span>{count}/{total}</span>
+                                                    <span>
+                                                        {count}/{total}
+                                                    </span>
                                                 </div>
                                                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-blue-500 transition-all"
-                                                        style={{ width: `${percent}%` }}
-                                                    />
+                                                    <div className="h-full bg-blue-500 transition-all" style={{ width: `${percent}%` }} />
                                                 </div>
                                             </div>
                                         );
@@ -1108,13 +1612,12 @@ export function EditableExamLayout({
                                 </div>
                             </div>
 
-                            {/* Question Palette */}
                             <EditablePalette
                                 questions={questions}
                                 section={currentSection}
                                 currentIndex={currentQuestionIndex}
-                                onSelect={setCurrentQuestionIndex}
-                                onAddNew={() => setCurrentQuestionIndex(sectionQuestions.length)}
+                                onSelect={handleQuestionSelect}
+                                onAddNew={() => handleQuestionSelect(sectionQuestions.length)}
                             />
                         </div>
                     </aside>
@@ -1123,5 +1626,3 @@ export function EditableExamLayout({
         </div>
     );
 }
-
-export default EditableExamLayout;

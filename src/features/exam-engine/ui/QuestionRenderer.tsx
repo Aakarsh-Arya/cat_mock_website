@@ -10,15 +10,13 @@
 
 'use client';
 
-import { useMemo, useCallback, useState } from 'react';
+import { useMemo, useCallback } from 'react';
 import type {
     QuestionSet,
     QuestionSetType,
-    ContentLayoutType,
     QuestionInSet,
-    SectionName,
 } from '@/types/exam';
-import { isCompositeSet, isSplitLayout } from '@/types/exam';
+import { isCompositeSet } from '@/types/exam';
 import { MathText } from './MathText';
 import { MCQRenderer } from './MCQRenderer';
 import { TITARenderer } from './TITARenderer';
@@ -43,8 +41,121 @@ interface QuestionRendererProps {
 }
 
 // =============================================================================
-// SPLIT PANE LAYOUT (For VARC / DILR / CASELET)
+// SPLIT PANE SECTIONS (For VARC / DILR / CASELET)
 // =============================================================================
+
+interface ContextPaneProps {
+    questionSet: QuestionSet;
+}
+
+export function ContextPane({ questionSet }: ContextPaneProps) {
+    return (
+        <div className="h-full overflow-y-auto border-r border-exam-bg-border bg-exam-bg-white">
+            <div className="sticky top-0 bg-exam-bg-pane border-b border-exam-bg-border px-4 py-2 z-10">
+                <h3 className="text-sm font-semibold text-exam-header-from flex items-center gap-2">
+                    <ContextIcon setType={questionSet.set_type} />
+                    {questionSet.context_title || getDefaultContextTitle(questionSet.set_type)}
+                </h3>
+            </div>
+
+            <div className="p-6">
+                {/* Context Image (for charts, diagrams) */}
+                {questionSet.context_image_url && (
+                    <div className="mb-4">
+                        <img
+                            src={questionSet.context_image_url}
+                            alt={questionSet.context_title || 'Context diagram'}
+                            className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm"
+                        />
+                    </div>
+                )}
+
+                {/* Context Body (passage text) */}
+                {questionSet.context_body && (
+                    <div className="prose prose-sm max-w-none text-exam-text-body leading-exam">
+                        <MathText text={questionSet.context_body} />
+                    </div>
+                )}
+
+                {/* Additional Images */}
+                {questionSet.context_additional_images?.map((img, idx) => (
+                    <figure key={img.url || `img-${idx}`} className="mt-4">
+                        <img
+                            src={img.url}
+                            alt={img.caption || `Additional figure ${idx + 1}`}
+                            className="max-w-full h-auto rounded border border-gray-200"
+                        />
+                        {img.caption && (
+                            <figcaption className="text-xs text-gray-500 mt-1 text-center">
+                                {img.caption}
+                            </figcaption>
+                        )}
+                    </figure>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+interface QuestionPaneProps {
+    activeQuestion: QuestionInSet;
+    activeQuestionIndex: number;
+    totalQuestions: number;
+    onQuestionChange: (index: number) => void;
+    response: string | null;
+    onAnswerChange: (questionId: string, answer: string | null) => void;
+    isReviewMode?: boolean;
+}
+
+export function QuestionPane({
+    activeQuestion,
+    activeQuestionIndex,
+    totalQuestions,
+    onQuestionChange,
+    response,
+    onAnswerChange,
+    isReviewMode,
+}: QuestionPaneProps) {
+    return (
+        <div className="h-full overflow-y-auto bg-exam-bg-white">
+            {/* Question Navigation within Set */}
+            <div className="sticky top-0 bg-exam-bg-pane border-b border-exam-bg-border px-4 py-2 z-10">
+                <div className="flex items-center justify-between">
+                    <span className="text-sm text-exam-text-secondary">
+                        Question {activeQuestionIndex + 1} of {totalQuestions}
+                    </span>
+                    <div className="flex gap-1">
+                        {Array.from({ length: totalQuestions }).map((_, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => onQuestionChange(idx)}
+                                className={`
+                                    w-7 h-7 rounded text-xs font-medium transition-colors
+                                    ${idx === activeQuestionIndex
+                                        ? 'bg-status-current text-white'
+                                        : 'bg-white border border-status-border text-exam-text-primary hover:bg-gray-100'
+                                    }
+                                `}
+                            >
+                                {idx + 1}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            {/* Question Content */}
+            <div className="p-6">
+                <QuestionContent
+                    question={activeQuestion}
+                    response={response}
+                    onAnswerChange={onAnswerChange}
+                    isReviewMode={isReviewMode}
+                />
+            </div>
+        </div>
+    );
+}
 
 interface SplitPaneLayoutProps {
     questionSet: QuestionSet;
@@ -68,91 +179,17 @@ function SplitPaneLayout({
     isReviewMode,
 }: SplitPaneLayoutProps) {
     return (
-        <div className="flex h-full">
-            {/* Left Pane: Context (Passage / Chart / Table) */}
-            <div className="w-1/2 h-full overflow-y-auto border-r border-exam-bg-border bg-exam-bg-white">
-                <div className="sticky top-0 bg-exam-bg-pane border-b border-exam-bg-border px-4 py-2 z-10">
-                    <h3 className="text-sm font-semibold text-exam-header-from flex items-center gap-2">
-                        <ContextIcon setType={questionSet.set_type} />
-                        {questionSet.context_title || getDefaultContextTitle(questionSet.set_type)}
-                    </h3>
-                </div>
-
-                <div className="p-6">
-                    {/* Context Image (for charts, diagrams) */}
-                    {questionSet.context_image_url && (
-                        <div className="mb-4">
-                            <img
-                                src={questionSet.context_image_url}
-                                alt={questionSet.context_title || 'Context diagram'}
-                                className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm"
-                            />
-                        </div>
-                    )}
-
-                    {/* Context Body (passage text) */}
-                    {questionSet.context_body && (
-                        <div className="prose prose-sm max-w-none text-exam-text-body leading-exam">
-                            <MathText text={questionSet.context_body} />
-                        </div>
-                    )}
-
-                    {/* Additional Images */}
-                    {questionSet.context_additional_images?.map((img, idx) => (
-                        <figure key={idx} className="mt-4">
-                            <img
-                                src={img.url}
-                                alt={img.caption || `Additional figure ${idx + 1}`}
-                                className="max-w-full h-auto rounded border border-gray-200"
-                            />
-                            {img.caption && (
-                                <figcaption className="text-xs text-gray-500 mt-1 text-center">
-                                    {img.caption}
-                                </figcaption>
-                            )}
-                        </figure>
-                    ))}
-                </div>
-            </div>
-
-            {/* Right Pane: Question */}
-            <div className="w-1/2 h-full overflow-y-auto bg-exam-bg-white">
-                {/* Question Navigation within Set */}
-                <div className="sticky top-0 bg-exam-bg-pane border-b border-exam-bg-border px-4 py-2 z-10">
-                    <div className="flex items-center justify-between">
-                        <span className="text-sm text-exam-text-secondary">
-                            Question {activeQuestionIndex + 1} of {totalQuestions}
-                        </span>
-                        <div className="flex gap-1">
-                            {Array.from({ length: totalQuestions }).map((_, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => onQuestionChange(idx)}
-                                    className={`
-                                        w-7 h-7 rounded text-xs font-medium transition-colors
-                                        ${idx === activeQuestionIndex
-                                            ? 'bg-status-current text-white'
-                                            : 'bg-white border border-status-border text-exam-text-primary hover:bg-gray-100'
-                                        }
-                                    `}
-                                >
-                                    {idx + 1}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Question Content */}
-                <div className="p-6">
-                    <QuestionContent
-                        question={activeQuestion}
-                        response={response}
-                        onAnswerChange={onAnswerChange}
-                        isReviewMode={isReviewMode}
-                    />
-                </div>
-            </div>
+        <div className="contents">
+            <ContextPane questionSet={questionSet} />
+            <QuestionPane
+                activeQuestion={activeQuestion}
+                activeQuestionIndex={activeQuestionIndex}
+                totalQuestions={totalQuestions}
+                onQuestionChange={onQuestionChange}
+                response={response}
+                onAnswerChange={onAnswerChange}
+                isReviewMode={isReviewMode}
+            />
         </div>
     );
 }
@@ -167,6 +204,8 @@ interface SingleFocusLayoutProps {
     response: string | null;
     onAnswerChange: (questionId: string, answer: string | null) => void;
     isReviewMode?: boolean;
+    /** P4.1: When true, render context body inline above question (for single-question text-only sets) */
+    showInlineContext?: boolean;
 }
 
 function SingleFocusLayout({
@@ -175,10 +214,26 @@ function SingleFocusLayout({
     response,
     onAnswerChange,
     isReviewMode,
+    showInlineContext = false,
 }: SingleFocusLayoutProps) {
     return (
         <div className="h-full overflow-y-auto bg-exam-bg-white">
             <div className="max-w-3xl mx-auto p-8">
+                {/* P4.1: Inline context for single-question text-only sets */}
+                {showInlineContext && questionSet.context_body && (
+                    <div className="mb-6 pb-6 border-b border-gray-200">
+                        {questionSet.context_title && (
+                            <h3 className="text-[15px] font-semibold text-exam-header-from mb-3 flex items-center gap-2">
+                                <ContextIcon setType={questionSet.set_type} />
+                                {questionSet.context_title}
+                            </h3>
+                        )}
+                        <div className="prose prose-sm max-w-none text-exam-text-body leading-exam">
+                            <MathText text={questionSet.context_body} />
+                        </div>
+                    </div>
+                )}
+
                 {/* Optional: Image at top for diagram-based questions */}
                 {questionSet.context_image_url && (
                     <div className="mb-6">
@@ -217,9 +272,9 @@ interface QuestionContentProps {
 
 function QuestionContent({
     question,
-    response,
-    onAnswerChange,
-    isReviewMode,
+    response: _response,
+    onAnswerChange: _onAnswerChange,
+    isReviewMode: _isReviewMode,
     showImage = false,
 }: QuestionContentProps) {
     // Create a Question object compatible with existing renderers
@@ -250,7 +305,7 @@ function QuestionContent({
                     <img
                         src={question.question_image_url}
                         alt="Question diagram"
-                        className="max-w-full h-auto rounded border border-gray-200"
+                        className="max-w-full max-h-64 w-auto h-auto object-contain rounded border border-gray-200"
                     />
                 </div>
             )}
@@ -374,8 +429,18 @@ export function QuestionRenderer({
     // Determine layout based on set_type
     const isComposite = isCompositeSet(questionSet.set_type);
 
+    // P4.1: Edge-case layout rule - single question + text-only context = full-width
+    // If set has only 1 question AND context has no media (no image_url, no additional_images),
+    // default to full-width (SingleFocusLayout) instead of split-pane
+    const hasContextMedia = Boolean(
+        questionSet.context_image_url ||
+        (questionSet.context_additional_images && questionSet.context_additional_images.length > 0)
+    );
+    const isSingleQuestionSet = questions.length === 1;
+    const useFullWidthForEdgeCase = isComposite && isSingleQuestionSet && !hasContextMedia;
+
     // Render appropriate layout
-    if (isComposite) {
+    if (isComposite && !useFullWidthForEdgeCase) {
         return (
             <SplitPaneLayout
                 questionSet={questionSet}
@@ -390,7 +455,8 @@ export function QuestionRenderer({
         );
     }
 
-    // Atomic / Single Focus Layout
+    // Atomic / Single Focus Layout (including edge-case single-question text-only sets)
+    // For edge-case: inline the context above the question
     return (
         <SingleFocusLayout
             questionSet={questionSet}
@@ -398,8 +464,7 @@ export function QuestionRenderer({
             response={currentResponse}
             onAnswerChange={handleAnswerChange}
             isReviewMode={isReviewMode}
+            showInlineContext={useFullWidthForEdgeCase && Boolean(questionSet.context_body)}
         />
     );
 }
-
-export default QuestionRenderer;

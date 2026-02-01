@@ -29,6 +29,8 @@ interface ResponseData {
     answer: string | null;
     is_correct: boolean | null;
     marks_obtained: number | null;
+    time_spent_seconds?: number | null;
+    visit_count?: number | null;
 }
 
 /** Peer statistics for a paper - aggregated response counts */
@@ -101,6 +103,13 @@ function getMaskedStyle(): {
 /** Format option label (A, B, C, D) */
 function getOptionLabel(index: number): string {
     return String.fromCharCode(65 + index); // A, B, C, D
+}
+
+function formatDuration(seconds?: number | null): string {
+    const totalSeconds = Math.max(0, Math.floor(seconds ?? 0));
+    const minutes = Math.floor(totalSeconds / 60);
+    const remainingSeconds = totalSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
 export function QuestionAnalysis({ questions, responses, peerStats = {} }: QuestionAnalysisProps) {
@@ -344,6 +353,10 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                                             <p className="text-sm text-gray-700 truncate">
                                                 {question.question_text.replace(/<[^>]*>/g, '').substring(0, 100)}...
                                             </p>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Time: {response?.time_spent_seconds ? formatDuration(response.time_spent_seconds) : '—'}
+                                                {'  '}• Visits: {response?.visit_count ?? '—'}
+                                            </p>
                                         </div>
 
                                         {/* Marks - only show after reveal */}
@@ -395,6 +408,22 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                                                 <h4 className="text-sm font-medium text-gray-500 mb-2">Question</h4>
                                                 <div className="text-gray-800 prose prose-sm max-w-none">
                                                     <MathText text={question.question_text} />
+                                                </div>
+                                            </div>
+
+                                            {/* Response Analytics */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-gray-600">
+                                                <div>
+                                                    <span className="text-xs text-gray-500 block">Time Spent</span>
+                                                    <span className="font-semibold text-gray-800">
+                                                        {formatDuration(response?.time_spent_seconds)}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-xs text-gray-500 block">Visits</span>
+                                                    <span className="font-semibold text-gray-800">
+                                                        {response?.visit_count ?? 0}
+                                                    </span>
                                                 </div>
                                             </div>
 
@@ -596,5 +625,3 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
         </div>
     );
 }
-
-export default QuestionAnalysis;

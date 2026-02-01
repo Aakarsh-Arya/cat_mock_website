@@ -1,0 +1,63 @@
+{
+  "schema_version": "v3.0",
+  "paper": {
+    "paper_key": "test",
+    "title": "Test Paper",
+    "slug": "test",
+    "year": 2025,
+    "total_questions": 1,
+    "total_marks": 3,
+    "duration_minutes": 120,
+    "sections": [
+      "VARC"
+    ],
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "difficulty_level": "medium",
+    "attempt_limit": 2
+  },
+  "question_sets": [
+    {
+      "client_set_id": "TEST_SET",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 1,
+      "context_image_url": null
+    }
+  ],
+  "questions": [
+    {
+      "client_question_id": "test_Q1",
+      "set_ref": "TEST_SET",
+      "sequence_order": 1,
+      "section": "VARC",
+      "question_number": 1,
+      "question_type": "MCQ",
+      "topic": "Test",
+      "subtopic": "Test",
+      "difficulty": "easy",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "What is 1+1?",
+      "options": [
+        {
+          "id": "A",
+          "text": "2"
+        },
+        {
+          "id": "B",
+          "text": "3"
+        },
+        {
+          "id": "C",
+          "text": "4"
+        },
+        {
+          "id": "D",
+          "text": "5"
+        }
+      ]
+    }
+  ]
+}
