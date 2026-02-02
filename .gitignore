@@ -1,53 +1,36 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
+# --- Security & Secrets ---
+.env
+.env.local
+.env.*.local
 *.pem
+*.key
+service-account*.json
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# python virtualenv
-/.venv/
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# Question data files (keep only sample)
-data/cat-2024-*.json
+# --- Data Protection ---
+data/*
 !data/sample-paper-template.json
-# Export artifacts (generated) - data_sanitized NOT ignored (needed for VS_Codebase export)
+
+# --- Dependencies & Build ---
+node_modules/
+.pnpm-store/
+.next/
+out/
+build/
+dist/
+.venv/
+
+# --- Generated Reports ---
+gemini_*.md
+VS_Codebase*.md
+repomix-output*
 .export_sanitized/
 .export_tmp/
-VS_Codebase.md
-gemini_*.md
+.repomix-vs-codebase.json
+
+# --- System ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
