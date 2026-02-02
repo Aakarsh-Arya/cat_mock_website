@@ -6,7 +6,6 @@
  */
 
 import { readFileSync, writeFileSync } from 'fs';
-import { basename, dirname, join } from 'path';
 import { validatePaperSchema } from './ajv-validator.mjs';
 
 // =============================================================================
@@ -168,7 +167,7 @@ function parseQuestionBlock(block, currentSetId) {
     const lines = block.split('\n');
 
     let questionTextLines = [];
-    let optionsLines = [];
+    let _optionsLines = [];
     let solutionLines = [];
     let inQuestionText = false;
     let inOptions = false;
@@ -316,7 +315,7 @@ function parseQuestionBlock(block, currentSetId) {
     return question;
 }
 
-function parseMarkdownContent(content, paperMeta) {
+function parseMarkdownContent(content, _paperMeta) {
     const question_sets = [];
     const questions = [];
 
@@ -327,9 +326,9 @@ function parseMarkdownContent(content, paperMeta) {
     content = cleanText(content);
 
     // Split by section headers
-    const sectionPattern = /^#\s*\*{0,2}Section:\s*(\w+)\*{0,2}/gim;
-    const setPattern = /^#{1,2}\s*\*{0,2}SET\*{0,2}/gim;
-    const questionPattern = /^#{2,3}\s*\*{0,2}QUESTION\*{0,2}/gim;
+    const _sectionPattern = /^#\s*\*{0,2}Section:\s*(\w+)\*{0,2}/gim;
+    const _setPattern = /^#{1,2}\s*\*{0,2}SET\*{0,2}/gim;
+    const _questionPattern = /^#{2,3}\s*\*{0,2}QUESTION\*{0,2}/gim;
 
     let currentSection = null;
     let currentSetId = null;

@@ -30,6 +30,43 @@ type PageProps = {
     params: { attemptId: string } | Promise<{ attemptId: string }>;
 };
 
+type PaperRow = {
+    id: string;
+    slug: string;
+    title: string;
+    description?: string | null;
+    year: number;
+    total_questions: number;
+    total_marks: number;
+    duration_minutes: number;
+    sections: SectionConfig[];
+    default_positive_marks: number;
+    default_negative_marks: number;
+    published: boolean;
+    available_from?: string | null;
+    available_until?: string | null;
+    difficulty_level?: Paper['difficulty_level'] | null;
+    is_free: boolean;
+    attempt_limit?: number | null;
+    allow_pause?: boolean | null;
+    created_at: string;
+    updated_at: string;
+};
+
+type ResponseRow = {
+    id: string;
+    attempt_id: string;
+    question_id: string;
+    answer: string | null;
+    status: Response['status'];
+    is_marked_for_review?: boolean | null;
+    is_visited?: boolean | null;
+    time_spent_seconds?: number | null;
+    visit_count?: number | null;
+    created_at: string;
+    updated_at: string;
+};
+
 export default async function ExamPage({ params }: PageProps) {
     const { attemptId } = await params;
 
@@ -126,8 +163,8 @@ export default async function ExamPage({ params }: PageProps) {
     const paperRaw = attemptData.papers as unknown;
     const paperData =
         Array.isArray(paperRaw) && paperRaw.length > 0
-            ? (paperRaw[0] as any)
-            : (paperRaw as any);
+            ? (paperRaw[0] as PaperRow | null)
+            : (paperRaw as PaperRow | null);
 
     if (!paperData?.id) {
         return (
@@ -320,7 +357,7 @@ export default async function ExamPage({ params }: PageProps) {
         const contextIds = Array.from(
             new Set(
                 orderedQuestions
-                    .map((q) => (q as any).context_id as string | null | undefined)
+                    .map((q) => q.context_id)
                     .filter((id): id is string => Boolean(id))
             )
         );
@@ -360,7 +397,7 @@ export default async function ExamPage({ params }: PageProps) {
         logger?.warn?.('Failed to fetch responses for exam page', responsesError, { attemptId });
     }
 
-    const responses: Response[] = (responseRows ?? []).map((r: any) => ({
+    const responses: Response[] = (responseRows as ResponseRow[] ?? []).map((r) => ({
         id: r.id,
         attempt_id: r.attempt_id,
         question_id: r.question_id,

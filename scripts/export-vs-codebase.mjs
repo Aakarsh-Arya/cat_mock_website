@@ -17,7 +17,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execSync, spawnSync } from 'child_process';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -43,21 +43,8 @@ const SECRET_PATTERNS = [
     { name: 'Bearer Token', pattern: /Bearer\s+[A-Za-z0-9_\-\.]{20,}/g },
 ];
 
-// Files that should never be included
-const EXCLUDED_FILES = [
-    '.env',
-    '.env.local',
-    '.env.*.local',
-    '.env.development',
-    '.env.production',
-    '*.pem',
-    '*.key',
-    '*.p12',
-    '*.pfx',
-    'id_rsa*',
-    '*.jks',
-    'service-account*.json',
-];
+// Files that should never be included (handled by .gitignore and repomix config)
+// NOTE: Patterns moved to repomix config ignore list
 
 /**
  * Run the sanitization script
@@ -178,7 +165,7 @@ function runPatternBasedSecretsScan() {
                         }
                     }
                 }
-            } catch (error) {
+            } catch (_error) {
                 // Skip files that can't be read
             }
         }
@@ -471,7 +458,7 @@ function verifyOutput() {
         'cat-2024-mock',
         'sample-paper-template',
     ];
-    let questionPaperFound = false;
+    let _questionPaperFound = false;
     for (const pattern of questionPaperPatterns) {
         if (content.includes(pattern) && !content.includes('REDACTIONS')) {
             // Check if it's just in the redactions table

@@ -254,9 +254,10 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
 
     if (questionSets.length === 0) {
+        const questionsWithAnswers = questions as QuestionWithAnswer[];
         const contextIds = Array.from(
             new Set(
-                (questions as Array<QuestionWithAnswer & { context_id?: string | null }>[])
+                questionsWithAnswers
                     .map((q) => q.context_id)
                     .filter((id): id is string => Boolean(id))
             )
@@ -278,11 +279,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
             }
         }
 
-        questionSets = buildLegacyQuestionSetsWithAnswers(
-            questions as QuestionWithAnswer[],
-            contexts,
-            attempt.paper_id
-        );
+        questionSets = buildLegacyQuestionSetsWithAnswers(questionsWithAnswers, contexts, attempt.paper_id);
     }
 
     // Fetch peer statistics for this paper
