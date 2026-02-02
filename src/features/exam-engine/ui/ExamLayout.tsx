@@ -31,11 +31,36 @@ interface ExamLayoutProps {
     paper: Paper;
     questions: Question[];
     onSaveResponse?: (questionId: string, answer: string | null) => void | Promise<void>;
+    onSaveResponsesBatch?: (items: BatchSaveItem[]) => BatchSaveResult | Promise<BatchSaveResult>;
     onSubmitExam?: () => void | Promise<void>;
     onSectionExpire?: (sectionName: SectionName) => void | Promise<void>;
     onPauseExam?: () => void | Promise<void>;
     layoutMode?: 'current' | 'three-column';
+    submissionProgress?: SubmissionProgress | null;
 }
+
+type BatchSaveItem = {
+    questionId: string;
+    answer: string | null;
+    status: string;
+    isMarkedForReview: boolean;
+    isVisited: boolean;
+    timeSpentSeconds: number;
+    visitCount?: number;
+};
+
+type BatchSaveResult = { success: boolean; failedQuestionIds?: string[] } | void;
+
+type SubmissionProgressStep = {
+    label: string;
+    status: 'pending' | 'active' | 'done';
+};
+
+type SubmissionProgress = {
+    percent: number;
+    activeLabel?: string;
+    steps: SubmissionProgressStep[];
+};
 
 // =============================================================================
 // TCS iON HEADER
@@ -282,10 +307,12 @@ export function ExamLayout({
     paper,
     questions,
     onSaveResponse,
+    onSaveResponsesBatch,
     onSubmitExam,
     onSectionExpire,
     onPauseExam,
     layoutMode = 'current',
+    submissionProgress,
 }: ExamLayoutProps) {
     const currentSection = useExamStore(selectCurrentSection);
     const currentQuestionIndex = useExamStore((s) => s.currentQuestionIndex);
@@ -297,6 +324,7 @@ export function ExamLayout({
     const clearAnswer = useExamStore((s) => s.clearAnswer);
     const saveAnswer = useExamStore((s) => s.saveAnswer);
     const setResponseStatus = useExamStore((s) => s.setResponseStatus);
+    const updateTimeSpent = useExamStore((s) => s.updateTimeSpent);
 
     const queuePendingSync = useExamStore((s) => s.queuePendingSync);
     const pendingSyncResponses = useExamStore((s) => s.pendingSyncResponses);
@@ -335,26 +363,66 @@ export function ExamLayout({
 
     // Sync Logic
     const syncPendingResponses = useCallback(async () => {
-        if (!onSaveResponse) return;
+        if (!onSaveResponse && !onSaveResponsesBatch) return;
         if (syncInFlight.current) return;
 
         const entries = Object.entries(pendingSyncRef.current);
         if (entries.length === 0) return;
+
+        const batchItems = onSaveResponsesBatch
+            ? (entries
+                .map(([questionId, payload]) => {
+                    const response = responses[questionId];
+                    if (!response) return null;
+                    const answer = payload?.answer === '' ? null : (payload?.answer ?? null);
+                    return {
+                        questionId,
+                        answer,
+                        status: response.status,
+                        isMarkedForReview: response.isMarkedForReview,
+                        isVisited: response.status !== 'not_visited',
+                        timeSpentSeconds: response.timeSpentSeconds,
+                        visitCount: response.visitCount,
+                    };
+                })
+                .filter(Boolean) as BatchSaveItem[])
+            : null;
+
+        if (onSaveResponsesBatch && (!batchItems || batchItems.length === 0)) return;
 
         syncInFlight.current = true;
         setIsSyncing(true);
 
         const succeeded: string[] = [];
         try {
-            for (const [questionId, payload] of entries) {
-                // Normalize empty-string to null (backend usually expects null for “no answer”)
-                const answer = payload?.answer === '' ? null : (payload?.answer ?? null);
-
+            if (onSaveResponsesBatch && batchItems) {
                 try {
-                    await onSaveResponse(questionId, answer);
-                    succeeded.push(questionId);
+                    const result = await onSaveResponsesBatch(batchItems);
+                    let failedIds: Set<string> | null = null;
+                    if (result && typeof result === 'object' && 'success' in result && result.success === false) {
+                        const ids = Array.isArray(result.failedQuestionIds) ? result.failedQuestionIds : [];
+                        failedIds = new Set(ids.length > 0 ? ids : batchItems.map((item) => item.questionId));
+                    }
+
+                    for (const item of batchItems) {
+                        if (!failedIds || !failedIds.has(item.questionId)) {
+                            succeeded.push(item.questionId);
+                        }
+                    }
                 } catch {
-                    // keep it pending; next sync attempt will retry
+                    // keep all pending; next sync attempt will retry
+                }
+            } else if (onSaveResponse) {
+                for (const [questionId, payload] of entries) {
+                    // Normalize empty-string to null (backend usually expects null for "no answer")
+                    const answer = payload?.answer === '' ? null : (payload?.answer ?? null);
+
+                    try {
+                        await onSaveResponse(questionId, answer);
+                        succeeded.push(questionId);
+                    } catch {
+                        // keep it pending; next sync attempt will retry
+                    }
                 }
             }
 
@@ -366,7 +434,7 @@ export function ExamLayout({
             syncInFlight.current = false;
             setIsSyncing(false);
         }
-    }, [onSaveResponse, clearPendingSync, setLastSyncTimestamp]);
+    }, [onSaveResponse, onSaveResponsesBatch, responses, clearPendingSync, setLastSyncTimestamp]);
 
     // Ref to coordinate auto-submit vs manual submit
     const autoSubmitInProgressRef = useRef(false);
@@ -432,6 +500,28 @@ export function ExamLayout({
 
     const sectionQuestions = useMemo(() => getQuestionsForSection(questions, currentSection), [questions, currentSection]);
     const currentQuestion = sectionQuestions[currentQuestionIndex];
+
+    // Track per-question time spent while the exam is active
+    useEffect(() => {
+        if (!hasHydrated || isSubmitting || isAutoSubmitting) return;
+        if (!currentQuestion?.id) return;
+
+        let lastTick = Date.now();
+        const interval = setInterval(() => {
+            const now = Date.now();
+            if (document.hidden) {
+                lastTick = now;
+                return;
+            }
+            const deltaSeconds = Math.floor((now - lastTick) / 1000);
+            if (deltaSeconds > 0) {
+                updateTimeSpent(currentQuestion.id, deltaSeconds);
+                lastTick = now;
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [currentQuestion?.id, hasHydrated, isSubmitting, isAutoSubmitting, updateTimeSpent]);
 
     // Tabs are disabled, but keep handler in case you later allow same-section jumps.
     const handleSectionSelect = useCallback(
@@ -575,11 +665,58 @@ export function ExamLayout({
 
     // Submitting State
     if (isSubmitting || isAutoSubmitting) {
+        const title = isAutoSubmitting ? 'Time is up - submitting your attempt' : 'Submitting your attempt';
+        const subtitle = isAutoSubmitting
+            ? 'Locking your answers and finalizing your score.'
+            : 'Locking answers, validating session, and building analytics.';
+        const progressPercent = submissionProgress?.percent ?? 66;
+        const progressSteps = submissionProgress?.steps ?? [
+            { label: 'Validating session', status: 'active' as const },
+            { label: 'Saving responses', status: 'pending' as const },
+            { label: 'Submitting exam', status: 'pending' as const },
+            { label: 'Preparing analysis', status: 'pending' as const },
+        ];
+        const activeLabel = submissionProgress?.activeLabel ?? 'Preparing analysis';
+
         return (
-            <div className="min-h-screen bg-exam-bg-page flex items-center justify-center">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4" />
-                    <p className="text-exam-text-muted">{isAutoSubmitting ? 'Auto-submitting section...' : 'Submitting exam...'}</p>
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-blue-950 to-indigo-950 text-white">
+                <div className="relative w-full max-w-xl px-6">
+                    <div className="absolute -inset-6 rounded-3xl bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.25),transparent_55%)] blur-2xl" />
+                    <div className="relative rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl px-6 py-8 shadow-2xl">
+                        <div className="flex items-center gap-4">
+                            <div className="relative h-12 w-12 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center">
+                                <div className="absolute inset-1 rounded-xl border border-white/20 animate-pulse" />
+                                <div className="h-5 w-5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                            </div>
+                            <div>
+                                <p className="text-lg font-semibold">{title}</p>
+                                <p className="text-sm text-white/70">{subtitle}</p>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 space-y-3">
+                            <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
+                                <div
+                                    className="h-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 transition-all duration-500"
+                                    style={{ width: `${Math.min(100, Math.max(5, progressPercent))}%` }}
+                                />
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-white/60">
+                                {progressSteps.map((step) => (
+                                    <span
+                                        key={step.label}
+                                        className={step.status === 'active' ? 'text-white' : step.status === 'done' ? 'text-emerald-200' : ''}
+                                    >
+                                        {step.label}
+                                    </span>
+                                ))}
+                            </div>
+                            <div className="text-xs text-white/70">Current step: {activeLabel}</div>
+                            <p className="text-xs text-white/50">
+                                Please keep this tab open. This usually takes a few seconds.
+                            </p>
+                        </div>
+                    </div>
                 </div>
             </div>
         );
@@ -626,7 +763,7 @@ export function ExamLayout({
                 isCalculatorVisible={isCalculatorVisible}
                 hasPendingSync={hasPendingSync}
                 isSyncing={isSyncing}
-                onSyncNow={onSaveResponse ? () => void syncPendingResponses() : undefined}
+                onSyncNow={onSaveResponse || onSaveResponsesBatch ? () => void syncPendingResponses() : undefined}
                 onPauseExam={onPauseExam}
                 allowPause={paper.allow_pause !== false}
                 timeLeftDisplay={timerData?.displayTime ?? '00:00:00'}

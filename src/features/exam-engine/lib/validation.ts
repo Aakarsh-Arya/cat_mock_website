@@ -202,6 +202,7 @@ export const SaveResponseRequestSchema = z.object({
     isMarkedForReview: z.boolean(),
     isVisited: z.boolean().optional(),
     timeSpentSeconds: z.number().int().min(0),
+    visitCount: z.number().int().min(0).optional(),
     sessionToken: z.string().nullable().optional(),
     force_resume: z.boolean().optional(),
 });

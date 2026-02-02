@@ -28,7 +28,21 @@ export async function POST(req: NextRequest) {
             return addVersionHeader(NextResponse.json({ error: 'attemptId required' }, { status: 400 }));
         }
 
+        // Attempt ID from body; also try to extract from Referer as a fallback.
+        const referer = req.headers.get('referer') ?? '';
+        let refererAttemptId: string | null = null;
+        try {
+            const path = new URL(referer).pathname;
+            const parts = path.split('/');
+            if (parts[1] === 'exam' && parts[2]) refererAttemptId = parts[2];
+        } catch {
+            // ignore malformed referer
+        }
+
         console.log('SUBMIT_ATTEMPT_ID_RECEIVED:', attemptId, 'submissionId:', submissionId ?? 'none');
+        if (refererAttemptId) {
+            console.log('SUBMIT_REFERER_ATTEMPT_ID:', refererAttemptId);
+        }
 
         const config = getSupabaseConfig();
         if (!config) {
@@ -73,13 +87,24 @@ export async function POST(req: NextRequest) {
         const adminClient = getServiceRoleClient();
         let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, submission_id')
+            .select('id, user_id, status')
             .eq('id', attemptId)
             .maybeSingle();
 
+        // If the schema doesn't have submission_id, avoid hard failure by retrying without it.
+        if (attemptError?.code === '42703') {
+            const retry = await adminClient
+                .from('attempts')
+                .select('id, user_id, status')
+                .eq('id', attemptId)
+                .maybeSingle();
+            attempt = retry.data ?? attempt;
+            attemptError = retry.error ?? null;
+        }
+
         console.log('SUBMIT_ATTEMPT_QUERY_RESULT:', attempt);
 
-        // Track the effective attemptId - may change if fallback is used
+        // Track the effective attemptId - may change if fallback or referer is used
         let effectiveAttemptId = attemptId;
 
         if (attemptError || !attempt) {
@@ -89,22 +114,41 @@ export async function POST(req: NextRequest) {
             console.log('SUBMIT_ATTEMPT_QUERY_ERROR:', attemptError);
             console.log('SUBMIT_ATTEMPT_QUERY_REASON:', reason);
 
+            // First, try referer attempt id (common mismatch when client has stale state)
+            if (refererAttemptId && refererAttemptId !== attemptId) {
+                const { data: refererAttempt, error: refererError } = await adminClient
+                    .from('attempts')
+                    .select('id, user_id, status')
+                    .eq('id', refererAttemptId)
+                    .maybeSingle();
+                if (refererAttempt && !refererError) {
+                    console.log('SUBMIT_REFERER_ATTEMPT_USED:', refererAttempt);
+                    console.log('SUBMIT_REFERER_ID_PROMOTION:', `${attemptId} -> ${refererAttempt.id}`);
+                    attempt = refererAttempt;
+                    effectiveAttemptId = refererAttempt.id;
+                }
+            }
+
+            if (!attempt) {
             const { data: fallbackAttempt, error: fallbackError } = await adminClient
                 .from('attempts')
-                .select('id, user_id, status, submission_id')
+                .select('id, user_id, status')
                 .eq('user_id', user.id)
                 .eq('status', 'in_progress')
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
-            if (fallbackAttempt && !fallbackError) {
-                console.log('SUBMIT_FALLBACK_ATTEMPT_USED:', fallbackAttempt);
-                console.log('SUBMIT_FALLBACK_ID_PROMOTION:', `${attemptId} -> ${fallbackAttempt.id}`);
-                attempt = fallbackAttempt;
-                // CRITICAL FIX: Promote the fallback attempt ID for all downstream operations
-                effectiveAttemptId = fallbackAttempt.id;
-            } else {
+                if (fallbackAttempt && !fallbackError) {
+                    console.log('SUBMIT_FALLBACK_ATTEMPT_USED:', fallbackAttempt);
+                    console.log('SUBMIT_FALLBACK_ID_PROMOTION:', `${attemptId} -> ${fallbackAttempt.id}`);
+                    attempt = fallbackAttempt;
+                    // CRITICAL FIX: Promote the fallback attempt ID for all downstream operations
+                    effectiveAttemptId = fallbackAttempt.id;
+                }
+            }
+
+            if (!attempt) {
                 const { data: recentAttempts, error: recentError } = await adminClient
                     .from('attempts')
                     .select('id, status, user_id, paper_id, created_at')
@@ -120,7 +164,24 @@ export async function POST(req: NextRequest) {
                     errorMessage: attemptError?.message ?? 'Attempt not found',
                 });
                 const notFound = addVersionHeader(NextResponse.json(
-                    { error: 'Attempt not found', code: 'ATTEMPT_NOT_FOUND' },
+                    {
+                        error: 'Attempt not found',
+                        code: 'ATTEMPT_NOT_FOUND',
+                        ...(process.env.NODE_ENV !== 'production'
+                            ? {
+                                debug: {
+                                    attemptId,
+                                    refererAttemptId,
+                                    userId: user.id,
+                                    supabaseUrl: config.url,
+                                    hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+                                    attemptErrorCode: attemptError?.code ?? null,
+                                    attemptErrorMessage: attemptError?.message ?? null,
+                                    recentAttempts: recentAttempts ?? null,
+                                },
+                            }
+                            : {}),
+                    },
                     { status: 404 }
                 ));
                 res.cookies.getAll().forEach((cookie) => notFound.cookies.set(cookie));
@@ -169,6 +230,8 @@ export async function POST(req: NextRequest) {
                 p_attempt_id: effectiveAttemptId,
                 p_session_token: sessionToken,
                 p_user_id: user.id,
+                // Disambiguate overloaded RPC (uuid vs text signature)
+                p_force_resume: false,
             });
 
         if (validateError) {

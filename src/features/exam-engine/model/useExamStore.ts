@@ -20,6 +20,7 @@ import type {
     SectionTimerState,
     QuestionStatus,
     Question,
+    PerformanceReason,
 } from '@/types/exam';
 import {
     SECTION_ORDER,
@@ -130,7 +131,25 @@ export const createExamStore = (attemptId?: string) => {
 
                 initializeExam: (data: ExamData) => {
                     const { paper, questions, attempt, responses: serverResponses } = data;
-                    const currentState = get();
+                    let currentState = get();
+
+                    // If the persisted state belongs to a different attempt, drop it.
+                    if (currentState.attemptId && currentState.attemptId !== attempt.id) {
+                        try {
+                            if (typeof window !== 'undefined') {
+                                localStorage.removeItem(`cat-exam-state-${currentState.attemptId}`);
+                                localStorage.removeItem('cat-exam-state-temp');
+                            }
+                        } catch {
+                            // best-effort cleanup
+                        }
+                        // Reset in-memory state to avoid reusing stale attemptId/timers.
+                        set({
+                            ...initialState,
+                            hasHydrated: false,
+                        });
+                        currentState = get();
+                    }
 
                     // PHASE 1 FIX: Check if we're resuming the same attempt with persisted state
                     if (currentState.attemptId === attempt.id && currentState.hasHydrated) {
@@ -770,6 +789,15 @@ export const createExamStore = (attemptId?: string) => {
                         state.visitedQuestions = new Set(Array.isArray(state.visitedQuestions) ? state.visitedQuestions : []);
                         state.markedQuestions = new Set(Array.isArray(state.markedQuestions) ? state.markedQuestions : []);
                         state.hasHydrated = true;
+
+                        // Guard against stale persisted state for a different attempt.
+                        if (typeof window !== 'undefined') {
+                            const parts = window.location.pathname.split('/');
+                            const currentAttemptId = parts[1] === 'exam' ? (parts[2] ?? null) : null;
+                            if (currentAttemptId && state.attemptId && state.attemptId !== currentAttemptId) {
+                                state.resetExam();
+                            }
+                        }
                     }
                 },
             }
@@ -841,4 +869,84 @@ export const selectSectionCounts = (questions: Question[]) => (state: ExamStore)
     });
 
     return counts;
+};
+
+// =============================================================================
+// ANALYSIS STORE (Reason Tags + Bookmarks)
+// =============================================================================
+
+interface AnalysisStoreState {
+    attemptId: string;
+    reasons: Record<string, PerformanceReason | null>;
+    bookmarks: Record<string, boolean>;
+}
+
+interface AnalysisStoreActions {
+    setReason: (questionId: string, reason: PerformanceReason | null) => void;
+    toggleBookmark: (questionId: string) => void;
+    clearReason: (questionId: string) => void;
+    resetAnalysis: () => void;
+}
+
+const analysisStoreCache = new Map<string, ReturnType<typeof createAnalysisStore>>();
+
+const createAnalysisStore = (attemptId: string) => {
+    const storageKey = `cat-exam-analysis-${attemptId}`;
+
+    return create<AnalysisStoreState & AnalysisStoreActions>()(
+        persist(
+            (set) => ({
+                attemptId,
+                reasons: {},
+                bookmarks: {},
+                setReason: (questionId, reason) => {
+                    set((state) => ({
+                        reasons: {
+                            ...state.reasons,
+                            [questionId]: reason,
+                        },
+                    }));
+                },
+                toggleBookmark: (questionId) => {
+                    set((state) => {
+                        const next = { ...state.bookmarks };
+                        if (next[questionId]) {
+                            delete next[questionId];
+                        } else {
+                            next[questionId] = true;
+                        }
+                        return { bookmarks: next };
+                    });
+                },
+                clearReason: (questionId) => {
+                    set((state) => {
+                        if (!(questionId in state.reasons)) {
+                            return state;
+                        }
+                        const next = { ...state.reasons };
+                        delete next[questionId];
+                        return { reasons: next };
+                    });
+                },
+                resetAnalysis: () => {
+                    set({ reasons: {}, bookmarks: {} });
+                },
+            }),
+            {
+                name: storageKey,
+                storage: createJSONStorage(() => (typeof window !== 'undefined' ? localStorage : noopStorage)),
+            }
+        )
+    );
+};
+
+export const getAnalysisStore = (attemptId?: string | null) => {
+    const key = attemptId || 'temp';
+    const existing = analysisStoreCache.get(key);
+    if (existing) {
+        return existing;
+    }
+    const created = createAnalysisStore(key);
+    analysisStoreCache.set(key, created);
+    return created;
 };

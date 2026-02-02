@@ -10,8 +10,18 @@ type SaveResponsePayload = {
     isMarkedForReview: boolean;
     isVisited?: boolean;
     timeSpentSeconds: number;
+    visitCount?: number;
     sessionToken?: string | null;
     force_resume?: boolean;
+};
+
+type SaveBatchItem = Omit<SaveResponsePayload, 'attemptId' | 'sessionToken' | 'force_resume'>;
+
+type SaveBatchPayload = {
+    attemptId: string;
+    sessionToken?: string | null;
+    force_resume?: boolean;
+    responses: SaveBatchItem[];
 };
 
 type ProgressPayload = {
@@ -77,6 +87,10 @@ export function initializeExamSession(attemptId: string): Promise<ActionResult<{
 
 export function saveResponse(payload: SaveResponsePayload): Promise<ActionResult<void>> {
     return postJson<void>('/api/save', payload);
+}
+
+export function saveResponsesBatch(payload: SaveBatchPayload): Promise<ActionResult<{ saved: number }>> {
+    return postJson<{ saved: number }>('/api/save-batch', payload);
 }
 
 export function updateAttemptProgress(payload: ProgressPayload): Promise<ActionResult<void>> {

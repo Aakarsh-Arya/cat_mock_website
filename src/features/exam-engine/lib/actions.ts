@@ -258,6 +258,7 @@ export async function saveResponse(data: {
     isMarkedForReview: boolean;
     isVisited?: boolean;
     timeSpentSeconds: number;
+    visitCount?: number;
     sessionToken?: string | null;
     force_resume?: boolean;
 }): Promise<ActionResult<void>> {
@@ -288,6 +289,8 @@ export async function saveResponse(data: {
             p_attempt_id: data.attemptId,
             p_session_token: data.sessionToken,
             p_user_id: user.id,
+            // Disambiguate overloaded RPC (uuid vs text signature)
+            p_force_resume: false,
         });
 
         if (validateError) {
@@ -353,6 +356,7 @@ export async function saveResponse(data: {
                 is_marked_for_review: data.isMarkedForReview,
                 is_visited: inferredVisited,
                 time_spent_seconds: data.timeSpentSeconds,
+                visit_count: typeof data.visitCount === 'number' ? data.visitCount : undefined,
             },
             { onConflict: 'attempt_id,question_id' }
         );
@@ -488,9 +492,19 @@ export async function submitExam(
         // CRITICAL: Select 'id' so we can promote fallback attempt ID
         let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, paper_id, started_at, submission_id')
+            .select('id, user_id, status, paper_id, started_at')
             .eq('id', normalizedAttemptId)
             .maybeSingle();
+
+        if (attemptError?.code === '42703') {
+            const retry = await adminClient
+                .from('attempts')
+                .select('id, user_id, status, paper_id, started_at')
+                .eq('id', normalizedAttemptId)
+                .maybeSingle();
+            attempt = retry.data ?? attempt;
+            attemptError = retry.error ?? null;
+        }
 
         if (attemptError || !attempt) {
             const reason = attemptError ? `error:${attemptError.code ?? 'unknown'}` : 'no_rows';
@@ -502,7 +516,7 @@ export async function submitExam(
 
             const { data: fallbackAttempt, error: fallbackError } = await adminClient
                 .from('attempts')
-                .select('id, user_id, status, paper_id, started_at, submission_id')
+                .select('id, user_id, status, paper_id, started_at')
                 .eq('user_id', user.id)
                 .eq('status', 'in_progress')
                 .order('created_at', { ascending: false })
@@ -546,6 +560,8 @@ export async function submitExam(
             p_attempt_id: normalizedAttemptId,
             p_session_token: options.sessionToken,
             p_user_id: user.id,
+            // Disambiguate overloaded RPC (uuid vs text signature)
+            p_force_resume: false,
         });
 
         const tryForceResume = async () => {
@@ -645,22 +661,67 @@ export async function submitExam(
         const submissionId = options?.submissionId ?? null;
 
         // Atomic status transition (prevents races/double submit)
+        const primaryUpdatePayload: Record<string, unknown> = {
+            status: 'submitted',
+            submitted_at: submittedAt,
+        };
+        if (submissionId) {
+            primaryUpdatePayload.submission_id = submissionId;
+        }
+
         let updateQuery = adminClient
             .from('attempts')
-            .update({ status: 'submitted', submitted_at: submittedAt, submission_id: submissionId })
+            .update(primaryUpdatePayload)
             .eq('id', normalizedAttemptId)
             .eq('status', 'in_progress');
 
+        // Best-effort: if submission_id exists in this DB, attempt idempotent update.
         if (submissionId) {
-            // Keep your existing behavior (submission_id is generated UUID-like string)
-            updateQuery = updateQuery.or(`submission_id.is.null,submission_id.eq.${submissionId}`);
+            try {
+                updateQuery = updateQuery.or(`submission_id.is.null,submission_id.eq.${submissionId}`);
+            } catch {
+                // ignore if column doesn't exist
+            }
         }
 
-        const { data: updatedAttempt, error: updateStatusError } = await updateQuery.select('id').maybeSingle();
+        let { data: updatedAttempt, error: updateStatusError } = await updateQuery.select('id').maybeSingle();
+
+        if (updateStatusError?.code === '42703') {
+            // Retry without submission_id (handles missing column)
+            const retry = await adminClient
+                .from('attempts')
+                .update({ status: 'submitted', submitted_at: submittedAt })
+                .eq('id', normalizedAttemptId)
+                .eq('status', 'in_progress')
+                .select('id')
+                .maybeSingle();
+            updatedAttempt = retry.data ?? updatedAttempt;
+            updateStatusError = retry.error ?? null;
+        }
+
+        if (updateStatusError?.code === '42703') {
+            // Retry without submitted_at (handles older schemas)
+            const retry = await adminClient
+                .from('attempts')
+                .update({ status: 'submitted' })
+                .eq('id', normalizedAttemptId)
+                .eq('status', 'in_progress')
+                .select('id')
+                .maybeSingle();
+            updatedAttempt = retry.data ?? updatedAttempt;
+            updateStatusError = retry.error ?? null;
+        }
 
         if (updateStatusError) {
             logger.error('Failed to mark attempt as submitted', updateStatusError, { attemptId: normalizedAttemptId });
-            return { success: false, error: 'Failed to submit exam' };
+            const detail = updateStatusError.message || updateStatusError.code || 'unknown';
+            return {
+                success: false,
+                error:
+                    process.env.NODE_ENV !== 'production'
+                        ? `Failed to submit exam: ${detail}`
+                        : 'Failed to submit exam',
+            };
         }
 
         if (!updatedAttempt) {
@@ -849,7 +910,7 @@ export async function fetchExamResults(
 
         const { data: responses, error: responsesError } = await supabase
             .from('responses')
-            .select('question_id, answer, is_correct, marks_obtained, time_spent_seconds, visit_count')
+            .select('question_id, answer, is_correct, marks_obtained, time_spent_seconds, visit_count, updated_at')
             .eq('attempt_id', attemptId);
 
         if (responsesError) return { success: false, error: 'Failed to fetch responses' };
@@ -866,6 +927,7 @@ export async function fetchExamResults(
                     marks_obtained: number | null;
                     time_spent_seconds?: number | null;
                     visit_count?: number | null;
+                    updated_at?: string | null;
                 }>,
             },
         };

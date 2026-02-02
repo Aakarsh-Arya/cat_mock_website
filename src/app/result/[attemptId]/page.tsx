@@ -11,6 +11,20 @@ import { fetchExamResults } from '@/features/exam-engine/lib/actions';
 import { ResultHeader } from '@/features/exam-engine/ui/ResultHeader';
 import { SectionalPerformance } from '@/features/exam-engine/ui/SectionalPerformance';
 import { QuestionAnalysis } from '@/features/exam-engine/ui/QuestionAnalysis';
+import { BackToDashboard } from '@/components/BackToDashboard';
+import { ResultReviewClient } from './ResultReviewClient';
+import { buildLegacyQuestionSetsWithAnswers } from '@/utils/question-sets';
+import type {
+    Question,
+    QuestionSetComplete,
+    QuestionSetMetadata,
+    QuestionSetType,
+    ContentLayoutType,
+    QuestionContext,
+    QuestionWithAnswer,
+    SectionName,
+    QuestionType,
+} from '@/types/exam';
 
 interface SectionScore {
     score: number;
@@ -114,9 +128,29 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
 
     const { attempt, questions, responses } = result.data!;
+    const answerMap = Object.fromEntries(responses.map((r) => [r.question_id, r.answer ?? null]));
+    const correctAnswerMap = Object.fromEntries(questions.map((q) => [q.id, q.correct_answer ?? '']));
 
     // Fetch paper details for display
     const supabase = await sbSSR();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    let attemptSequenceLabel: string | null = null;
+    if (user) {
+        const { data: attemptHistory } = await supabase
+            .from('attempts')
+            .select('id, created_at')
+            .eq('user_id', user.id)
+            .eq('paper_id', attempt.paper_id)
+            .order('created_at', { ascending: true });
+
+        if (attemptHistory && attemptHistory.length > 0) {
+            const index = attemptHistory.findIndex((a) => a.id === attempt.id);
+            if (index >= 0) {
+                attemptSequenceLabel = `Attempt ${index + 1} of ${attemptHistory.length}`;
+            }
+        }
+    }
     const { data: paper } = await supabase
         .from('papers')
         .select('title, total_marks, total_questions')
@@ -125,6 +159,131 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
 
     const paperTitle = paper?.title || 'Exam Result';
     const totalMarks = paper?.total_marks || attempt.max_possible_score || 198;
+
+    type QuestionSetViewRow = {
+        id: string;
+        paper_id: string;
+        section: string;
+        set_type: string;
+        content_layout: string;
+        context_title?: string | null;
+        context_body?: string | null;
+        context_image_url?: string | null;
+        context_additional_images?: unknown;
+        display_order: number;
+        question_count: number;
+        metadata?: QuestionSetMetadata | null;
+        is_active: boolean;
+        is_published: boolean;
+        created_at: string;
+        updated_at: string;
+        questions: Array<{
+            id: string;
+            question_text: string;
+            question_type: string;
+            options: unknown;
+            positive_marks: number;
+            negative_marks: number;
+            question_number: number;
+            sequence_order: number | null;
+            question_image_url?: string | null;
+            difficulty?: string | null;
+            topic?: string | null;
+            subtopic?: string | null;
+            is_active: boolean;
+        }>;
+    };
+
+    const { data: questionSetRows, error: questionSetError } = await supabase
+        .from('question_sets_with_questions')
+        .select('*')
+        .eq('paper_id', attempt.paper_id);
+
+    if (questionSetError) {
+        console.warn('[ResultPage] Failed to fetch question_sets_with_questions', questionSetError);
+    }
+
+    let questionSets: QuestionSetComplete[] = [];
+
+    if (questionSetRows && questionSetRows.length > 0) {
+        questionSets = (questionSetRows as QuestionSetViewRow[]).map((row) => ({
+            id: row.id,
+            paper_id: row.paper_id,
+            section: row.section as SectionName,
+            set_type: row.set_type as QuestionSetType,
+            content_layout: row.content_layout as ContentLayoutType,
+            context_title: row.context_title ?? undefined,
+            context_body: row.context_body ?? undefined,
+            context_image_url: row.context_image_url ?? undefined,
+            context_additional_images: Array.isArray(row.context_additional_images)
+                ? (row.context_additional_images as QuestionSetComplete['context_additional_images'])
+                : [],
+            display_order: row.display_order,
+            question_count: row.question_count,
+            metadata: (row.metadata ?? {}) as QuestionSetMetadata,
+            is_active: row.is_active,
+            is_published: row.is_published,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            questions: (row.questions ?? []).map((q, index) => ({
+                id: q.id,
+                set_id: row.id,
+                paper_id: row.paper_id,
+                section: row.section as SectionName,
+                sequence_order: q.sequence_order ?? index + 1,
+                question_number: q.question_number,
+                question_text: q.question_text,
+                question_type: q.question_type as QuestionType,
+                options: q.options as Question['options'],
+                positive_marks: q.positive_marks,
+                negative_marks: q.negative_marks,
+                question_image_url: q.question_image_url ?? undefined,
+                difficulty: q.difficulty as Question['difficulty'],
+                topic: q.topic ?? undefined,
+                subtopic: q.subtopic ?? undefined,
+                is_active: q.is_active,
+            })),
+        }));
+
+        const sectionOrder: Record<SectionName, number> = { VARC: 0, DILR: 1, QA: 2 };
+        questionSets.sort((a, b) => {
+            const sd = (sectionOrder[a.section] ?? 99) - (sectionOrder[b.section] ?? 99);
+            if (sd) return sd;
+            return (a.display_order ?? 9999) - (b.display_order ?? 9999);
+        });
+    }
+
+    if (questionSets.length === 0) {
+        const contextIds = Array.from(
+            new Set(
+                (questions as Array<QuestionWithAnswer & { context_id?: string | null }>[])
+                    .map((q) => q.context_id)
+                    .filter((id): id is string => Boolean(id))
+            )
+        );
+
+        let contexts: QuestionContext[] = [];
+        if (contextIds.length > 0) {
+            const { data: contextsData, error: contextsError } = await supabase
+                .from('question_contexts')
+                .select(
+                    'id, title, section, content, context_type, paper_id, display_order, is_active, image_url, created_at, updated_at'
+                )
+                .in('id', contextIds);
+
+            if (contextsError) {
+                console.warn('[ResultPage] Failed to fetch question_contexts', contextsError);
+            } else {
+                contexts = (contextsData ?? []) as QuestionContext[];
+            }
+        }
+
+        questionSets = buildLegacyQuestionSetsWithAnswers(
+            questions as QuestionWithAnswer[],
+            contexts,
+            attempt.paper_id
+        );
+    }
 
     // Fetch peer statistics for this paper
     type PaperStats = Record<string, { total: number; options: Record<string, number> }>;
@@ -141,6 +300,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
 
     return (
         <main className="min-h-screen bg-gray-50">
+            <BackToDashboard variant="fixed" />
             {/* Header with paper title and submission info */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-8 px-6">
                 <div className="max-w-5xl mx-auto">
@@ -148,6 +308,11 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                     <p className="text-blue-100">
                         Submitted: {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : '—'}
                     </p>
+                    {attemptSequenceLabel && (
+                        <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white">
+                            {attemptSequenceLabel}
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -167,6 +332,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                     percentile={attempt.percentile ?? null}
                     rank={attempt.rank ?? null}
                     submittedAt={attempt.submitted_at ?? null}
+                    reviewAnchorId="exam-review"
                 />
 
                 {/* Sectional Performance */}
@@ -199,6 +365,17 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                         }))}
                         responses={responses}
                         peerStats={paperStats}
+                        attemptSequenceLabel={attemptSequenceLabel}
+                        attemptId={attempt.id}
+                    />
+                )}
+
+                {questionSets.length > 0 && (
+                    <ResultReviewClient
+                        paperTitle={paperTitle}
+                        questionSets={questionSets}
+                        answerMap={answerMap}
+                        correctAnswerMap={correctAnswerMap}
                     />
                 )}
 

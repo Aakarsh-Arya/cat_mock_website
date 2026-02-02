@@ -227,7 +227,11 @@ export function MathText({ text, className }: MathTextProps) {
         return null;
     }
 
-    const parts = String(text).split(MATH_PATTERN).filter(Boolean);
+    const normalizedText = String(text)
+        .replace(/\\\[((?:.|\n)+?)\\\]/g, (_match, math) => `$$${math}$$`)
+        .replace(/\\\(((?:.|\n)+?)\\\)/g, (_match, math) => `$${math}$`);
+
+    const parts = normalizedText.split(MATH_PATTERN).filter(Boolean);
 
     return (
         <div className={`prose prose-sm max-w-none ${className ?? ''}`}>

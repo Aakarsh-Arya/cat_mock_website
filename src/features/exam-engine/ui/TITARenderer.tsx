@@ -29,6 +29,8 @@ interface TITARendererProps {
     showCorrectAnswer?: boolean;
     /** Correct answer (only available in results) */
     correctAnswer?: string;
+    /** Optional answer override for review mode */
+    answerOverride?: string | null;
 }
 
 // =============================================================================
@@ -41,6 +43,7 @@ export function TITARenderer({
     readOnly = false,
     showCorrectAnswer = false,
     correctAnswer,
+    answerOverride = null,
 }: TITARendererProps) {
     const response = useExamStore(selectResponse(question.id));
     // FIX: Use setLocalAnswer to store answer locally without changing status
@@ -48,7 +51,7 @@ export function TITARenderer({
     const setLocalAnswer = useExamStore((s) => s.setLocalAnswer);
 
     // Local state for input (debounced save)
-    const [localValue, setLocalValue] = useState(response?.answer ?? '');
+    const [localValue, setLocalValue] = useState(answerOverride ?? response?.answer ?? '');
 
     // PHASE 3 FIX: Track if we're updating from store to prevent loops
     const isUpdatingFromStore = useRef(false);
@@ -57,15 +60,16 @@ export function TITARenderer({
     // Only update if the value is different AND we're not in the middle of a local update
     useEffect(() => {
         const storeValue = response?.answer ?? '';
-        if (storeValue !== localValue && !isUpdatingFromStore.current) {
+        const nextValue = answerOverride ?? storeValue;
+        if (nextValue !== localValue && !isUpdatingFromStore.current) {
             isUpdatingFromStore.current = true;
-            setLocalValue(storeValue);
+            setLocalValue(nextValue);
             // Reset flag after state update
             requestAnimationFrame(() => {
                 isUpdatingFromStore.current = false;
             });
         }
-    }, [response?.answer, localValue]);
+    }, [response?.answer, answerOverride, localValue]);
 
     // Determine if answer is correct (for results view)
     const isCorrect = showCorrectAnswer && localValue === correctAnswer;

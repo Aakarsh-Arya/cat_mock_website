@@ -57,6 +57,8 @@ export async function POST(req: NextRequest) {
                     p_attempt_id: attemptId,
                     p_session_token: sessionToken,
                     p_user_id: user.id,
+                    // Disambiguate overloaded RPC (uuid vs text signature)
+                    p_force_resume: false,
                 });
 
                 if (isValidSession === false) {

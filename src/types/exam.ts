@@ -359,6 +359,9 @@ export type QuestionStatus =
     | 'marked'           // Purple - Marked for review, no answer
     | 'answered_marked'; // Purple with checkmark - Has answer AND marked for review
 
+/** Self-reported reason tags for analysis review */
+export type PerformanceReason = 'concept_gap' | 'careless_error' | 'time_pressure' | 'guess';
+
 /** Response entity from database */
 export interface Response {
     id: string;

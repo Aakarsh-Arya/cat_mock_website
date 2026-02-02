@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { checkRateLimit, RATE_LIMITS, userRateLimitKey, getRateLimitHeaders } from '@/lib/rate-limit';
 import { examLogger } from '@/lib/logger';
+import { getServiceRoleClient } from '@/lib/supabase/service-role';
 import {
     isNonEmptyString,
     getSupabaseConfig,
@@ -22,7 +23,28 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.json();
-        const { attemptId, questionId, answer, sessionToken, force_resume } = body ?? {};
+        const {
+            attemptId,
+            questionId,
+            answer,
+            sessionToken,
+            force_resume,
+            status,
+            isMarkedForReview,
+            isVisited,
+            timeSpentSeconds,
+            visitCount,
+        } = body ?? {};
+
+        const referer = req.headers.get('referer') ?? '';
+        let refererAttemptId: string | null = null;
+        try {
+            const path = new URL(referer).pathname;
+            const parts = path.split('/');
+            if (parts[1] === 'exam' && parts[2]) refererAttemptId = parts[2];
+        } catch {
+            // ignore malformed referer
+        }
 
         if (!isNonEmptyString(attemptId)) {
             return addVersionHeader(NextResponse.json({ error: 'attemptId is required' }, { status: 400 }));
@@ -73,12 +95,26 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Ensure the attempt belongs to the user
-        const { data: attempt, error: attemptError } = await supabase
+        // Ensure the attempt belongs to the user (service role read to avoid RLS false negatives)
+        const adminClient = getServiceRoleClient();
+        let effectiveAttemptId = attemptId;
+        let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
             .select('id, user_id, status, started_at, paper_id')
             .eq('id', attemptId)
             .maybeSingle();
+
+        if ((!attempt || attemptError) && refererAttemptId && refererAttemptId !== attemptId) {
+            const { data: refererAttempt, error: refererError } = await adminClient
+                .from('attempts')
+                .select('id, user_id, status, started_at, paper_id')
+                .eq('id', refererAttemptId)
+                .maybeSingle();
+            if (refererAttempt && !refererError) {
+                attempt = refererAttempt;
+                effectiveAttemptId = refererAttemptId;
+            }
+        }
 
         if (attemptError) {
             console.log('API_SAVE_ATTEMPT_LOOKUP_FAILED', {
@@ -88,7 +124,25 @@ export async function POST(req: NextRequest) {
                 errorCode: attemptError.code ?? null,
                 errorMessage: attemptError.message ?? 'Attempt lookup failed',
             });
-            return NextResponse.json({ error: 'Failed to fetch attempt' }, { status: 500 });
+            return NextResponse.json(
+                {
+                    error: 'Failed to fetch attempt',
+                    ...(process.env.NODE_ENV !== 'production'
+                        ? {
+                            debug: {
+                                attemptId,
+                                refererAttemptId,
+                                userId: session.user.id,
+                                supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? null,
+                                hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+                                attemptErrorCode: attemptError.code ?? null,
+                                attemptErrorMessage: attemptError.message ?? null,
+                            },
+                        }
+                        : {}),
+                },
+                { status: 500 }
+            );
         }
 
         if (!attempt || attempt.user_id !== session.user.id) {
@@ -127,9 +181,11 @@ export async function POST(req: NextRequest) {
         }
 
         const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
-            p_attempt_id: attemptId,
+            p_attempt_id: effectiveAttemptId,
             p_session_token: sessionToken,
             p_user_id: session.user.id,
+            // Disambiguate overloaded RPC (uuid vs text signature)
+            p_force_resume: false,
         });
 
         if (validateError) {
@@ -141,16 +197,46 @@ export async function POST(req: NextRequest) {
             // If RPC error and force_resume is set, try to proceed with force resume
             if (force_resume === true) {
                 const { error: forceResumeError } = await supabase.rpc('force_resume_exam_session', {
-                    p_attempt_id: attemptId,
+                    p_attempt_id: effectiveAttemptId,
                     p_new_session_token: sessionToken,
                 });
                 if (!forceResumeError) {
                     // Force resume succeeded, continue with save
                 } else {
-                    return NextResponse.json({ error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' }, { status: 500 });
+                    return NextResponse.json(
+                        {
+                            error: 'Failed to validate session',
+                            code: 'VALIDATION_RPC_ERROR',
+                            ...(process.env.NODE_ENV !== 'production'
+                                ? {
+                                    debug: {
+                                        attemptId: effectiveAttemptId,
+                                        validateErrorCode: validateError.code ?? null,
+                                        validateErrorMessage: validateError.message ?? null,
+                                    },
+                                }
+                                : {}),
+                        },
+                        { status: 500 }
+                    );
                 }
             } else {
-                return NextResponse.json({ error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' }, { status: 500 });
+                return NextResponse.json(
+                    {
+                        error: 'Failed to validate session',
+                        code: 'VALIDATION_RPC_ERROR',
+                        ...(process.env.NODE_ENV !== 'production'
+                            ? {
+                                debug: {
+                                    attemptId: effectiveAttemptId,
+                                    validateErrorCode: validateError.code ?? null,
+                                    validateErrorMessage: validateError.message ?? null,
+                                },
+                            }
+                            : {}),
+                    },
+                    { status: 500 }
+                );
             }
         }
 
@@ -160,13 +246,13 @@ export async function POST(req: NextRequest) {
                 const userAgent = req.headers.get('user-agent') ?? 'unknown';
 
                 examLogger.securityEvent('Force resume (save)', {
-                    attemptId,
+                    attemptId: effectiveAttemptId,
                     ip,
                     userAgent,
                 });
 
                 const { error: forceResumeError } = await supabase.rpc('force_resume_exam_session', {
-                    p_attempt_id: attemptId,
+                    p_attempt_id: effectiveAttemptId,
                     p_new_session_token: sessionToken,
                 });
 
@@ -187,7 +273,7 @@ export async function POST(req: NextRequest) {
                     return NextResponse.json({ error: 'Failed to force resume session' }, { status: 500 });
                 }
             } else {
-                examLogger.securityEvent('Save session token mismatch', { attemptId });
+                examLogger.securityEvent('Save session token mismatch', { attemptId: effectiveAttemptId });
                 return NextResponse.json(
                     {
                         error: 'Session conflict detected. This exam may be open in another tab or device.',
@@ -209,7 +295,22 @@ export async function POST(req: NextRequest) {
                 .maybeSingle();
 
             if (paperTimingError) {
-                return NextResponse.json({ error: 'Failed to fetch paper timing' }, { status: 500 });
+                return NextResponse.json(
+                    {
+                        error: 'Failed to fetch paper timing',
+                        ...(process.env.NODE_ENV !== 'production'
+                            ? {
+                                debug: {
+                                    attemptId: effectiveAttemptId,
+                                    paperId: attempt.paper_id,
+                                    paperTimingErrorCode: paperTimingError.code ?? null,
+                                    paperTimingErrorMessage: paperTimingError.message ?? null,
+                                },
+                            }
+                            : {}),
+                    },
+                    { status: 500 }
+                );
             }
 
             const totalMinutes = (paperTiming?.sections || []).reduce(
@@ -235,9 +336,21 @@ export async function POST(req: NextRequest) {
         }
 
         // Upsert response
+        const upsertPayload: Record<string, unknown> = {
+            attempt_id: effectiveAttemptId,
+            question_id: questionId,
+            answer: answer ?? null,
+        };
+
+        if (typeof status === 'string') upsertPayload.status = status;
+        if (typeof isMarkedForReview === 'boolean') upsertPayload.is_marked_for_review = isMarkedForReview;
+        if (typeof isVisited === 'boolean') upsertPayload.is_visited = isVisited;
+        if (typeof timeSpentSeconds === 'number') upsertPayload.time_spent_seconds = timeSpentSeconds;
+        if (typeof visitCount === 'number') upsertPayload.visit_count = visitCount;
+
         const { data, error } = await supabase
             .from('responses')
-            .upsert({ attempt_id: attemptId, question_id: questionId, answer }, { onConflict: 'attempt_id,question_id' })
+            .upsert(upsertPayload, { onConflict: 'attempt_id,question_id' })
             .select('attempt_id, question_id, answer, updated_at')
             .single();
 
@@ -274,7 +387,22 @@ export async function POST(req: NextRequest) {
                 errorCode,
                 errorMessage,
             });
-            return NextResponse.json({ error: errorMessage }, { status: 500 });
+            return NextResponse.json(
+                {
+                    error: errorMessage,
+                    ...(process.env.NODE_ENV !== 'production'
+                        ? {
+                            debug: {
+                                attemptId: effectiveAttemptId,
+                                questionId,
+                                errorCode,
+                                errorMessage,
+                            },
+                        }
+                        : {}),
+                },
+                { status: 500 }
+            );
         }
 
         // Add rate limit headers to successful response

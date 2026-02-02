@@ -7,7 +7,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { type SectionName, type QuestionType } from '@/types/exam';
+import { type SectionName, type QuestionType, type PerformanceReason } from '@/types/exam';
+import { getAnalysisStore } from '@/features/exam-engine/model/useExamStore';
 import { MathText } from './MathText';
 
 interface QuestionData {
@@ -31,6 +32,7 @@ interface ResponseData {
     marks_obtained: number | null;
     time_spent_seconds?: number | null;
     visit_count?: number | null;
+    updated_at?: string | null;
 }
 
 /** Peer statistics for a paper - aggregated response counts */
@@ -45,6 +47,8 @@ interface QuestionAnalysisProps {
     questions: QuestionData[];
     responses: ResponseData[];
     peerStats?: PaperStats;
+    attemptSequenceLabel?: string | null;
+    attemptId?: string | null;
 }
 
 type FilterType = 'all' | 'correct' | 'incorrect' | 'unanswered';
@@ -112,7 +116,29 @@ function formatDuration(seconds?: number | null): string {
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
 }
 
-export function QuestionAnalysis({ questions, responses, peerStats = {} }: QuestionAnalysisProps) {
+function normalizeDifficulty(raw?: string | null): 'easy' | 'medium' | 'hard' | 'unknown' {
+    const value = (raw ?? '').toLowerCase().trim();
+    if (value === 'easy') return 'easy';
+    if (value === 'medium') return 'medium';
+    if (value === 'hard') return 'hard';
+    return 'unknown';
+}
+
+const REASON_OPTIONS: Array<{ value: PerformanceReason; label: string }> = [
+    { value: 'concept_gap', label: 'Concept gap' },
+    { value: 'careless_error', label: 'Silly mistake' },
+    { value: 'time_pressure', label: 'Time pressure' },
+    { value: 'guess', label: 'Guess/unsure' },
+];
+
+const DIFFICULTY_LEGEND = [
+    { key: 'easy', label: 'Easy', color: 'bg-emerald-500' },
+    { key: 'medium', label: 'Medium', color: 'bg-amber-500' },
+    { key: 'hard', label: 'Hard', color: 'bg-rose-500' },
+    { key: 'unknown', label: 'Unknown', color: 'bg-slate-400' },
+] as const;
+
+export function QuestionAnalysis({ questions, responses, peerStats = {}, attemptSequenceLabel, attemptId }: QuestionAnalysisProps) {
     const [filter, setFilter] = useState<FilterType>('all');
     const [expandedQuestions, setExpandedQuestions] = useState<Set<string>>(new Set());
     const [visibleSolutions, setVisibleSolutions] = useState<Set<string>>(new Set());
@@ -120,6 +146,70 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
     const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
     const [activeSection, setActiveSection] = useState<SectionName | 'all'>('all');
     const [activeTopic, setActiveTopic] = useState<string>('all');
+
+    const analysisStore = getAnalysisStore(attemptId ?? 'temp');
+    const analysisReasons = analysisStore((s) => s.reasons);
+    const bookmarkedQuestions = analysisStore((s) => s.bookmarks);
+    const setAnalysisReason = analysisStore((s) => s.setReason);
+    const toggleBookmark = analysisStore((s) => s.toggleBookmark);
+
+    const responseMap = useMemo(() => {
+        return new Map(responses.map((r) => [r.question_id, r]));
+    }, [responses]);
+
+    const timeSeriesBySection = useMemo(() => {
+        const sectionOrder: SectionName[] = ['VARC', 'DILR', 'QA'];
+        return sectionOrder.map((section) => {
+            const items = questions
+                .filter((q) => q.section === section)
+                .sort((a, b) => a.question_number - b.question_number)
+                .map((q) => {
+                    const response = responseMap.get(q.id);
+                    return {
+                        id: q.id,
+                        number: q.question_number,
+                        timeSpent: response?.time_spent_seconds ?? 0,
+                    };
+                });
+
+            const maxTime = items.reduce((max, item) => Math.max(max, item.timeSpent), 0);
+            return { section, items, maxTime };
+        });
+    }, [questions, responseMap]);
+
+    const attemptTimelineBySection = useMemo(() => {
+        const sectionOrder: SectionName[] = ['VARC', 'DILR', 'QA'];
+        return sectionOrder.map((section) => {
+            const items = questions
+                .filter((q) => q.section === section)
+                .map((q) => {
+                    const response = responseMap.get(q.id);
+                    return {
+                        id: q.id,
+                        number: q.question_number,
+                        difficulty: normalizeDifficulty(q.difficulty),
+                        updatedAt: response?.updated_at ?? null,
+                    };
+                });
+
+            const withTimestamp = items
+                .filter((item) => item.updatedAt)
+                .sort((a, b) => new Date(a.updatedAt as string).getTime() - new Date(b.updatedAt as string).getTime());
+            const withoutTimestamp = items
+                .filter((item) => !item.updatedAt)
+                .sort((a, b) => a.number - b.number);
+
+            const ordered = withTimestamp.length > 0 ? [...withTimestamp, ...withoutTimestamp] : withoutTimestamp;
+
+            return {
+                section,
+                items: ordered.map((item, index) => ({
+                    ...item,
+                    order: index + 1,
+                })),
+            };
+        });
+    }, [questions, responseMap]);
 
     // Filter questions (section + status)
     const baseFilteredQuestions = questions.filter(q => {
@@ -231,9 +321,54 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
 
     return (
         <div className="mb-8">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                Question Analysis
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <h2 className="text-xl font-semibold text-gray-800">Question Analysis</h2>
+                {attemptSequenceLabel && (
+                    <span className="text-xs font-semibold uppercase tracking-wide text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1 rounded-full">
+                        {attemptSequenceLabel}
+                    </span>
+                )}
+            </div>
+
+            <div className="mb-6">
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <h3 className="text-sm font-semibold text-gray-800">Time Spent vs Question</h3>
+                            <p className="text-xs text-gray-500">Seconds spent per question, grouped by section.</p>
+                        </div>
+                    </div>
+                    <div className="space-y-5">
+                        {timeSeriesBySection.map((section) => {
+                            const maxHeight = 96;
+                            const maxTime = section.maxTime || 1;
+                            return (
+                                <div key={section.section}>
+                                    <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+                                        <span className="font-semibold text-gray-700">{section.section === 'DILR' ? 'LRDI' : section.section}</span>
+                                        <span>{section.items.length} questions</span>
+                                    </div>
+                                    <div className="flex items-end gap-1 h-28 rounded-md bg-slate-50 border border-slate-100 px-2 py-3">
+                                        {section.items.map((item) => {
+                                            const height = Math.max(6, Math.round((item.timeSpent / maxTime) * maxHeight));
+                                            return (
+                                                <div key={item.id} className="flex flex-col items-center flex-1 min-w-[10px]">
+                                                    <div
+                                                        className="w-full rounded-sm bg-blue-500/80 hover:bg-blue-600 transition"
+                                                        style={{ height: `${height}px` }}
+                                                        title={`Q${item.number} - ${formatDuration(item.timeSpent)}`}
+                                                    />
+                                                    <span className="mt-1 text-[10px] text-gray-500">{item.number}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
 
             {/* Filters */}
             <div className="flex flex-wrap gap-3 mb-6">
@@ -312,6 +447,11 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                             const style = isRevealed
                                 ? getStatusStyle(response?.is_correct ?? null, hasAnswer)
                                 : getMaskedStyle();
+                            const isBookmarked = Boolean(bookmarkedQuestions[question.id]);
+                            const selectedReason = analysisReasons[question.id] ?? null;
+                            const isIncorrect = hasAnswer && response?.is_correct === false;
+                            const isSkipped = !hasAnswer;
+                            const showReasonPicker = isIncorrect || isSkipped;
 
                             return (
                                 <div
@@ -320,9 +460,17 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                                     className={`border-2 ${style.borderClass} ${style.bgClass} rounded-lg overflow-hidden transition-all`}
                                 >
                                     {/* Question Header (Click to expand) */}
-                                    <button
+                                    <div
+                                        role="button"
+                                        tabIndex={0}
                                         onClick={() => toggleQuestion(question.id)}
-                                        className="w-full flex items-center gap-4 p-4 text-left hover:bg-white/50 transition-colors"
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                toggleQuestion(question.id);
+                                            }
+                                        }}
+                                        className="w-full flex items-center gap-4 p-4 text-left hover:bg-white/50 transition-colors cursor-pointer"
                                     >
                                         {/* Question Number */}
                                         <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-white border flex items-center justify-center">
@@ -355,7 +503,7 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                                             </p>
                                             <p className="text-xs text-gray-500 mt-1">
                                                 Time: {response?.time_spent_seconds ? formatDuration(response.time_spent_seconds) : '—'}
-                                                {'  '}• Visits: {response?.visit_count ?? '—'}
+                                                {' '}• Visits: {response?.visit_count ?? '—'}
                                             </p>
                                         </div>
 
@@ -376,6 +524,35 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                                             )}
                                         </div>
 
+                                        {/* Bookmark Toggle */}
+                                        <button
+                                            type="button"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                toggleBookmark(question.id);
+                                            }}
+                                            className={`flex-shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full border transition-colors ${isBookmarked
+                                                ? 'border-amber-300 bg-amber-50 text-amber-600'
+                                                : 'border-gray-200 text-gray-400 hover:bg-gray-50'
+                                                }`}
+                                            aria-pressed={isBookmarked}
+                                            aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark question'}
+                                        >
+                                            <svg
+                                                className="w-5 h-5"
+                                                viewBox="0 0 24 24"
+                                                fill={isBookmarked ? 'currentColor' : 'none'}
+                                                stroke="currentColor"
+                                                strokeWidth={2}
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    d="M5 4a2 2 0 012-2h10a2 2 0 012 2v18l-7-4-7 4V4z"
+                                                />
+                                            </svg>
+                                        </button>
+
                                         {/* Expand Icon */}
                                         <div className="flex-shrink-0">
                                             <svg
@@ -387,7 +564,7 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                             </svg>
                                         </div>
-                                    </button>
+                                    </div>
 
                                     {/* Expanded Content */}
                                     {isExpanded && (
@@ -426,6 +603,38 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                                                     </span>
                                                 </div>
                                             </div>
+
+                                            {showReasonPicker && (
+                                                <div className="rounded-lg border border-amber-100 bg-amber-50/70 p-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-xs font-semibold text-amber-700">Reason for Performance</span>
+                                                        <span className="text-[10px] uppercase tracking-wide text-amber-600">
+                                                            {isSkipped ? 'Skipped' : 'Incorrect'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="mt-2 flex flex-wrap gap-2">
+                                                        {REASON_OPTIONS.map((option) => {
+                                                            const isActive = selectedReason === option.value;
+                                                            return (
+                                                                <button
+                                                                    key={option.value}
+                                                                    type="button"
+                                                                    onClick={() => setAnalysisReason(question.id, isActive ? null : option.value)}
+                                                                    className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${isActive
+                                                                        ? 'bg-amber-500 text-white border-amber-500'
+                                                                        : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-100'
+                                                                        }`}
+                                                                >
+                                                                    {option.label}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                    <p className="mt-2 text-[10px] text-amber-600">
+                                                        Tap again to clear a selection.
+                                                    </p>
+                                                </div>
+                                            )}
 
                                             {/* Options (for MCQ) with Masked Review Mode */}
                                             {question.question_type === 'MCQ' && question.options && (
@@ -621,6 +830,57 @@ export function QuestionAnalysis({ questions, responses, peerStats = {} }: Quest
                         </div>
                     </div>
                 </aside>
+            </div>
+
+            <div className="mt-8 bg-white border border-gray-200 rounded-lg p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                    <div>
+                        <h3 className="text-sm font-semibold text-gray-800">Attempt Strategy (Section-wise)</h3>
+                        <p className="text-xs text-gray-500">Order of interaction within each section, colored by difficulty.</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                        {DIFFICULTY_LEGEND.map((item) => (
+                            <span key={item.key} className="inline-flex items-center gap-1">
+                                <span className={`h-2.5 w-2.5 rounded-full ${item.color}`} />
+                                {item.label}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="space-y-5">
+                    {attemptTimelineBySection.map((section) => (
+                        <div key={section.section}>
+                            <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+                                <span className="font-semibold text-gray-700">
+                                    {section.section === 'DILR' ? 'LRDI' : section.section}
+                                </span>
+                                <span>{section.items.length} questions</span>
+                            </div>
+                            <div className="relative h-12 rounded-full bg-slate-50 border border-slate-100 px-4">
+                                <div className="absolute inset-0 flex items-center justify-between px-4">
+                                    {section.items.map((item) => {
+                                        const color =
+                                            DIFFICULTY_LEGEND.find((entry) => entry.key === item.difficulty)?.color ||
+                                            'bg-slate-400';
+                                        return (
+                                            <div key={item.id} className="flex-1 flex justify-center">
+                                                <span
+                                                    className={`h-5 w-5 rounded-full shadow-sm ${color}`}
+                                                    title={`Q${item.number} - Attempt ${item.order}`}
+                                                />
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            <div className="mt-2 flex items-center justify-between text-[10px] text-gray-500">
+                                <span>Start</span>
+                                <span>Finish</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );

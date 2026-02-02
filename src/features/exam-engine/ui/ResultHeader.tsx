@@ -17,6 +17,7 @@ interface ResultHeaderProps {
     percentile: number | null;
     rank: number | null;
     submittedAt: string | null;
+    reviewAnchorId?: string;
 }
 
 /**
@@ -47,6 +48,7 @@ export function ResultHeader({
     percentile,
     rank,
     submittedAt,
+    reviewAnchorId,
 }: ResultHeaderProps) {
     const scorePercentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
     const scoreColor = scorePercentage >= 70
@@ -71,6 +73,20 @@ export function ResultHeader({
                     </p>
                 )}
             </div>
+
+            {reviewAnchorId && (
+                <div className="mt-4 flex justify-center">
+                    <a
+                        href={`#${reviewAnchorId}`}
+                        className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                    >
+                        Review in Exam UI
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14m-7-7l7 7-7 7" />
+                        </svg>
+                    </a>
+                </div>
+            )}
 
             {/* Main Score Card */}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 shadow-sm border border-blue-100">

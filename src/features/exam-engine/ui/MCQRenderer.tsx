@@ -26,6 +26,8 @@ interface MCQRendererProps {
     showCorrectAnswer?: boolean;
     /** Correct answer (only available in results) */
     correctAnswer?: string;
+    /** Optional answer override for review mode */
+    answerOverride?: string | null;
 }
 
 interface OptionProps {
@@ -180,13 +182,14 @@ export function MCQRenderer({
     readOnly = false,
     showCorrectAnswer = false,
     correctAnswer,
+    answerOverride = null,
 }: MCQRendererProps) {
     const response = useExamStore(selectResponse(question.id));
     // FIX: Use setLocalAnswer to store answer locally without changing status
     // Status only changes when user clicks "Save and Next"
     const setLocalAnswer = useExamStore((s) => s.setLocalAnswer);
 
-    const selectedAnswer = response?.answer ?? null;
+    const selectedAnswer = answerOverride ?? response?.answer ?? null;
 
     // Handle option selection - stores locally, does NOT turn palette green
     const handleChange = useCallback(
@@ -206,7 +209,7 @@ export function MCQRenderer({
             <fieldset className="space-y-3">
                 <legend className="sr-only">Multiple choice options</legend>
                 {options.map((optionText, index) => {
-                    const label = OPTION_LABELS[index];
+                    const label = OPTION_LABELS[index] ?? String(index + 1);
                     const isSelected = selectedAnswer === label;
                     const isCorrect = showCorrectAnswer && correctAnswer === label;
                     const isIncorrect = showCorrectAnswer && isSelected && correctAnswer !== label;
@@ -216,7 +219,7 @@ export function MCQRenderer({
 
                     return (
                         <MCQOption
-                            key={label}
+                            key={`${question.id}-${index}`}
                             label={label}
                             value={label}
                             text={optionText}

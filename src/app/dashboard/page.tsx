@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BackToDashboard } from '@/components/BackToDashboard';
 import { sbSSR } from '@/lib/supabase/server';
 
 type Attempt = {
@@ -109,6 +110,9 @@ export default async function DashboardPage({
 
     return (
         <main style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
+            <div style={{ marginBottom: 16 }}>
+                <BackToDashboard />
+            </div>
             {/* Unauthorized Error Banner */}
             {params.error === 'unauthorized' && (
                 <div style={{

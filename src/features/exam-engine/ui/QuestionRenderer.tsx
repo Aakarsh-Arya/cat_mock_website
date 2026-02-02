@@ -38,6 +38,18 @@ interface QuestionRendererProps {
     onAnswerChange?: (questionId: string, answer: string | null) => void;
     /** Whether exam is in review mode (show correct answers) */
     isReviewMode?: boolean;
+    /** Render in read-only mode (review) */
+    readOnly?: boolean;
+    /** Show correct answers in review mode */
+    showCorrectAnswer?: boolean;
+    /** Correct answers keyed by question id */
+    correctAnswerMap?: Record<string, string>;
+    /** Optional: show bookmark toggle for the active question */
+    showBookmarkToggle?: boolean;
+    /** Optional: list of bookmarked question ids */
+    bookmarkedQuestionIds?: Set<string> | Record<string, boolean>;
+    /** Optional: callback to toggle bookmark for a question */
+    onToggleBookmark?: (questionId: string) => void;
 }
 
 // =============================================================================
@@ -105,6 +117,13 @@ interface QuestionPaneProps {
     response: string | null;
     onAnswerChange: (questionId: string, answer: string | null) => void;
     isReviewMode?: boolean;
+    readOnly?: boolean;
+    showCorrectAnswer?: boolean;
+    responses?: Record<string, string | null>;
+    correctAnswerMap?: Record<string, string>;
+    showBookmarkToggle?: boolean;
+    isBookmarked?: boolean;
+    onToggleBookmark?: (questionId: string) => void;
 }
 
 export function QuestionPane({
@@ -115,6 +134,13 @@ export function QuestionPane({
     response,
     onAnswerChange,
     isReviewMode,
+    readOnly,
+    showCorrectAnswer,
+    responses,
+    correctAnswerMap,
+    showBookmarkToggle,
+    isBookmarked,
+    onToggleBookmark,
 }: QuestionPaneProps) {
     return (
         <div className="h-full overflow-y-auto bg-exam-bg-white">
@@ -151,6 +177,13 @@ export function QuestionPane({
                     response={response}
                     onAnswerChange={onAnswerChange}
                     isReviewMode={isReviewMode}
+                    readOnly={readOnly}
+                    showCorrectAnswer={showCorrectAnswer}
+                    responses={responses}
+                    correctAnswerMap={correctAnswerMap}
+                    showBookmarkToggle={showBookmarkToggle}
+                    isBookmarked={isBookmarked}
+                    onToggleBookmark={onToggleBookmark}
                 />
             </div>
         </div>
@@ -166,6 +199,13 @@ interface SplitPaneLayoutProps {
     response: string | null;
     onAnswerChange: (questionId: string, answer: string | null) => void;
     isReviewMode?: boolean;
+    readOnly?: boolean;
+    showCorrectAnswer?: boolean;
+    responses?: Record<string, string | null>;
+    correctAnswerMap?: Record<string, string>;
+    showBookmarkToggle?: boolean;
+    isBookmarked?: boolean;
+    onToggleBookmark?: (questionId: string) => void;
 }
 
 function SplitPaneLayout({
@@ -177,6 +217,13 @@ function SplitPaneLayout({
     response,
     onAnswerChange,
     isReviewMode,
+    readOnly,
+    showCorrectAnswer,
+    responses,
+    correctAnswerMap,
+    showBookmarkToggle,
+    isBookmarked,
+    onToggleBookmark,
 }: SplitPaneLayoutProps) {
     return (
         <div className="contents">
@@ -189,6 +236,13 @@ function SplitPaneLayout({
                 response={response}
                 onAnswerChange={onAnswerChange}
                 isReviewMode={isReviewMode}
+                readOnly={readOnly}
+                showCorrectAnswer={showCorrectAnswer}
+                responses={responses}
+                correctAnswerMap={correctAnswerMap}
+                showBookmarkToggle={showBookmarkToggle}
+                isBookmarked={isBookmarked}
+                onToggleBookmark={onToggleBookmark}
             />
         </div>
     );
@@ -206,6 +260,13 @@ interface SingleFocusLayoutProps {
     isReviewMode?: boolean;
     /** P4.1: When true, render context body inline above question (for single-question text-only sets) */
     showInlineContext?: boolean;
+    readOnly?: boolean;
+    showCorrectAnswer?: boolean;
+    responses?: Record<string, string | null>;
+    correctAnswerMap?: Record<string, string>;
+    showBookmarkToggle?: boolean;
+    isBookmarked?: boolean;
+    onToggleBookmark?: (questionId: string) => void;
 }
 
 function SingleFocusLayout({
@@ -215,6 +276,13 @@ function SingleFocusLayout({
     onAnswerChange,
     isReviewMode,
     showInlineContext = false,
+    readOnly,
+    showCorrectAnswer,
+    responses,
+    correctAnswerMap,
+    showBookmarkToggle,
+    isBookmarked,
+    onToggleBookmark,
 }: SingleFocusLayoutProps) {
     return (
         <div className="h-full overflow-y-auto bg-exam-bg-white">
@@ -252,6 +320,13 @@ function SingleFocusLayout({
                     onAnswerChange={onAnswerChange}
                     isReviewMode={isReviewMode}
                     showImage={true}
+                    readOnly={readOnly}
+                    showCorrectAnswer={showCorrectAnswer}
+                    responses={responses}
+                    correctAnswerMap={correctAnswerMap}
+                    showBookmarkToggle={showBookmarkToggle}
+                    isBookmarked={isBookmarked}
+                    onToggleBookmark={onToggleBookmark}
                 />
             </div>
         </div>
@@ -268,6 +343,13 @@ interface QuestionContentProps {
     onAnswerChange: (questionId: string, answer: string | null) => void;
     isReviewMode?: boolean;
     showImage?: boolean;
+    readOnly?: boolean;
+    showCorrectAnswer?: boolean;
+    responses?: Record<string, string | null>;
+    correctAnswerMap?: Record<string, string>;
+    showBookmarkToggle?: boolean;
+    isBookmarked?: boolean;
+    onToggleBookmark?: (questionId: string) => void;
 }
 
 function QuestionContent({
@@ -276,6 +358,13 @@ function QuestionContent({
     onAnswerChange: _onAnswerChange,
     isReviewMode: _isReviewMode,
     showImage = false,
+    readOnly = false,
+    showCorrectAnswer = false,
+    responses,
+    correctAnswerMap,
+    showBookmarkToggle,
+    isBookmarked = false,
+    onToggleBookmark,
 }: QuestionContentProps) {
     // Create a Question object compatible with existing renderers
     const questionForRenderer = useMemo(() => ({
@@ -297,8 +386,39 @@ function QuestionContent({
         updated_at: '',
     }), [question]);
 
+    const answerOverride = responses?.[question.id] ?? null;
+    const correctAnswer = correctAnswerMap?.[question.id];
+
     return (
         <div className="space-y-6">
+            {showBookmarkToggle && onToggleBookmark && (
+                <div className="flex justify-end">
+                    <button
+                        type="button"
+                        onClick={() => onToggleBookmark(question.id)}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${isBookmarked
+                            ? 'border-amber-300 bg-amber-50 text-amber-600'
+                            : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                            }`}
+                        aria-pressed={isBookmarked}
+                    >
+                        <svg
+                            className="h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill={isBookmarked ? 'currentColor' : 'none'}
+                            stroke="currentColor"
+                            strokeWidth={2}
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M5 4a2 2 0 012-2h10a2 2 0 012 2v18l-7-4-7 4V4z"
+                            />
+                        </svg>
+                        {isBookmarked ? 'Bookmarked' : 'Bookmark'}
+                    </button>
+                </div>
+            )}
             {/* Question Image (if shown in single focus mode) */}
             {showImage && question.question_image_url && (
                 <div className="mb-4">
@@ -323,9 +443,21 @@ function QuestionContent({
             {/* Answer Options */}
             <div className="mt-4">
                 {question.question_type === 'MCQ' ? (
-                    <MCQRenderer question={questionForRenderer} />
+                    <MCQRenderer
+                        question={questionForRenderer}
+                        readOnly={readOnly}
+                        showCorrectAnswer={showCorrectAnswer}
+                        correctAnswer={correctAnswer}
+                        answerOverride={answerOverride}
+                    />
                 ) : (
-                    <TITARenderer question={questionForRenderer} />
+                    <TITARenderer
+                        question={questionForRenderer}
+                        readOnly={readOnly}
+                        showCorrectAnswer={showCorrectAnswer}
+                        correctAnswer={correctAnswer}
+                        answerOverride={answerOverride}
+                    />
                 )}
             </div>
         </div>
@@ -394,6 +526,12 @@ export function QuestionRenderer({
     responses = {},
     onAnswerChange,
     isReviewMode = false,
+    readOnly = false,
+    showCorrectAnswer = false,
+    correctAnswerMap,
+    showBookmarkToggle = false,
+    bookmarkedQuestionIds,
+    onToggleBookmark,
 }: QuestionRendererProps) {
     // Get questions from the set
     const questions = questionSet.questions ?? [];
@@ -415,6 +553,14 @@ export function QuestionRenderer({
 
     // Get current response
     const currentResponse = responses[activeQuestion.id] ?? null;
+
+    const isBookmarked = useMemo(() => {
+        if (!bookmarkedQuestionIds) return false;
+        if (bookmarkedQuestionIds instanceof Set) {
+            return bookmarkedQuestionIds.has(activeQuestion.id);
+        }
+        return Boolean(bookmarkedQuestionIds[activeQuestion.id]);
+    }, [bookmarkedQuestionIds, activeQuestion.id]);
 
     // Handle answer changes
     const handleAnswerChange = useCallback((questionId: string, answer: string | null) => {
@@ -451,6 +597,13 @@ export function QuestionRenderer({
                 response={currentResponse}
                 onAnswerChange={handleAnswerChange}
                 isReviewMode={isReviewMode}
+                readOnly={readOnly}
+                showCorrectAnswer={showCorrectAnswer}
+                responses={responses}
+                correctAnswerMap={correctAnswerMap}
+                showBookmarkToggle={showBookmarkToggle}
+                isBookmarked={isBookmarked}
+                onToggleBookmark={onToggleBookmark}
             />
         );
     }
@@ -465,6 +618,13 @@ export function QuestionRenderer({
             onAnswerChange={handleAnswerChange}
             isReviewMode={isReviewMode}
             showInlineContext={useFullWidthForEdgeCase && Boolean(questionSet.context_body)}
+            readOnly={readOnly}
+            showCorrectAnswer={showCorrectAnswer}
+            responses={responses}
+            correctAnswerMap={correctAnswerMap}
+            showBookmarkToggle={showBookmarkToggle}
+            isBookmarked={isBookmarked}
+            onToggleBookmark={onToggleBookmark}
         />
     );
 }

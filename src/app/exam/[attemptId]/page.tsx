@@ -6,8 +6,8 @@
 
 import { sbSSR } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
-import { ExamClient } from './ExamClient';
+import { ExamClient } from '@/features/exam-engine/lib/ExamClient';
+import { BackToDashboard } from '@/components/BackToDashboard';
 import type {
     Paper,
     Question,
@@ -39,9 +39,7 @@ export default async function ExamPage({ params }: PageProps) {
                 <div className="text-center">
                     <h1 className="text-2xl font-bold text-gray-800 mb-4">Invalid Attempt</h1>
                     <p className="text-gray-600 mb-6">The attempt id is missing or invalid.</p>
-                    <Link href="/dashboard" className="text-blue-600 hover:underline">
-                        Back to Dashboard
-                    </Link>
+                    <BackToDashboard />
                 </div>
             </main>
         );
@@ -88,9 +86,7 @@ export default async function ExamPage({ params }: PageProps) {
                     <p className="text-gray-600 mb-6">
                         This exam attempt does not exist or you don&apos;t have access to it.
                     </p>
-                    <Link href="/dashboard" className="text-blue-600 hover:underline">
-                        Back to Dashboard
-                    </Link>
+                    <BackToDashboard />
                 </div>
             </main>
         );
@@ -103,9 +99,7 @@ export default async function ExamPage({ params }: PageProps) {
                 <div className="text-center">
                     <h1 className="text-2xl font-bold text-gray-800 mb-4">Unauthorized</h1>
                     <p className="text-gray-600 mb-6">You don&apos;t have access to this exam attempt.</p>
-                    <Link href="/dashboard" className="text-blue-600 hover:underline">
-                        Back to Dashboard
-                    </Link>
+                    <BackToDashboard />
                 </div>
             </main>
         );
@@ -122,9 +116,7 @@ export default async function ExamPage({ params }: PageProps) {
                 <div className="text-center">
                     <h1 className="text-2xl font-bold text-gray-800 mb-4">Attempt Not Available</h1>
                     <p className="text-gray-600 mb-6">This exam attempt is not in progress and cannot be resumed.</p>
-                    <Link href="/dashboard" className="text-blue-600 hover:underline">
-                        Back to Dashboard
-                    </Link>
+                    <BackToDashboard />
                 </div>
             </main>
         );
@@ -143,9 +135,7 @@ export default async function ExamPage({ params }: PageProps) {
                 <div className="text-center">
                     <h1 className="text-2xl font-bold text-gray-800 mb-4">Paper Not Found</h1>
                     <p className="text-gray-600 mb-6">This attempt is missing its paper data.</p>
-                    <Link href="/dashboard" className="text-blue-600 hover:underline">
-                        Back to Dashboard
-                    </Link>
+                    <BackToDashboard />
                 </div>
             </main>
         );
@@ -309,17 +299,15 @@ export default async function ExamPage({ params }: PageProps) {
                 <main className="min-h-screen flex items-center justify-center bg-gray-50">
                     <div className="text-center max-w-xl px-4">
                         <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
-                        <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
-                        <p className="text-gray-600 mb-6">
-                            Ensure the secure questions_exam view and its RLS policies are deployed.
-                        </p>
-                        <Link href="/dashboard" className="text-blue-600 hover:underline">
-                            Back to Dashboard
-                        </Link>
-                    </div>
-                </main>
-            );
-        }
+                    <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
+                    <p className="text-gray-600 mb-6">
+                        Ensure the secure questions_exam view and its RLS policies are deployed.
+                    </p>
+                    <BackToDashboard />
+                </div>
+            </main>
+        );
+    }
 
         // Force correct section ordering (VARC → DILR → QA)
         const sectionOrder: Record<SectionName, number> = { VARC: 0, DILR: 1, QA: 2 };
@@ -386,5 +374,10 @@ export default async function ExamPage({ params }: PageProps) {
         updated_at: r.updated_at,
     }));
 
-    return <ExamClient paper={paper} questions={questions} attempt={attempt} responses={responses} />;
+    return (
+        <>
+            <BackToDashboard variant="fixed" />
+            <ExamClient key={attempt.id} paper={paper} questions={questions} attempt={attempt} responses={responses} />
+        </>
+    );
 }
