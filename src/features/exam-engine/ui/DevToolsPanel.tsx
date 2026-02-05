@@ -59,12 +59,14 @@ export function DevToolsPanel({ onTriggerSubmit }: DevToolsPanelProps) {
     const moveToNextSectionAction = useExamStore((s) => s.moveToNextSection);
     const updateSectionTimerAction = useExamStore((s) => s.updateSectionTimer);
     const setAutoSubmittingAction = useExamStore((s) => s.setAutoSubmitting);
+    const setSectionTimerOverrideAction = useExamStore((s) => s.setSectionTimerOverride);
 
     // Create executor interface for dev tools
     const executor: DevActionExecutor = {
         expireSection: expireSectionAction,
         moveToNextSection: moveToNextSectionAction,
         updateSectionTimer: updateSectionTimerAction,
+        setSectionTimerOverride: setSectionTimerOverrideAction,
         setAutoSubmitting: setAutoSubmittingAction,
         getCurrentSectionIndex: () => currentSectionIndex,
         getSectionTimers: () => sectionTimers,
@@ -132,12 +134,12 @@ export function DevToolsPanel({ onTriggerSubmit }: DevToolsPanelProps) {
         (r) => r.status === 'answered' || r.status === 'answered_marked'
     ).length;
 
-    // Floating trigger button (always visible in dev)
+    // Floating trigger button (always visible in dev) - positioned on LEFT to avoid overlap with BugReportFab on right
     if (!isVisible) {
         return (
             <button
                 onClick={() => setIsVisible(true)}
-                className="fixed bottom-4 right-4 z-[9999] bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-3 py-2 rounded-lg shadow-lg text-sm flex items-center gap-2"
+                className="fixed bottom-4 left-4 z-[9999] bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-3 py-2 rounded-lg shadow-lg text-sm flex items-center gap-2"
                 title="Open Dev Tools (Ctrl+Shift+D)"
             >
                 🛠️ DEV
@@ -145,10 +147,10 @@ export function DevToolsPanel({ onTriggerSubmit }: DevToolsPanelProps) {
         );
     }
 
-    // Minimized state
+    // Minimized state - positioned on LEFT to avoid overlap with BugReportFab
     if (isMinimized) {
         return (
-            <div className="fixed bottom-4 right-4 z-[9999] bg-gray-900 border border-yellow-500 rounded-lg shadow-lg p-2">
+            <div className="fixed bottom-4 left-4 z-[9999] bg-gray-900 border border-yellow-500 rounded-lg shadow-lg p-2">
                 <div className="flex items-center gap-2">
                     <span className="text-yellow-500 text-sm font-bold">🛠️ DEV</span>
                     <span className="text-white text-xs">
@@ -171,9 +173,9 @@ export function DevToolsPanel({ onTriggerSubmit }: DevToolsPanelProps) {
         );
     }
 
-    // Full panel
+    // Full panel - positioned on LEFT to avoid overlap with BugReportFab
     return (
-        <div className="fixed bottom-4 right-4 z-[9999] bg-gray-900 border border-yellow-500 rounded-lg shadow-lg w-80 max-h-[80vh] overflow-y-auto">
+        <div className="fixed bottom-4 left-4 z-[9999] bg-gray-900 border border-yellow-500 rounded-lg shadow-lg w-80 max-h-[80vh] overflow-y-auto">
             {/* Header */}
             <div className="bg-yellow-500 text-black px-3 py-2 font-bold flex justify-between items-center rounded-t-lg">
                 <span>🛠️ Dev Tools</span>

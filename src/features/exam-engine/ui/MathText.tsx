@@ -8,6 +8,7 @@
 import { BlockMath, InlineMath } from 'react-katex';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 
 interface MathTextProps {
     text?: string | null;
@@ -244,8 +245,14 @@ export function MathText({ text, className }: MathTextProps) {
                     <ReactMarkdown
                         key={index}
                         remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeRaw]}
                         components={{
-                            p: ({ children }) => <p className="whitespace-pre-wrap">{children}</p>,
+                            p: ({ children }) => <div className="whitespace-pre-wrap">{children}</div>,
+                            pre: ({ children }) => (
+                                <div className="overflow-x-auto rounded bg-gray-100 p-3 text-xs whitespace-pre font-mono">
+                                    {children}
+                                </div>
+                            ),
                             table: ({ children }) => <table className="table-auto border-collapse">{children}</table>,
                             th: ({ children }) => <th className="border px-2 py-1">{children}</th>,
                             td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
@@ -279,10 +286,11 @@ export function MathText({ text, className }: MathTextProps) {
                                     }
                                 }
 
+                                // Use div instead of pre to avoid hydration error when wrapped in <p>
                                 return (
-                                    <pre className="overflow-x-auto rounded bg-gray-100 p-3 text-xs">
+                                    <div className="overflow-x-auto rounded bg-gray-100 p-3 text-xs whitespace-pre font-mono">
                                         <code className={className}>{children}</code>
-                                    </pre>
+                                    </div>
                                 );
                             },
                         }}

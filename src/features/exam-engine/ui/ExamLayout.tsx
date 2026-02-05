@@ -361,6 +361,24 @@ export function ExamLayout({
         pendingSyncRef.current = pendingSyncResponses;
     }, [pendingSyncResponses]);
 
+    const runWithTimeout = useCallback(
+        async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+            let timeoutId: ReturnType<typeof setTimeout> | null = null;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(() => {
+                    reject(new Error(`${label} timed out after ${ms}ms`));
+                }, ms);
+            });
+
+            try {
+                return await Promise.race([promise, timeoutPromise]);
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+            }
+        },
+        []
+    );
+
     // Sync Logic
     const syncPendingResponses = useCallback(async () => {
         if (!onSaveResponse && !onSaveResponsesBatch) return;
@@ -438,44 +456,77 @@ export function ExamLayout({
 
     // Ref to coordinate auto-submit vs manual submit
     const autoSubmitInProgressRef = useRef(false);
+    // Track sync-in-progress for submit coordination
+    const submitSyncCompletedRef = useRef(false);
+    // CRITICAL: Track if auto-submit has COMPLETED successfully - prevents re-entry forever
+    const autoSubmitCompletedRef = useRef(false);
 
     const handleAutoSubmitExam = useCallback(async () => {
-        // RACE CONDITION FIX: Check if manual submit already in progress
+        // CRITICAL: If auto-submit has already completed, never process again
+        if (autoSubmitCompletedRef.current) {
+            console.log('[ExamLayout] Auto-submit skipped: already completed');
+            return;
+        }
+
+        // RACE CONDITION FIX: Only block if MANUAL submit is in progress
+        // DO NOT check isAutoSubmittingFromStore here - that flag is set by the timer
+        // BEFORE calling this function, so checking it would block the auto-submit itself!
         if (isSubmitting) {
-            // Manual submit is already running, skip auto-submit
             console.log('[ExamLayout] Auto-submit skipped: manual submit in progress');
             return;
         }
 
-        // Prevent duplicate auto-submit calls
+        // Prevent duplicate auto-submit calls via ref (synchronous check)
         if (autoSubmitInProgressRef.current) {
-            console.log('[ExamLayout] Auto-submit skipped: already in progress');
+            console.log('[ExamLayout] Auto-submit skipped: already in progress (ref)');
             return;
         }
         autoSubmitInProgressRef.current = true;
+        console.log('[ExamLayout] Auto-submit STARTING');
 
         try {
-            await syncPendingResponses();
+            // Only sync if not already synced by another submit path
+            if (!submitSyncCompletedRef.current && !syncInFlight.current) {
+                try {
+                    await runWithTimeout(syncPendingResponses(), 8000, 'syncPendingResponses');
+                    submitSyncCompletedRef.current = true;
+                } catch {
+                    // best-effort; still submit
+                }
+            }
         } catch {
-            // best-effort; still submit
+            // best-effort
         }
         try {
-            await onSubmitExam?.();
+            await runWithTimeout(onSubmitExam?.() ?? Promise.resolve(), 20000, 'onSubmitExam');
+            // Mark as completed ONLY after successful submission
+            autoSubmitCompletedRef.current = true;
+            console.log('[ExamLayout] Auto-submit COMPLETED SUCCESSFULLY');
         } finally {
             autoSubmitInProgressRef.current = false;
+            submitSyncCompletedRef.current = false;
+            console.log('[ExamLayout] Auto-submit FINISHED');
         }
-    }, [syncPendingResponses, onSubmitExam, isSubmitting]);
+    }, [syncPendingResponses, onSubmitExam, isSubmitting, runWithTimeout]);
 
     const handleSectionExpire = useCallback(
         async (sectionName: SectionName) => {
             try {
-                await syncPendingResponses();
+                await runWithTimeout(syncPendingResponses(), 8000, 'syncPendingResponses');
             } catch {
                 // best-effort
             }
-            await onSectionExpire?.(sectionName);
+            try {
+                await runWithTimeout(
+                    onSectionExpire?.(sectionName) ?? Promise.resolve(),
+                    8000,
+                    'onSectionExpire'
+                );
+            } catch {
+                // best-effort
+            }
         },
-        [syncPendingResponses, onSectionExpire]
+        [syncPendingResponses, onSectionExpire, runWithTimeout]
     );
 
     // IMPORTANT: only call useExamTimer ONCE in this layout to avoid duplicate intervals/expiry triggers.
@@ -485,18 +536,30 @@ export function ExamLayout({
     });
 
     const handleManualSubmitExam = useCallback(async () => {
-        if (isSyncing || isSubmitting || isAutoSubmitting) return;
+        // Also check the autoSubmitInProgressRef for extra safety
+        if (isSyncing || isSubmitting || isAutoSubmitting || autoSubmitInProgressRef.current) {
+            console.log('[ExamLayout] Manual submit blocked', { isSyncing, isSubmitting, isAutoSubmitting, autoSubmitInProgress: autoSubmitInProgressRef.current });
+            return;
+        }
 
         const confirmed = window.confirm('Are you sure you want to submit the exam? This action cannot be undone.');
         if (!confirmed) return;
 
         try {
-            await syncPendingResponses();
+            // Only sync if not already synced
+            if (!submitSyncCompletedRef.current && !syncInFlight.current) {
+                await runWithTimeout(syncPendingResponses(), 8000, 'syncPendingResponses');
+                submitSyncCompletedRef.current = true;
+            }
         } catch {
             // best-effort; still submit
         }
-        await onSubmitExam?.();
-    }, [isSyncing, isSubmitting, isAutoSubmitting, syncPendingResponses, onSubmitExam]);
+        try {
+            await runWithTimeout(onSubmitExam?.() ?? Promise.resolve(), 20000, 'onSubmitExam');
+        } finally {
+            submitSyncCompletedRef.current = false;
+        }
+    }, [isSyncing, isSubmitting, isAutoSubmitting, syncPendingResponses, onSubmitExam, runWithTimeout]);
 
     const sectionQuestions = useMemo(() => getQuestionsForSection(questions, currentSection), [questions, currentSection]);
     const currentQuestion = sectionQuestions[currentQuestionIndex];

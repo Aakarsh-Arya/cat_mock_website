@@ -133,12 +133,18 @@ export const createExamStore = (attemptId?: string) => {
                     const { paper, questions, attempt, responses: serverResponses } = data;
                     let currentState = get();
 
-                    // If the persisted state belongs to a different attempt, drop it.
+                    // PHASE 2 FIX: If the persisted state belongs to a different attempt, NUKE ALL exam state.
+                    // This prevents zombie states where localStorage holds an old attemptId that no longer exists.
                     if (currentState.attemptId && currentState.attemptId !== attempt.id) {
                         try {
                             if (typeof window !== 'undefined') {
-                                localStorage.removeItem(`cat-exam-state-${currentState.attemptId}`);
-                                localStorage.removeItem('cat-exam-state-temp');
+                                // AGGRESSIVE CLEANUP: Remove ALL cat-exam-state-* keys
+                                const keys = Object.keys(localStorage);
+                                keys.forEach((key) => {
+                                    if (key.startsWith('cat-exam-state-')) {
+                                        localStorage.removeItem(key);
+                                    }
+                                });
                             }
                         } catch {
                             // best-effort cleanup
@@ -152,14 +158,143 @@ export const createExamStore = (attemptId?: string) => {
                     }
 
                     // PHASE 1 FIX: Check if we're resuming the same attempt with persisted state
+                    const normalizeSectionName = (value?: string | null): SectionName => {
+                        const normalized = (value ?? '').toUpperCase().trim();
+                        if (normalized === 'LRDI') return 'DILR';
+                        if (normalized === 'QUANT' || normalized === 'QUANTS') return 'QA';
+                        if (normalized === 'VARC' || normalized === 'DILR' || normalized === 'QA') {
+                            return normalized as SectionName;
+                        }
+                        return 'VARC';
+                    };
+
                     if (currentState.attemptId === attempt.id && currentState.hasHydrated) {
+                        const now = Date.now();
+                        const sectionDurations = getSectionDurationSecondsMap(paper.sections);
+                        const serverTimeRemaining = attempt.time_remaining ?? {};
+                        const resumeSection = normalizeSectionName(attempt.current_section as string | null | undefined);
+
+                        const sections: SectionName[] = ['VARC', 'DILR', 'QA'];
+                        const nextSectionTimers = { ...currentState.sectionTimers } as Record<SectionName, SectionTimerState>;
+
+                        for (const section of sections) {
+                            const duration = sectionDurations[section];
+                            const localTimer = currentState.sectionTimers[section];
+                            const localRemaining =
+                                typeof localTimer?.remainingSeconds === 'number' ? localTimer.remainingSeconds : duration;
+                            const serverRemaining =
+                                typeof (serverTimeRemaining as Partial<Record<SectionName, number>>)[section] === 'number'
+                                    ? (serverTimeRemaining as Partial<Record<SectionName, number>>)[section]!
+                                    : null;
+
+                            let mergedRemaining = serverRemaining !== null
+                                ? (localRemaining <= 0 && serverRemaining > 0
+                                    ? serverRemaining
+                                    : Math.min(localRemaining, serverRemaining))
+                                : localRemaining;
+                            if (serverRemaining !== null && serverRemaining <= 0 && localRemaining <= 0) {
+                                // Avoid instant auto-submit on resume when server/local timers are stale.
+                                mergedRemaining = duration;
+                            }
+                            const clampedRemaining = Math.max(0, Math.min(duration, mergedRemaining));
+
+                            const shouldHaveStarted =
+                                section === resumeSection ||
+                                localTimer.startedAt > 0 ||
+                                clampedRemaining < duration;
+
+                            const nextStartedAt = shouldHaveStarted
+                                ? now - (duration - clampedRemaining) * 1000
+                                : 0;
+
+                            nextSectionTimers[section] = {
+                                ...localTimer,
+                                durationSeconds: duration,
+                                remainingSeconds: clampedRemaining,
+                                startedAt: shouldHaveStarted ? nextStartedAt : 0,
+                                isExpired:
+                                    serverRemaining !== null
+                                        ? clampedRemaining <= 0 && serverRemaining > 0
+                                        : (localTimer.isExpired || clampedRemaining <= 0),
+                            };
+                        }
+
+                        const serverSection = resumeSection;
+                        const serverSectionIndex = SECTION_ORDER[serverSection];
+                        let nextSectionIndex = currentState.currentSectionIndex;
+                        let nextQuestionIndex = currentState.currentQuestionIndex;
+
+                        if (serverSectionIndex > currentState.currentSectionIndex) {
+                            nextSectionIndex = serverSectionIndex;
+                            nextQuestionIndex = Math.max(0, (attempt.current_question ?? 1) - 1);
+                        } else if (serverSectionIndex === currentState.currentSectionIndex && attempt.current_question) {
+                            nextQuestionIndex = Math.max(currentState.currentQuestionIndex, attempt.current_question - 1);
+                        }
+
+                        const lockedSections = new Set(currentState.lockedSections);
+                        for (let i = 0; i < nextSectionIndex; i++) {
+                            lockedSections.add(getSectionByIndex(i));
+                        }
+
+                        // PHASE 5 FIX: Merge server responses with local state to recover any
+                        // answers that were saved to DB but not in localStorage
+                        const mergedResponses = { ...currentState.responses };
+                        if (serverResponses && serverResponses.length > 0) {
+                            serverResponses.forEach((r) => {
+                                const localResponse = mergedResponses[r.question_id];
+                                if (!localResponse) return;
+
+                                // Server has an answered status - always trust server for answered questions
+                                const serverIsAnswered = r.status === 'answered' || r.status === 'answered_marked';
+                                const localIsAnswered = localResponse.status === 'answered' || localResponse.status === 'answered_marked';
+
+                                if (serverIsAnswered) {
+                                    // Server has answer - use server data (more authoritative)
+                                    mergedResponses[r.question_id] = {
+                                        answer: r.answer ?? null,
+                                        status: r.status,
+                                        isMarkedForReview: r.is_marked_for_review ?? false,
+                                        timeSpentSeconds: Math.max(localResponse.timeSpentSeconds, r.time_spent_seconds ?? 0),
+                                        visitCount: Math.max(localResponse.visitCount, r.visit_count ?? 0),
+                                    };
+                                } else if (localIsAnswered) {
+                                    // Local has answer but server doesn't - keep local (might be unsaved)
+                                    // Just update time spent if server has more
+                                    mergedResponses[r.question_id] = {
+                                        ...localResponse,
+                                        timeSpentSeconds: Math.max(localResponse.timeSpentSeconds, r.time_spent_seconds ?? 0),
+                                        visitCount: Math.max(localResponse.visitCount, r.visit_count ?? 0),
+                                    };
+                                } else {
+                                    // Neither has answer - merge metadata
+                                    mergedResponses[r.question_id] = {
+                                        ...localResponse,
+                                        status: localResponse.status === 'not_visited' ? r.status : localResponse.status,
+                                        isMarkedForReview: localResponse.isMarkedForReview || r.is_marked_for_review,
+                                        timeSpentSeconds: Math.max(localResponse.timeSpentSeconds, r.time_spent_seconds ?? 0),
+                                        visitCount: Math.max(localResponse.visitCount, r.visit_count ?? 0),
+                                    };
+                                }
+                            });
+                        }
+
                         examDebug.resume({
                             attemptId: attempt.id,
                             fromSection: currentState.currentSectionIndex,
                             fromQuestion: currentState.currentQuestionIndex,
                             preservedState: true,
                         });
-                        logger.debug('Resuming existing attempt, preserving timer state', { attemptId: attempt.id });
+                        logger.debug('Resuming existing attempt, syncing server timers and merging responses', { attemptId: attempt.id });
+
+                        set({
+                            responses: mergedResponses,
+                            sectionTimers: nextSectionTimers,
+                            currentSectionIndex: nextSectionIndex,
+                            currentQuestionIndex: nextQuestionIndex,
+                            lockedSections: Array.from(lockedSections),
+                            isSubmitting: false,
+                            isAutoSubmitting: false,
+                        });
                         return;
                     }
 
@@ -191,12 +326,20 @@ export const createExamStore = (attemptId?: string) => {
 
                     const now = Date.now();
                     const attemptStartedAt = attempt.started_at ? new Date(attempt.started_at).getTime() : now;
+                    const rawTimeRemaining = attempt.time_remaining as Partial<Record<SectionName, number>> | null | undefined;
+                    const hasTimeRemaining =
+                        rawTimeRemaining &&
+                        Object.values(rawTimeRemaining).some((value) => typeof value === 'number' && value > 0);
+                    const isLikelyNewAttempt = !hasTimeRemaining &&
+                        (attempt.current_section == null || attempt.current_section === 'VARC') &&
+                        (attempt.current_question == null || attempt.current_question <= 1);
+                    const baseStartTime = hasTimeRemaining ? attemptStartedAt : (isLikelyNewAttempt ? now : attemptStartedAt);
 
                     const sectionDurations = getSectionDurationSecondsMap(paper.sections);
                     const sectionTimers: Record<SectionName, SectionTimerState> = {
                         VARC: {
                             sectionName: 'VARC',
-                            startedAt: attemptStartedAt,
+                            startedAt: baseStartTime,
                             durationSeconds: sectionDurations.VARC,
                             remainingSeconds: sectionDurations.VARC,
                             isExpired: false,
@@ -218,8 +361,8 @@ export const createExamStore = (attemptId?: string) => {
                     };
 
                     // Parse existing time_remaining from server if resuming
-                    if (attempt.time_remaining) {
-                        const timeRemaining = attempt.time_remaining;
+                    if (hasTimeRemaining && rawTimeRemaining) {
+                        const timeRemaining = rawTimeRemaining;
 
                         if (timeRemaining.VARC !== undefined) {
                             sectionTimers.VARC.remainingSeconds = timeRemaining.VARC;
@@ -236,27 +379,32 @@ export const createExamStore = (attemptId?: string) => {
                         }
                     }
 
-                    const currentSection = attempt.current_section || 'VARC';
+                    const currentSection = normalizeSectionName(attempt.current_section as string | null | undefined);
                     const currentSectionIndex = SECTION_ORDER[currentSection];
 
                     const currentQuestionFromServer = attempt.current_question ?? 1;
                     const currentQuestionIndex = Math.max(0, currentQuestionFromServer - 1);
 
-                    if (currentSectionIndex > 0 && sectionTimers[currentSection].startedAt === 0) {
-                        const sectionTimer = sectionTimers[currentSection];
-                        if (sectionTimer.remainingSeconds < sectionDurations[currentSection]) {
-                            const elapsedSeconds = sectionDurations[currentSection] - sectionTimer.remainingSeconds;
-                            sectionTimer.startedAt = now - elapsedSeconds * 1000;
-                        } else {
-                            sectionTimer.startedAt = now;
-                        }
+                    // Normalize current section start time based on remainingSeconds to avoid instant expiry.
+                    const currentTimer = sectionTimers[currentSection];
+                    if (currentTimer) {
+                        const duration = sectionDurations[currentSection];
+                        const clampedRemaining = Math.max(0, Math.min(duration, currentTimer.remainingSeconds));
+                        currentTimer.remainingSeconds = clampedRemaining;
+                        currentTimer.startedAt =
+                            clampedRemaining >= duration ? now : now - (duration - clampedRemaining) * 1000;
                     }
 
-                    // P0 FIX: Generate session token (client-local; server token may overwrite later)
+                    // P0 FIX: Prefer any existing token (e.g., server-initialized) to avoid overwriting it.
+                    const existingSessionToken =
+                        typeof currentState.sessionToken === 'string' && currentState.sessionToken.trim().length > 0
+                            ? currentState.sessionToken
+                            : null;
                     const sessionToken =
-                        typeof crypto !== 'undefined' && crypto.randomUUID
+                        existingSessionToken ??
+                        (typeof crypto !== 'undefined' && crypto.randomUUID
                             ? crypto.randomUUID()
-                            : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                            : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
 
                     const visitedQuestions = new Set<string>();
                     const markedQuestions = new Set<string>();
@@ -725,6 +873,24 @@ export const createExamStore = (attemptId?: string) => {
                             [sectionName]: {
                                 ...state.sectionTimers[sectionName],
                                 remainingSeconds: Math.max(0, remainingSeconds),
+                            },
+                        },
+                    });
+                },
+                setSectionTimerOverride: (sectionName: SectionName, remainingSeconds: number) => {
+                    const state = get();
+                    const safeRemaining = Math.max(0, Math.floor(remainingSeconds));
+                    const durationSeconds = Math.max(1, safeRemaining);
+                    set({
+                        sectionTimers: {
+                            ...state.sectionTimers,
+                            [sectionName]: {
+                                ...state.sectionTimers[sectionName],
+                                sectionName,
+                                startedAt: Date.now(),
+                                durationSeconds,
+                                remainingSeconds: safeRemaining,
+                                isExpired: safeRemaining <= 0,
                             },
                         },
                     });

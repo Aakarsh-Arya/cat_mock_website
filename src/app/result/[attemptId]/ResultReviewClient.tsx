@@ -5,12 +5,21 @@
 
 'use client';
 
-import { useMemo, useCallback, useState } from 'react';
-import type { QuestionSetComplete, SectionName } from '@/types/exam';
+import { useMemo, useCallback, useState, useEffect } from 'react';
+import type { QuestionSetComplete, SectionName, PerformanceReason } from '@/types/exam';
 import { assemblePaper } from '@/features/exam-engine/lib/assemblePaper';
 import { QuestionRenderer } from '@/features/exam-engine/ui/QuestionRenderer';
+import { isCompositeSet } from '@/types/exam';
+import { getAnalysisStore } from '@/features/exam-engine/model/useExamStore';
 
 const SECTION_ORDER: SectionName[] = ['VARC', 'DILR', 'QA'];
+
+const REASON_OPTIONS: Array<{ value: PerformanceReason; label: string }> = [
+    { value: 'concept_gap', label: 'Concept gap' },
+    { value: 'careless_error', label: 'Silly mistake' },
+    { value: 'time_pressure', label: 'Time pressure' },
+    { value: 'guess', label: 'Guess/unsure' },
+];
 
 interface ReviewNavState {
     section: SectionName;
@@ -23,6 +32,18 @@ interface ResultReviewClientProps {
     questionSets: QuestionSetComplete[];
     answerMap: Record<string, string | null>;
     correctAnswerMap: Record<string, string>;
+    solutionMap?: Record<string, {
+        solution_text?: string | null;
+        solution_image_url?: string | null;
+        video_solution_url?: string | null;
+    }>;
+    responseMetaMap?: Record<string, {
+        time_spent_seconds?: number | null;
+        visit_count?: number | null;
+        updated_at?: string | null;
+    }>;
+    responseStatusMap?: Record<string, string | null | undefined>;
+    attemptId?: string | null;
 }
 
 function getSectionSets(sets: QuestionSetComplete[], section: SectionName): QuestionSetComplete[] {
@@ -39,8 +60,19 @@ export function ResultReviewClient({
     questionSets,
     answerMap,
     correctAnswerMap,
+    solutionMap,
+    responseMetaMap = {},
+    responseStatusMap = {},
+    attemptId,
 }: ResultReviewClientProps) {
     const assembled = useMemo(() => assemblePaper(questionSets), [questionSets]);
+    const [isExpanded, setIsExpanded] = useState(false);
+
+    const analysisStore = getAnalysisStore(attemptId ?? 'result-review');
+    const analysisReasons = analysisStore((s) => s.reasons);
+    const bookmarkedQuestions = analysisStore((s) => s.bookmarks);
+    const setAnalysisReason = analysisStore((s) => s.setReason);
+    const toggleBookmark = analysisStore((s) => s.toggleBookmark);
 
     const [navState, setNavState] = useState<ReviewNavState>({
         section: 'VARC',
@@ -59,6 +91,18 @@ export function ResultReviewClient({
 
     const currentSet = sectionSets[navState.setIndex];
 
+    const hasContextPane = useMemo(() => {
+        if (!currentSet) return false;
+        const isComposite = isCompositeSet(currentSet.set_type);
+        if (!isComposite) return false;
+        const hasMedia = Boolean(
+            currentSet.context_image_url ||
+            (currentSet.context_additional_images && currentSet.context_additional_images.length > 0)
+        );
+        const isSingleQuestionSet = currentSet.questions.length === 1;
+        return !(isSingleQuestionSet && !hasMedia);
+    }, [currentSet]);
+
     const sectionCounts = useMemo(() => {
         const counts: Record<SectionName, number> = { VARC: 0, DILR: 0, QA: 0 };
         assembled.questionSets.forEach((set) => {
@@ -75,14 +119,94 @@ export function ResultReviewClient({
         updateNavState({ questionIndex: index });
     }, [updateNavState]);
 
-    const handlePaletteSelect = useCallback((setIndex: number, questionIndex: number) => {
-        updateNavState({ setIndex, questionIndex });
-    }, [updateNavState]);
-
     const sectionDisplay = navState.section === 'DILR' ? 'LRDI' : navState.section === 'QA' ? 'Quant' : navState.section;
 
+    const formatDuration = (seconds?: number | null) => {
+        const totalSeconds = Math.max(0, Math.floor(seconds ?? 0));
+        const minutes = Math.floor(totalSeconds / 60);
+        const remainingSeconds = totalSeconds % 60;
+        return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+    };
+
+    const questionPositionMap = useMemo(() => {
+        const map = new Map<string, { setIndex: number; questionIndex: number }>();
+        sectionSets.forEach((set, setIdx) => {
+            set.questions.forEach((q, qIdx) => {
+                map.set(q.id, { setIndex: setIdx, questionIndex: qIdx });
+            });
+        });
+        return map;
+    }, [sectionSets]);
+
+    const handlePaletteSelect = useCallback((questionId: string) => {
+        const pos = questionPositionMap.get(questionId);
+        if (!pos) return;
+        updateNavState({ setIndex: pos.setIndex, questionIndex: pos.questionIndex });
+    }, [questionPositionMap, updateNavState]);
+
+    const questionById = useMemo(() => {
+        const map = new Map<string, (typeof sectionSets)[number]['questions'][number]>();
+        sectionSets.forEach((set) => {
+            set.questions.forEach((q) => {
+                map.set(q.id, q);
+            });
+        });
+        return map;
+    }, [sectionSets]);
+
+    const attemptOrderIds = useMemo(() => {
+        const questionsInSection = sectionSets.flatMap((set) => set.questions);
+        const withTimestamp = questionsInSection
+            .filter((q) => responseMetaMap[q.id]?.updated_at)
+            .sort((a, b) => {
+                const aTime = new Date(responseMetaMap[a.id]?.updated_at as string).getTime();
+                const bTime = new Date(responseMetaMap[b.id]?.updated_at as string).getTime();
+                if (aTime !== bTime) return aTime - bTime;
+                return a.question_number - b.question_number;
+            });
+        const withoutTimestamp = questionsInSection
+            .filter((q) => !responseMetaMap[q.id]?.updated_at)
+            .sort((a, b) => a.question_number - b.question_number);
+        return withTimestamp.length > 0 ? [...withTimestamp, ...withoutTimestamp].map((q) => q.id) : withoutTimestamp.map((q) => q.id);
+    }, [sectionSets, responseMetaMap]);
+
+    const currentQuestion = currentSet?.questions?.[navState.questionIndex];
+    const currentResponseMeta = currentQuestion ? responseMetaMap[currentQuestion.id] : undefined;
+    const currentAnswer = currentQuestion ? answerMap[currentQuestion.id] : null;
+    const currentCorrect = currentQuestion ? correctAnswerMap[currentQuestion.id] : null;
+    const currentStatusRaw = currentQuestion ? responseStatusMap[currentQuestion.id] ?? null : null;
+    const currentAnsweredStatus = currentStatusRaw === 'answered' || currentStatusRaw === 'answered_marked';
+    const hasCurrentAnswer = currentAnsweredStatus || (currentAnswer !== null && currentAnswer !== undefined && String(currentAnswer).trim() !== '');
+    const hasCurrentKey = currentCorrect !== null && currentCorrect !== undefined && String(currentCorrect).trim() !== '';
+    const currentStatus = hasCurrentAnswer
+        ? hasCurrentKey
+            ? String(currentAnswer).trim() === String(currentCorrect).trim()
+                ? 'Correct'
+                : 'Incorrect'
+            : 'Attempted'
+        : 'Not Attempted';
+    const currentIsIncorrect = hasCurrentAnswer && hasCurrentKey && String(currentAnswer).trim() !== String(currentCorrect).trim();
+    const currentIsSkipped = !hasCurrentAnswer;
+    const selectedReason = currentQuestion ? analysisReasons[currentQuestion.id] ?? null : null;
+    const isBookmarked = currentQuestion ? Boolean(bookmarkedQuestions[currentQuestion.id]) : false;
+
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        if (isExpanded) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+        return () => {
+            document.body.style.overflow = '';
+        };
+    }, [isExpanded]);
+
     return (
-        <section id="exam-review" className="bg-exam-bg-page rounded-2xl border border-exam-bg-border-light overflow-hidden font-exam">
+        <section
+            id="exam-review"
+            className={`bg-exam-bg-page border border-exam-bg-border-light overflow-hidden font-exam flex flex-col min-h-[620px] ${isExpanded ? 'fixed inset-0 z-[80] rounded-none h-screen shadow-2xl' : 'rounded-2xl h-[calc(100vh-220px)]'}`}
+        >
             <header className="h-14 flex items-center justify-between px-6 bg-gradient-to-r from-exam-header-from to-exam-header-to text-white">
                 <div className="flex items-center gap-3">
                     <span className="inline-flex items-center rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
@@ -90,7 +214,16 @@ export function ResultReviewClient({
                     </span>
                     <h2 className="text-base font-semibold">{paperTitle}</h2>
                 </div>
-                <div className="text-xs text-white/80">Exam-style Review</div>
+                <div className="flex items-center gap-3 text-xs text-white/80">
+                    <span>Exam-style Review</span>
+                    <button
+                        type="button"
+                        onClick={() => setIsExpanded((prev) => !prev)}
+                        className="rounded-full border border-white/30 px-3 py-1 text-[11px] font-semibold text-white hover:bg-white/10"
+                    >
+                        {isExpanded ? 'Exit Fullscreen' : 'Expand'}
+                    </button>
+                </div>
             </header>
 
             <div className="bg-white border-b border-exam-bg-border flex">
@@ -113,57 +246,159 @@ export function ResultReviewClient({
                 })}
             </div>
 
-            <div className="flex min-h-[520px]">
-                <div className="flex-1 grid grid-cols-2 overflow-hidden">
-                    {currentSet ? (
-                        <QuestionRenderer
-                            questionSet={currentSet}
-                            activeQuestionIndex={navState.questionIndex}
-                            onQuestionChange={handleQuestionChange}
-                            responses={answerMap}
-                            isReviewMode={true}
-                            readOnly={true}
-                            showCorrectAnswer={true}
-                            correctAnswerMap={correctAnswerMap}
-                        />
-                    ) : (
-                        <div className="col-span-2 flex items-center justify-center text-gray-500">
-                            No questions in this section.
-                        </div>
-                    )}
-                </div>
+            <div className="flex-1 overflow-hidden">
+                <div className={`h-full grid ${hasContextPane ? 'grid-cols-[48%_33%_19%]' : 'grid-cols-[81%_19%]'}`}>
+                    <div className={`min-h-0 overflow-hidden ${hasContextPane ? 'col-span-2 grid grid-cols-2' : 'col-span-1'}`}>
+                        {currentSet ? (
+                            <QuestionRenderer
+                                questionSet={currentSet}
+                                activeQuestionIndex={navState.questionIndex}
+                                onQuestionChange={handleQuestionChange}
+                                responses={answerMap}
+                                isReviewMode={true}
+                                readOnly={true}
+                                showCorrectAnswer={true}
+                                correctAnswerMap={correctAnswerMap}
+                                solutionMap={solutionMap}
+                            />
+                        ) : (
+                            <div className="col-span-2 flex items-center justify-center text-gray-500">
+                                No questions in this section.
+                            </div>
+                        )}
+                    </div>
 
-                <aside className="w-72 border-l border-exam-bg-border bg-slate-50 overflow-y-auto">
+                    <aside className="border-l border-exam-bg-border bg-slate-50 overflow-y-auto min-h-0">
                     <div className="p-4">
-                        <h3 className="font-semibold text-gray-700 mb-3">Question Navigator</h3>
+                        <h3 className="font-semibold text-gray-700 mb-3">Attempt Order</h3>
                         <div className="grid grid-cols-5 gap-2">
-                            {sectionSets.flatMap((set, setIdx) =>
-                                set.questions.map((q, qIdx) => {
-                                    const isActive = setIdx === navState.setIndex && qIdx === navState.questionIndex;
-                                    return (
-                                        <button
-                                            key={q.id}
-                                            type="button"
-                                            onClick={() => handlePaletteSelect(setIdx, qIdx)}
-                                            className={`w-10 h-10 rounded text-sm font-medium transition-colors ${isActive
-                                                ? 'bg-blue-600 text-white ring-2 ring-offset-1 ring-blue-400'
-                                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                                }`}
-                                        >
-                                            {q.question_number}
-                                        </button>
-                                    );
-                                })
-                            )}
+                            {attemptOrderIds.map((questionId, index) => {
+                                const q = questionById.get(questionId);
+                                if (!q) return null;
+                                const isActive = currentQuestion?.id === q.id;
+                                const answer = answerMap[q.id];
+                                const rawStatus = responseStatusMap[q.id] ?? null;
+                                const isAnsweredStatus = rawStatus === 'answered' || rawStatus === 'answered_marked';
+                                const hasAnswer = isAnsweredStatus || (answer !== null && answer !== undefined && String(answer).trim() !== '');
+                                    const correctAnswer = correctAnswerMap[q.id];
+                                    const hasCorrect = correctAnswer !== undefined && correctAnswer !== null && String(correctAnswer).trim() !== '';
+                                    const isCorrect = hasAnswer && hasCorrect && String(answer).trim() === String(correctAnswer).trim();
+                                    const statusClass = hasAnswer
+                                        ? hasCorrect
+                                            ? isCorrect
+                                                ? 'bg-emerald-500 text-white'
+                                                : 'bg-rose-500 text-white'
+                                            : 'bg-blue-500 text-white'
+                                        : 'bg-gray-200 text-gray-700';
+                                return (
+                                    <button
+                                        key={q.id}
+                                        type="button"
+                                        onClick={() => handlePaletteSelect(q.id)}
+                                        className={`w-10 h-10 rounded text-sm font-medium transition-colors ${isActive
+                                            ? `${statusClass} ring-2 ring-offset-1 ring-blue-400`
+                                            : `${statusClass} hover:opacity-90`
+                                            }`}
+                                        title={`Attempt #${index + 1} - ${hasAnswer ? (isCorrect ? 'Correct' : 'Incorrect') : 'Not attempted'}`}
+                                    >
+                                        {q.question_number}
+                                    </button>
+                                );
+                            })}
                         </div>
 
-                        <div className="mt-6 p-3 bg-white rounded border border-gray-200 text-xs text-gray-600">
-                            <div className="font-semibold text-gray-700 mb-1">{sectionDisplay} Summary</div>
-                            <p>{sectionSets.length} sets - {sectionCounts[navState.section]} questions</p>
-                            <p className="mt-1">Click a number to jump to that question.</p>
+                        <div className="mt-6 p-3 bg-white rounded border border-gray-200 text-xs text-gray-600 space-y-2">
+                            <div className="flex items-center justify-between">
+                                <div className="font-semibold text-gray-700">Question Metadata</div>
+                                {currentQuestion && (
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleBookmark(currentQuestion.id)}
+                                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold transition-colors ${isBookmarked
+                                            ? 'border-amber-300 bg-amber-50 text-amber-600'
+                                            : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                                            }`}
+                                        aria-pressed={isBookmarked}
+                                    >
+                                        <svg
+                                            className="h-3.5 w-3.5"
+                                            viewBox="0 0 24 24"
+                                            fill={isBookmarked ? 'currentColor' : 'none'}
+                                            stroke="currentColor"
+                                            strokeWidth={2}
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                d="M5 4a2 2 0 012-2h10a2 2 0 012 2v18l-7-4-7 4V4z"
+                                            />
+                                        </svg>
+                                        {isBookmarked ? 'Bookmarked' : 'Bookmark'}
+                                    </button>
+                                )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <span className="text-gray-400 block">Time Spent</span>
+                                    <span className="font-semibold text-gray-800">{formatDuration(currentResponseMeta?.time_spent_seconds)}</span>
+                                </div>
+                                <div>
+                                    <span className="text-gray-400 block">Status</span>
+                                    <span className="font-semibold text-gray-800">{currentStatus}</span>
+                                </div>
+                                <div>
+                                    <span className="text-gray-400 block">Topic</span>
+                                    <span className="font-semibold text-gray-800">{currentQuestion?.topic ?? '—'}</span>
+                                </div>
+                                <div>
+                                    <span className="text-gray-400 block">Subtopic</span>
+                                    <span className="font-semibold text-gray-800">{currentQuestion?.subtopic ?? '—'}</span>
+                                </div>
+                                <div>
+                                    <span className="text-gray-400 block">Difficulty</span>
+                                    <span className="font-semibold text-gray-800">{currentQuestion?.difficulty ?? '—'}</span>
+                                </div>
+                                <div>
+                                    <span className="text-gray-400 block">Section</span>
+                                    <span className="font-semibold text-gray-800">{sectionDisplay}</span>
+                                </div>
+                            </div>
+                            {currentQuestion && (currentIsIncorrect || currentIsSkipped) && (
+                                <div className="mt-2 rounded-md border border-amber-100 bg-amber-50/70 p-2">
+                                    <div className="flex items-center justify-between text-[11px] font-semibold text-amber-700">
+                                        <span>Reason for Performance</span>
+                                        <span className="uppercase text-[10px] text-amber-600">
+                                            {currentIsSkipped ? 'Skipped' : 'Incorrect'}
+                                        </span>
+                                    </div>
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                        {REASON_OPTIONS.map((option) => {
+                                            const isActive = selectedReason === option.value;
+                                            return (
+                                                <button
+                                                    key={option.value}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!currentQuestion) return;
+                                                        setAnalysisReason(currentQuestion.id, isActive ? null : option.value);
+                                                    }}
+                                                    className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors ${isActive
+                                                        ? 'bg-amber-500 text-white border-amber-500'
+                                                        : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-100'
+                                                        }`}
+                                                >
+                                                    {option.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                            <p className="text-[11px] text-gray-400">Order reflects your attempt sequence.</p>
                         </div>
                     </div>
-                </aside>
+                    </aside>
+                </div>
             </div>
         </section>
     );

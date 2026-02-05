@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initializeExamSession } from '@/features/exam-engine/lib/actions';
 import { sbSSR } from '@/lib/supabase/server';
 
 export async function POST(req: NextRequest) {
@@ -20,32 +19,16 @@ export async function POST(req: NextRequest) {
 
         const { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('id, user_id, status, session_token')
+            .select('status')
             .eq('id', attemptId)
+            .eq('user_id', user.id)
             .maybeSingle();
 
         if (attemptError || !attempt) {
             return NextResponse.json({ error: 'Attempt not found' }, { status: 404 });
         }
 
-        if (attempt.user_id !== user.id) {
-            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
-
-        if (attempt.status !== 'in_progress' && attempt.status !== 'paused') {
-            return NextResponse.json({ error: 'Attempt is not active' }, { status: 400 });
-        }
-
-        if (typeof attempt.session_token === 'string' && attempt.session_token.length > 0) {
-            return NextResponse.json({ success: true, data: { sessionToken: attempt.session_token } });
-        }
-
-        const result = await initializeExamSession(attemptId);
-        if (!result.success) {
-            return NextResponse.json({ error: result.error || 'Failed to initialize session' }, { status: 400 });
-        }
-
-        return NextResponse.json({ success: true, data: result.data });
+        return NextResponse.json({ success: true, data: { status: attempt.status } });
     } catch {
         return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
     }

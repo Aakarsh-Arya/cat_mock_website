@@ -2,3 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes landing-fade-up {
+    0% {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes landing-glow {
+    0%,
+    100% {
+        opacity: 0.15;
+        transform: scale(0.98);
+    }
+    50% {
+        opacity: 0.45;
+        transform: scale(1);
+    }
+}

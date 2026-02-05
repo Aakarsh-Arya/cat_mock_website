@@ -101,6 +101,7 @@ export interface DevActionExecutor {
     expireSection: (sectionName: SectionName) => void;
     moveToNextSection: () => void;
     updateSectionTimer: (sectionName: SectionName, remainingSeconds: number) => void;
+    setSectionTimerOverride?: (sectionName: SectionName, remainingSeconds: number) => void;
     setAutoSubmitting: (isAutoSubmitting: boolean) => void;
     getCurrentSectionIndex: () => number;
     getSectionTimers: () => Record<SectionName, { remainingSeconds: number }>;
@@ -155,7 +156,8 @@ export const setCurrentSectionTimer = (
     const currentSection = sections[currentIndex];
 
     console.log(`[DevTools] Setting ${currentSection} timer to ${seconds}s`);
-    executor.updateSectionTimer(currentSection, seconds);
+    const setter = executor.setSectionTimerOverride ?? executor.updateSectionTimer;
+    setter(currentSection, seconds);
 };
 
 /**

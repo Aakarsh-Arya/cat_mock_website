@@ -4,7 +4,7 @@
  * @blueprint Milestone 5 - Milestone_Change_Log.md - Change 002
  */
 
-import { type SectionName } from '@/types/exam';
+import { type SectionName, getSectionDisplayLabel } from '@/types/exam';
 
 interface SectionScore {
     score: number;
@@ -25,25 +25,21 @@ interface SectionalPerformanceProps {
 
 /** Section display configuration */
 const SECTION_DISPLAY: Record<SectionName, {
-    name: string;
     fullName: string;
     color: string;
     bgColor: string;
 }> = {
     VARC: {
-        name: 'VARC',
         fullName: 'Verbal Ability & Reading Comprehension',
         color: 'text-blue-700',
         bgColor: 'bg-blue-50',
     },
     DILR: {
-        name: 'DILR',
         fullName: 'Data Interpretation & Logical Reasoning',
         color: 'text-purple-700',
         bgColor: 'bg-purple-50',
     },
     QA: {
-        name: 'QA',
         fullName: 'Quantitative Aptitude',
         color: 'text-green-700',
         bgColor: 'bg-green-50',
@@ -73,6 +69,8 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
                     const sectionDisplay = SECTION_DISPLAY[sectionName];
                     const sectionCfg = config[sectionName] || { maxMarks: 0, totalQuestions: 0 };
 
+                    const sectionLabel = getSectionDisplayLabel(sectionName);
+
                     if (!scores) {
                         return (
                             <div
@@ -80,7 +78,7 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
                                 className={`${sectionDisplay.bgColor} rounded-xl p-5 border`}
                             >
                                 <h3 className={`font-bold text-lg ${sectionDisplay.color} mb-1`}>
-                                    {sectionDisplay.name}
+                                    {sectionLabel}
                                 </h3>
                                 <p className="text-gray-400 text-sm">No data available</p>
                             </div>
@@ -103,7 +101,7 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
                             {/* Section Header */}
                             <div className="mb-4">
                                 <h3 className={`font-bold text-lg ${sectionDisplay.color}`}>
-                                    {sectionDisplay.name}
+                                    {sectionLabel}
                                 </h3>
                                 <p className="text-xs text-gray-500">
                                     {sectionDisplay.fullName}

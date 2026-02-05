@@ -106,6 +106,11 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
     // Prevent double-trigger of expiry (interval ticks + visibility effect + delayed ticks)
     const expiryInProgressRef = useRef(false);
 
+    // CRITICAL: Track sections that have COMPLETED expiry processing
+    // Once a section is in this set, it should NEVER be processed again
+    // This prevents the loop caused by refs resetting in finally blocks
+    const expiredSectionsProcessedRef = useRef<Set<SectionName>>(new Set());
+
     useEffect(() => {
         onSectionExpireRef.current = onSectionExpire;
         onExamCompleteRef.current = onExamComplete;
@@ -126,33 +131,57 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
 
     const handleSectionExpiry = useCallback(
         async (sectionName: SectionName) => {
+            // CRITICAL: Check if this section was ALREADY processed - permanent gate
+            if (expiredSectionsProcessedRef.current.has(sectionName)) {
+                console.log('[useExamTimer] Section already processed, skipping', { sectionName });
+                return;
+            }
+
             // Atomic check-and-set to prevent race conditions
             // Check both local ref AND store state before proceeding
             const storeState = useExamStore.getState();
-            if (expiryInProgressRef.current) return;
-            if (storeState.isAutoSubmitting || storeState.isSubmitting) return;
+            if (expiryInProgressRef.current) {
+                console.log('[useExamTimer] Section expiry blocked: already in progress', { sectionName });
+                return;
+            }
+            if (storeState.isAutoSubmitting || storeState.isSubmitting) {
+                console.log('[useExamTimer] Section expiry blocked: submit in progress', { sectionName });
+                return;
+            }
 
             // Set flag immediately to block any concurrent calls
             expiryInProgressRef.current = true;
+            // CRITICAL: Mark section as processed IMMEDIATELY (before any async work)
+            // This is the permanent gate that prevents re-processing
+            expiredSectionsProcessedRef.current.add(sectionName);
 
             // Stop ticks immediately (don’t wait for state re-render)
             stopTimer();
 
+            // CRITICAL: Mark section as expired FIRST (before setAutoSubmitting)
+            // This ensures tick() won't re-trigger even if state updates are delayed
+            expireSection(sectionName);
+
             setAutoSubmitting(true);
             try {
-                expireSection(sectionName);
+                console.log('[useExamTimer] Section expiry processing', { sectionName });
 
                 // Persist section responses / server-side save (if provided)
                 await onSectionExpireRef.current?.(sectionName);
 
                 // Determine completion based on sectionName (most reliable)
                 if (sectionName === 'QA') {
+                    console.log('[useExamTimer] QA expired - calling onExamComplete');
                     await onExamCompleteRef.current?.();
+                    console.log('[useExamTimer] onExamComplete returned');
                 } else {
                     moveToNextSection();
                 }
             } finally {
+                console.log('[useExamTimer] Section expiry cleanup - setting isAutoSubmitting=false');
                 setAutoSubmitting(false);
+                // CRITICAL: Only reset expiryInProgressRef, NOT expiredSectionsProcessedRef
+                // The section remains in expiredSectionsProcessedRef FOREVER to prevent re-processing
                 expiryInProgressRef.current = false;
 
                 // If not submitting and not manually paused, resume ticking for the next section
@@ -173,6 +202,10 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
 
         // Use ref to get current section (avoids stale closure)
         const section = currentSectionRef.current;
+
+        // CRITICAL: Skip if this section was already processed
+        if (expiredSectionsProcessedRef.current.has(section)) return;
+
         const timer = st.sectionTimers[section];
         if (!timer) return;
 
@@ -239,6 +272,8 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         if (!hasHydrated || isSubmitting || isAutoSubmitting) return;
         if (isManuallyPausedRef.current) return;
         if (expiryInProgressRef.current) return;
+        // CRITICAL: Skip if this section was already processed
+        if (expiredSectionsProcessedRef.current.has(currentSection)) return;
 
         if (currentTimer.isExpired) return;
         if (currentTimer.startedAt === 0) return;
@@ -248,6 +283,18 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
             void handleSectionExpiry(currentSection);
         }
     }, [currentSection, currentTimer, handleSectionExpiry, hasHydrated, isSubmitting, isAutoSubmitting]);
+
+    // Recovery: if the current timer is already marked expired after resume, force expiry handling.
+    useEffect(() => {
+        if (!hasHydrated || isSubmitting || isAutoSubmitting) return;
+        if (isManuallyPausedRef.current) return;
+        if (expiryInProgressRef.current) return;
+        // CRITICAL: Skip if this section was already processed
+        if (expiredSectionsProcessedRef.current.has(currentSection)) return;
+        if (!currentTimer.isExpired) return;
+
+        void handleSectionExpiry(currentSection);
+    }, [currentSection, currentTimer.isExpired, handleSectionExpiry, hasHydrated, isSubmitting, isAutoSubmitting]);
 
     // Sync on tab focus
     useEffect(() => {

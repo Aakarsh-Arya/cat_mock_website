@@ -8,6 +8,7 @@ import { adminLogger } from '@/lib/logger';
 import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import QuestionRowActions from './QuestionRowActions';
 
 function getAdminClient() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -150,12 +151,11 @@ export default async function QuestionsPage() {
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                        <Link
-                                            href={`/admin/papers/${question.paper_id}/edit`}
-                                            className="text-blue-600 hover:text-blue-900"
-                                        >
-                                            Edit in Paper
-                                        </Link>
+                                        <QuestionRowActions
+                                            questionId={question.id}
+                                            isActive={question.is_active}
+                                            editHref={`/admin/papers/${question.paper_id}/edit`}
+                                        />
                                     </td>
                                 </tr>
                             ))

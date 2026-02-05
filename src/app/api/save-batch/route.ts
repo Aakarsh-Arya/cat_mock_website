@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         const adminClient = getServiceRoleClient();
         const { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, started_at, paper_id')
+            .select('id, user_id, status, started_at, paper_id, submitted_at')
             .eq('id', attemptId)
             .maybeSingle();
 
@@ -96,7 +96,19 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
-        if (attempt.status !== 'in_progress') {
+        // FIX: Allow saves during submit transition grace period (60 seconds after submit)
+        // This prevents data loss when submit times out but actually succeeds on server
+        const isInProgress = attempt.status === 'in_progress';
+        const isRecentlySubmitted = attempt.status === 'submitted' && attempt.submitted_at &&
+            (Date.now() - new Date(attempt.submitted_at as string).getTime()) < 60000; // 60 second grace
+
+        if (!isInProgress && !isRecentlySubmitted) {
+            // Log for debugging - don't error if attempt is completed/submitted beyond grace
+            console.log('Save-batch rejected - attempt not in progress', {
+                attemptId,
+                status: attempt.status,
+                submitted_at: attempt.submitted_at,
+            });
             return NextResponse.json({ error: 'Attempt is not in progress' }, { status: 400 });
         }
 

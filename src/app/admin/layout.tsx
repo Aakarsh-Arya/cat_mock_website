@@ -89,6 +89,12 @@ export default async function AdminLayout({
                                     Papers
                                 </Link>
                                 <Link
+                                    href="/admin/landing-page"
+                                    className="text-gray-200 hover:text-white transition-colors"
+                                >
+                                    Landing Page
+                                </Link>
+                                <Link
                                     href="/admin/question-sets"
                                     className="text-gray-200 hover:text-white transition-colors"
                                 >
@@ -99,6 +105,12 @@ export default async function AdminLayout({
                                     className="text-gray-200 hover:text-white transition-colors"
                                 >
                                     Questions
+                                </Link>
+                                <Link
+                                    href="/admin/bug-reports"
+                                    className="text-gray-200 hover:text-white transition-colors"
+                                >
+                                    Bug Reports
                                 </Link>
                             </nav>
                         </div>

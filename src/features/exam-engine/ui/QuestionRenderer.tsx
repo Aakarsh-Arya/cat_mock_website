@@ -44,6 +44,12 @@ interface QuestionRendererProps {
     showCorrectAnswer?: boolean;
     /** Correct answers keyed by question id */
     correctAnswerMap?: Record<string, string>;
+    /** Optional: solution content keyed by question id (review mode) */
+    solutionMap?: Record<string, {
+        solution_text?: string | null;
+        solution_image_url?: string | null;
+        video_solution_url?: string | null;
+    }>;
     /** Optional: show bookmark toggle for the active question */
     showBookmarkToggle?: boolean;
     /** Optional: list of bookmarked question ids */
@@ -121,6 +127,11 @@ interface QuestionPaneProps {
     showCorrectAnswer?: boolean;
     responses?: Record<string, string | null>;
     correctAnswerMap?: Record<string, string>;
+    solutionMap?: Record<string, {
+        solution_text?: string | null;
+        solution_image_url?: string | null;
+        video_solution_url?: string | null;
+    }>;
     showBookmarkToggle?: boolean;
     isBookmarked?: boolean;
     onToggleBookmark?: (questionId: string) => void;
@@ -138,6 +149,7 @@ export function QuestionPane({
     showCorrectAnswer,
     responses,
     correctAnswerMap,
+    solutionMap,
     showBookmarkToggle,
     isBookmarked,
     onToggleBookmark,
@@ -181,6 +193,7 @@ export function QuestionPane({
                     showCorrectAnswer={showCorrectAnswer}
                     responses={responses}
                     correctAnswerMap={correctAnswerMap}
+                    solutionMap={solutionMap}
                     showBookmarkToggle={showBookmarkToggle}
                     isBookmarked={isBookmarked}
                     onToggleBookmark={onToggleBookmark}
@@ -203,6 +216,11 @@ interface SplitPaneLayoutProps {
     showCorrectAnswer?: boolean;
     responses?: Record<string, string | null>;
     correctAnswerMap?: Record<string, string>;
+    solutionMap?: Record<string, {
+        solution_text?: string | null;
+        solution_image_url?: string | null;
+        video_solution_url?: string | null;
+    }>;
     showBookmarkToggle?: boolean;
     isBookmarked?: boolean;
     onToggleBookmark?: (questionId: string) => void;
@@ -221,6 +239,7 @@ function SplitPaneLayout({
     showCorrectAnswer,
     responses,
     correctAnswerMap,
+    solutionMap,
     showBookmarkToggle,
     isBookmarked,
     onToggleBookmark,
@@ -240,6 +259,7 @@ function SplitPaneLayout({
                 showCorrectAnswer={showCorrectAnswer}
                 responses={responses}
                 correctAnswerMap={correctAnswerMap}
+                solutionMap={solutionMap}
                 showBookmarkToggle={showBookmarkToggle}
                 isBookmarked={isBookmarked}
                 onToggleBookmark={onToggleBookmark}
@@ -264,6 +284,11 @@ interface SingleFocusLayoutProps {
     showCorrectAnswer?: boolean;
     responses?: Record<string, string | null>;
     correctAnswerMap?: Record<string, string>;
+    solutionMap?: Record<string, {
+        solution_text?: string | null;
+        solution_image_url?: string | null;
+        video_solution_url?: string | null;
+    }>;
     showBookmarkToggle?: boolean;
     isBookmarked?: boolean;
     onToggleBookmark?: (questionId: string) => void;
@@ -280,6 +305,7 @@ function SingleFocusLayout({
     showCorrectAnswer,
     responses,
     correctAnswerMap,
+    solutionMap,
     showBookmarkToggle,
     isBookmarked,
     onToggleBookmark,
@@ -324,6 +350,7 @@ function SingleFocusLayout({
                     showCorrectAnswer={showCorrectAnswer}
                     responses={responses}
                     correctAnswerMap={correctAnswerMap}
+                    solutionMap={solutionMap}
                     showBookmarkToggle={showBookmarkToggle}
                     isBookmarked={isBookmarked}
                     onToggleBookmark={onToggleBookmark}
@@ -347,6 +374,11 @@ interface QuestionContentProps {
     showCorrectAnswer?: boolean;
     responses?: Record<string, string | null>;
     correctAnswerMap?: Record<string, string>;
+    solutionMap?: Record<string, {
+        solution_text?: string | null;
+        solution_image_url?: string | null;
+        video_solution_url?: string | null;
+    }>;
     showBookmarkToggle?: boolean;
     isBookmarked?: boolean;
     onToggleBookmark?: (questionId: string) => void;
@@ -362,6 +394,7 @@ function QuestionContent({
     showCorrectAnswer = false,
     responses,
     correctAnswerMap,
+    solutionMap,
     showBookmarkToggle,
     isBookmarked = false,
     onToggleBookmark,
@@ -388,6 +421,8 @@ function QuestionContent({
 
     const answerOverride = responses?.[question.id] ?? null;
     const correctAnswer = correctAnswerMap?.[question.id];
+    const solution = solutionMap?.[question.id];
+    const hasSolution = Boolean(solution?.solution_text || solution?.solution_image_url || solution?.video_solution_url);
 
     return (
         <div className="space-y-6">
@@ -460,6 +495,40 @@ function QuestionContent({
                     />
                 )}
             </div>
+
+            {hasSolution && (
+                <details className="rounded-lg border border-gray-200 bg-white p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-blue-600">
+                        View solution
+                    </summary>
+                    <div className="mt-3 space-y-3 text-sm text-gray-700">
+                        {solution?.solution_text && (
+                            <div className="prose prose-sm max-w-none">
+                                <MathText text={solution.solution_text} />
+                            </div>
+                        )}
+                        {solution?.solution_image_url && (
+                            <div className="rounded border border-gray-200 overflow-hidden">
+                                <img
+                                    src={solution.solution_image_url}
+                                    alt="Solution"
+                                    className="w-full h-auto"
+                                />
+                            </div>
+                        )}
+                        {solution?.video_solution_url && (
+                            <a
+                                href={solution.video_solution_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-600 hover:underline text-sm"
+                            >
+                                Watch video solution
+                            </a>
+                        )}
+                    </div>
+                </details>
+            )}
         </div>
     );
 }
@@ -529,6 +598,7 @@ export function QuestionRenderer({
     readOnly = false,
     showCorrectAnswer = false,
     correctAnswerMap,
+    solutionMap,
     showBookmarkToggle = false,
     bookmarkedQuestionIds,
     onToggleBookmark,
@@ -601,6 +671,7 @@ export function QuestionRenderer({
                 showCorrectAnswer={showCorrectAnswer}
                 responses={responses}
                 correctAnswerMap={correctAnswerMap}
+                solutionMap={solutionMap}
                 showBookmarkToggle={showBookmarkToggle}
                 isBookmarked={isBookmarked}
                 onToggleBookmark={onToggleBookmark}
@@ -618,13 +689,14 @@ export function QuestionRenderer({
             onAnswerChange={handleAnswerChange}
             isReviewMode={isReviewMode}
             showInlineContext={useFullWidthForEdgeCase && Boolean(questionSet.context_body)}
-            readOnly={readOnly}
-            showCorrectAnswer={showCorrectAnswer}
-            responses={responses}
-            correctAnswerMap={correctAnswerMap}
-            showBookmarkToggle={showBookmarkToggle}
-            isBookmarked={isBookmarked}
-            onToggleBookmark={onToggleBookmark}
-        />
+        readOnly={readOnly}
+        showCorrectAnswer={showCorrectAnswer}
+        responses={responses}
+        correctAnswerMap={correctAnswerMap}
+        solutionMap={solutionMap}
+        showBookmarkToggle={showBookmarkToggle}
+        isBookmarked={isBookmarked}
+        onToggleBookmark={onToggleBookmark}
+    />
     );
 }

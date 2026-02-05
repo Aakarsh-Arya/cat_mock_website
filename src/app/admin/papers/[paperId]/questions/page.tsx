@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import { sbSSR } from '@/lib/supabase/server';
+import QuestionRowActions from '@/app/admin/questions/QuestionRowActions';
 
 interface PageProps {
     params: Promise<{ paperId: string }>;
@@ -114,6 +115,7 @@ export default async function PaperQuestionsPage({ params }: PageProps) {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Topic</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -129,11 +131,18 @@ export default async function PaperQuestionsPage({ params }: PageProps) {
                                             {q.is_active ? 'Active' : 'Inactive'}
                                         </span>
                                     </td>
+                                    <td className="px-6 py-3 text-right text-sm font-medium">
+                                        <QuestionRowActions
+                                            questionId={q.id}
+                                            isActive={q.is_active}
+                                            editHref={`/admin/papers/${paperId}/edit?qid=${q.id}`}
+                                        />
+                                    </td>
                                 </tr>
                             ))
                         ) : (
                             <tr>
-                                <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                                <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                                     No questions found for this paper.
                                 </td>
                             </tr>

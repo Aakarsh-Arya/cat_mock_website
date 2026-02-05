@@ -3,17 +3,11 @@ import { redirect } from 'next/navigation';
 import { sbSSR } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import Link from 'next/link';
+import { getSectionDurationSecondsMap, type SectionName, type SectionConfig } from '@/types/exam';
 
 export const metadata: Metadata = {
     title: "Mock Details",
 };
-
-interface Section {
-    name: string;
-    questions: number;
-    time: number;
-    marks: number;
-}
 
 interface Paper {
     id: string;
@@ -24,7 +18,7 @@ interface Paper {
     total_questions: number;
     total_marks: number;
     duration_minutes: number;
-    sections: Section[];
+    sections: SectionConfig[];
     published: boolean;
     difficulty_level: string | null;
     is_free: boolean;
@@ -78,8 +72,9 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
         previousAttempts = attempts || [];
     }
 
-    // Check attempt limit (count attempts that are not expired)
-    const activeAttemptsCount = previousAttempts.filter((a) => a.status !== 'expired').length;
+    // Check attempt limit (count completed + submitted only)
+    const attemptLimitStatuses = new Set(['completed', 'submitted']);
+    const activeAttemptsCount = previousAttempts.filter((a) => attemptLimitStatuses.has(a.status)).length;
     const attemptLimit = paper?.attempt_limit ?? null;
     const canAttempt = attemptLimit === null || attemptLimit <= 0 || activeAttemptsCount < attemptLimit;
 
@@ -95,7 +90,7 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
         // Check if paperId looks like a UUID
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
 
-        type PaperData = { id: string; published: boolean; sections: Section[]; duration_minutes: number; attempt_limit: number | null };
+        type PaperData = { id: string; published: boolean; sections: SectionConfig[]; duration_minutes: number; attempt_limit: number | null };
         let p: PaperData | null = null;
 
         if (isUUID) {
@@ -120,20 +115,6 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             throw new Error('Paper not available');
         }
 
-        const attemptLimitServer = p.attempt_limit ?? null;
-        if (attemptLimitServer !== null && attemptLimitServer > 0) {
-            const { count: attemptCount } = await s
-                .from('attempts')
-                .select('id', { count: 'exact', head: true })
-                .eq('paper_id', p.id)
-                .eq('user_id', currentUser.id)
-                .neq('status', 'expired');
-
-            if ((attemptCount ?? 0) >= attemptLimitServer) {
-                redirect(`/mock/${paperId}?limit_reached=1`);
-            }
-        }
-
         // FIX: Check for existing in_progress attempt - reuse instead of creating new
         const { data: existingAttempt } = await s
             .from('attempts')
@@ -146,16 +127,32 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             .maybeSingle();
 
         if (existingAttempt) {
-            // Resume existing attempt instead of creating new one
+            // Resume existing attempt instead of creating a new one
             redirect(`/exam/${existingAttempt.id}`);
         }
 
+        const attemptLimitServer = p.attempt_limit ?? null;
+        if (attemptLimitServer !== null && attemptLimitServer > 0) {
+            const { count: attemptCount } = await s
+                .from('attempts')
+                .select('id', { count: 'exact', head: true })
+                .eq('paper_id', p.id)
+                .eq('user_id', currentUser.id)
+                .in('status', ['completed', 'submitted']);
+
+            if ((attemptCount ?? 0) >= attemptLimitServer) {
+                redirect(`/mock/${paperId}?limit_reached=1`);
+            }
+        }
+
         // Initialize time remaining for each section
-        const sections = p.sections as Section[] || [];
-        const timeRemaining: Record<string, number> = {};
-        sections.forEach((sec: Section) => {
-            timeRemaining[sec.name] = sec.time * 60; // Convert to seconds
-        });
+        const sections = (p.sections as SectionConfig[]) || [];
+        const sectionDurations = getSectionDurationSecondsMap(sections);
+        const timeRemaining: Record<SectionName, number> = {
+            VARC: sectionDurations.VARC,
+            DILR: sectionDurations.DILR,
+            QA: sectionDurations.QA,
+        };
 
         const { data: attempt, error: insertErr } = await s
             .from('attempts')
@@ -163,7 +160,7 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
                 paper_id: p.id,
                 user_id: currentUser.id,
                 status: 'in_progress',
-                current_section: sections[0]?.name || null,
+                current_section: 'VARC',
                 current_question: 1,
                 time_remaining: timeRemaining
             })
@@ -269,7 +266,7 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
                         </tr>
                     </thead>
                     <tbody>
-                        {sections.map((section: Section, idx: number) => (
+                        {sections.map((section: SectionConfig, idx: number) => (
                             <tr key={`${section.name}-${idx}`} style={{ borderBottom: '1px solid #eee' }}>
                                 <td style={{ padding: 12 }}>{section.name}</td>
                                 <td style={{ padding: 12, textAlign: 'center' }}>{section.questions}</td>
@@ -312,15 +309,17 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
                                 <span>Attempt {previousAttempts.length - idx}</span>
                                 <span style={{ color: '#666' }}>{new Date(attempt.created_at).toLocaleDateString()}</span>
                                 <span style={{
-                                    color: attempt.status === 'completed' ? '#4caf50' : '#ff9800'
+                                    color: attempt.status === 'completed' || attempt.status === 'submitted' ? '#4caf50' : '#ff9800'
                                 }}>{attempt.status}</span>
                                 <span style={{ fontWeight: 'bold' }}>
                                     {attempt.total_score !== null ? `${attempt.total_score} marks` : '—'}
                                 </span>
-                                {attempt.status === 'completed' ? (
+                                {attempt.status === 'completed' || attempt.status === 'submitted' ? (
                                     <Link href={`/result/${attempt.id}`} style={{ color: '#1976d2' }}>View Result</Link>
-                                ) : (
+                                ) : attempt.status === 'in_progress' ? (
                                     <Link href={`/exam/${attempt.id}`} style={{ color: '#ff9800' }}>Continue</Link>
+                                ) : (
+                                    <span style={{ color: '#999' }}>—</span>
                                 )}
                             </div>
                         ))}

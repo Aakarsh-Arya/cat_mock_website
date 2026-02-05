@@ -20,6 +20,18 @@ export const SECTION_ORDER: Record<SectionName, number> = {
     QA: 2,
 } as const;
 
+/** Short display labels for sections used in analytics UI */
+export const SECTION_DISPLAY_LABELS: Record<SectionName, string> = {
+    VARC: 'VARC',
+    DILR: 'LRDI',
+    QA: 'QA',
+} as const;
+
+/** Get short display label for a section */
+export function getSectionDisplayLabel(section: SectionName): string {
+    return SECTION_DISPLAY_LABELS[section] ?? section;
+}
+
 /** Section configuration from paper.sections JSONB */
 export interface SectionConfig {
     name: SectionName;
@@ -571,6 +583,7 @@ export interface ExamEngineActions {
 
     // Timer
     updateSectionTimer: (sectionName: SectionName, remainingSeconds: number) => void;
+    setSectionTimerOverride: (sectionName: SectionName, remainingSeconds: number) => void;
     expireSection: (sectionName: SectionName) => void;
 
     // Submission

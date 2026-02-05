@@ -20,6 +20,8 @@ import type {
 } from '@/types/exam';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 import { PaletteShell } from '@/features/shared/ui/PaletteShell';
+import { MarkdownToolbar } from './MarkdownToolbar';
+import { getTopicOptions, getSubtopicOptions } from '../config/topicOptions';
 
 // =============================================================================
 // TYPES
@@ -468,6 +470,7 @@ function EditableSetPane({
     const [imageUrl, setImageUrl] = useState<string | null>(questionSet?.context_image_url ?? null);
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
     useEffect(() => {
         setTitle(questionSet?.context_title ?? '');
@@ -586,7 +589,13 @@ function EditableSetPane({
                                 className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                             />
 
+                            <MarkdownToolbar
+                                textareaRef={contentTextareaRef}
+                                value={content}
+                                onChange={setContent}
+                            />
                             <textarea
+                                ref={contentTextareaRef}
                                 value={content}
                                 onChange={(e) => setContent(e.target.value)}
                                 placeholder="Set stimulus / passage"
@@ -689,6 +698,7 @@ function EditableContextPane({
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
     useEffect(() => {
         setTitle(context?.title ?? '');
@@ -817,7 +827,13 @@ function EditableContextPane({
                             className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                         />
 
+                        <MarkdownToolbar
+                            textareaRef={contentTextareaRef}
+                            value={content}
+                            onChange={setContent}
+                        />
                         <textarea
+                            ref={contentTextareaRef}
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
                             placeholder={
@@ -932,6 +948,12 @@ function EditableQuestionArea({
     const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const questionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const solutionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const [topic, setTopic] = useState(question?.topic ?? '');
+    const [subtopic, setSubtopic] = useState(question?.subtopic ?? '');
+
+    const topicOptions = useMemo(() => getTopicOptions(section, topic), [section, topic]);
+    const subtopicOptions = useMemo(() => getSubtopicOptions(section, topic, subtopic), [section, topic, subtopic]);
 
     useEffect(() => {
         if (!question) {
@@ -943,6 +965,8 @@ function EditableQuestionArea({
             setNegativeMarks(1);
             setSolutionText('');
             setImageUrl(null);
+            setTopic('');
+            setSubtopic('');
             return;
         }
 
@@ -954,6 +978,8 @@ function EditableQuestionArea({
         setNegativeMarks(question.negative_marks ?? 1);
         setImageUrl(question.question_image_url ?? null);
         setSolutionText(question.solution_text ?? '');
+        setTopic(question.topic ?? '');
+        setSubtopic(question.subtopic ?? '');
     }, [question?.id]);
 
     useEffect(() => {
@@ -999,6 +1025,8 @@ function EditableQuestionArea({
             negative_marks: questionType === 'TITA' ? 0 : negativeMarks,
             solution_text: solutionText || undefined,
             question_image_url: imageUrl || undefined,
+            topic: topic || undefined,
+            subtopic: subtopic || undefined,
             set_id: useSet ? selectedSetId ?? undefined : undefined,
             context_id: useSet ? undefined : selectedContextId && selectedContextId !== 'new' ? selectedContextId : undefined,
             is_active: true,
@@ -1018,6 +1046,8 @@ function EditableQuestionArea({
         negativeMarks,
         solutionText,
         imageUrl,
+        topic,
+        subtopic,
         selectedSetId,
         selectedContextId,
         onSave,
@@ -1079,6 +1109,12 @@ function EditableQuestionArea({
                 </div>
 
                 <div className="mb-6">
+                    <MarkdownToolbar
+                        textareaRef={questionTextareaRef}
+                        value={questionText}
+                        onChange={setQuestionText}
+                        className="mb-2"
+                    />
                     <div className="prose prose-lg max-w-none">
                         <textarea
                             ref={questionTextareaRef}
@@ -1121,7 +1157,14 @@ function EditableQuestionArea({
                     <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-800">
                         Solution (Optional)
                     </summary>
+                    <MarkdownToolbar
+                        textareaRef={solutionTextareaRef}
+                        value={solutionText}
+                        onChange={setSolutionText}
+                        className="mt-3"
+                    />
                     <textarea
+                        ref={solutionTextareaRef}
                         value={solutionText}
                         onChange={(e) => setSolutionText(e.target.value)}
                         placeholder="Enter solution explanation..."
@@ -1129,6 +1172,49 @@ function EditableQuestionArea({
                         className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                     />
                 </details>
+
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Topic
+                        </label>
+                        <select
+                            value={topic}
+                            onChange={(e) => {
+                                const nextTopic = e.target.value;
+                                setTopic(nextTopic);
+                                if (!getSubtopicOptions(section, nextTopic).includes(subtopic)) {
+                                    setSubtopic('');
+                                }
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                        >
+                            <option value="">— Select Topic —</option>
+                            {topicOptions.map((option) => (
+                                <option key={option} value={option}>
+                                    {option}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Subtopic
+                        </label>
+                        <select
+                            value={subtopic}
+                            onChange={(e) => setSubtopic(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                        >
+                            <option value="">— Select Subtopic —</option>
+                            {subtopicOptions.map((option) => (
+                                <option key={option} value={option}>
+                                    {option}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
 
                 <div className="mt-6 pt-4 border-t border-gray-200 flex justify-end">
                     <button

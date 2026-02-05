@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "katex/dist/katex.min.css";
+import AuthenticatedOverlays from "@/components/AuthenticatedOverlays";
 
 export const metadata: Metadata = {
   title: "CAT Mock Test Platform",
@@ -12,10 +13,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
+    return (
     <html lang="en">
       <body className="font-sans antialiased">
         {children}
+        <AuthenticatedOverlays />
       </body>
     </html>
   );

@@ -18,6 +18,9 @@ type Paper = {
 
 export default async function MocksPage() {
     const supabase = await sbSSR();
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
 
     // Fetch published papers. Availability window is filtered in code for reliability.
     const { data, error } = await supabase
@@ -27,11 +30,27 @@ export default async function MocksPage() {
         .order('year', { ascending: false })
         .order('created_at', { ascending: false });
 
+    const inProgressAttemptsByPaper = new Map<string, { id: string }>();
+    if (user) {
+        const { data: inProgressAttempts } = await supabase
+            .from('attempts')
+            .select('id, paper_id, created_at')
+            .eq('user_id', user.id)
+            .eq('status', 'in_progress')
+            .order('created_at', { ascending: false });
+
+        (inProgressAttempts ?? []).forEach((attempt) => {
+            if (!inProgressAttemptsByPaper.has(attempt.paper_id)) {
+                inProgressAttemptsByPaper.set(attempt.paper_id, { id: attempt.id });
+            }
+        });
+    }
+
     const now = Date.now();
     const papers: Paper[] = (data ?? []).filter((p: Paper) => {
         const fromOk = !p.available_from || Date.parse(p.available_from) <= now;
         const untilOk = !p.available_until || Date.parse(p.available_until) >= now;
-        return fromOk && untilOk;
+        return (fromOk && untilOk) || inProgressAttemptsByPaper.has(p.id);
     });
 
     // Group papers by year
@@ -76,7 +95,9 @@ export default async function MocksPage() {
                             </h2>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
                                 {yearPapers.map((p) => {
-                                    const href = `/mock/${p.slug || p.id}`;
+                                    const inProgressAttempt = inProgressAttemptsByPaper.get(p.id);
+                                    const href = inProgressAttempt ? `/exam/${inProgressAttempt.id}` : `/mock/${p.slug || p.id}`;
+                                    const ctaLabel = inProgressAttempt ? 'Continue Mock' : 'Start Mock';
                                     return (
                                         <div key={p.id} style={{
                                             border: '1px solid #ddd',
@@ -143,7 +164,7 @@ export default async function MocksPage() {
                                                 fontWeight: 'bold',
                                                 fontSize: 14
                                             }}>
-                                                Start Mock
+                                                {ctaLabel}
                                             </Link>
                                         </div>
                                     );

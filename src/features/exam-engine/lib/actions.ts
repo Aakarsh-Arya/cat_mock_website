@@ -550,8 +550,20 @@ export async function submitExam(
         if (attempt.user_id !== user.id) return { success: false, error: 'Unauthorized' };
 
         // Phase 5: Treat already-submitted as success (idempotent)
+        // PHASE 3 FIX: Return data matching successful first submission shape for proper UI redirect
         if (attempt.status === 'completed' || attempt.status === 'submitted') {
-            return { success: true, data: { success: true, already_submitted: true } as unknown as SubmitExamResponse };
+            logger.info('submitExam: attempt already submitted, returning success (idempotent)', {
+                attemptId: normalizedAttemptId,
+                status: attempt.status,
+            });
+            return {
+                success: true,
+                data: {
+                    success: true,
+                    already_submitted: true,
+                    attemptId: normalizedAttemptId,
+                } as unknown as SubmitExamResponse,
+            };
         }
         if (attempt.status !== 'in_progress') return { success: false, error: 'Attempt is not in progress' };
         if (!options?.sessionToken) return { success: false, error: 'Missing session token' };
@@ -837,10 +849,12 @@ export async function fetchExamResults(
         responses: Array<{
             question_id: string;
             answer: string | null;
+            status?: string | null;
             is_correct: boolean | null;
             marks_obtained: number | null;
             time_spent_seconds?: number | null;
             visit_count?: number | null;
+            updated_at?: string | null;
         }>;
     }>
 > {
@@ -910,7 +924,7 @@ export async function fetchExamResults(
 
         const { data: responses, error: responsesError } = await supabase
             .from('responses')
-            .select('question_id, answer, is_correct, marks_obtained, time_spent_seconds, visit_count, updated_at')
+            .select('question_id, answer, status, is_correct, marks_obtained, time_spent_seconds, visit_count, updated_at')
             .eq('attempt_id', attemptId);
 
         if (responsesError) return { success: false, error: 'Failed to fetch responses' };
@@ -923,6 +937,7 @@ export async function fetchExamResults(
                 responses: responses as Array<{
                     question_id: string;
                     answer: string | null;
+                    status?: string | null;
                     is_correct: boolean | null;
                     marks_obtained: number | null;
                     time_spent_seconds?: number | null;

@@ -6,10 +6,12 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import type { QuestionWithAnswer, SectionName, QuestionType } from '@/types/exam';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 import { MathText } from '@/features/exam-engine/ui/MathText';
+import { MarkdownToolbar } from './MarkdownToolbar';
+import { getTopicOptions, getSubtopicOptions } from '../config/topicOptions';
 
 // =============================================================================
 // TYPES
@@ -240,12 +242,18 @@ export function EditableQuestion({
     const [imageUrl, setImageUrl] = useState<string | null>(question?.question_image_url ?? null);
     const [isUploading, setIsUploading] = useState(false);
     const [topic, setTopic] = useState(question?.topic ?? '');
+    const [subtopic, setSubtopic] = useState(question?.subtopic ?? '');
     const [taxonomyType, setTaxonomyType] = useState(question?.taxonomy_type ?? '');
     const [topicTag, setTopicTag] = useState(question?.topic_tag ?? '');
     const [difficultyRationale, setDifficultyRationale] = useState(question?.difficulty_rationale ?? '');
     const [difficulty, setDifficulty] = useState(question?.difficulty ?? 'medium');
     const [showPreview, setShowPreview] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
+    const questionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const solutionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+    const topicOptions = useMemo(() => getTopicOptions(section, topic), [section, topic]);
+    const subtopicOptions = useMemo(() => getSubtopicOptions(section, topic, subtopic), [section, topic, subtopic]);
 
     useEffect(() => {
         setQuestionText(question?.question_text ?? '');
@@ -257,6 +265,7 @@ export function EditableQuestion({
         setSolutionText(question?.solution_text ?? '');
         setImageUrl(question?.question_image_url ?? null);
         setTopic(question?.topic ?? '');
+        setSubtopic(question?.subtopic ?? '');
         setTaxonomyType(question?.taxonomy_type ?? '');
         setTopicTag(question?.topic_tag ?? '');
         setDifficultyRationale(question?.difficulty_rationale ?? '');
@@ -320,6 +329,7 @@ export function EditableQuestion({
             solution_text: solutionText || undefined,
             question_image_url: imageUrl || undefined,
             topic: topic || undefined,
+            subtopic: subtopic || undefined,
             difficulty: difficulty as 'easy' | 'medium' | 'hard',
             is_active: true,
         };
@@ -333,7 +343,7 @@ export function EditableQuestion({
     }, [
         question, paperId, section, questionNumber, questionText, questionFormat,
         options, correctAnswer, positiveMarks, negativeMarks, solutionText,
-        topic, taxonomyType, topicTag, difficultyRationale, difficulty, imageUrl, onSave, isSaving
+        topic, subtopic, taxonomyType, topicTag, difficultyRationale, difficulty, imageUrl, onSave, isSaving
     ]);
 
     return (
@@ -429,7 +439,14 @@ export function EditableQuestion({
                         {showPreview ? 'Hide Preview' : 'Preview'}
                     </button>
                 </div>
+                <MarkdownToolbar
+                    textareaRef={questionTextareaRef}
+                    value={questionText}
+                    onChange={setQuestionText}
+                    className="mb-2"
+                />
                 <textarea
+                    ref={questionTextareaRef}
                     value={questionText}
                     onChange={(e) => setQuestionText(e.target.value)}
                     placeholder="Enter the question text... (Supports Markdown and LaTeX with $...$)"
@@ -518,7 +535,14 @@ export function EditableQuestion({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                     Solution / Explanation
                 </label>
+                <MarkdownToolbar
+                    textareaRef={solutionTextareaRef}
+                    value={solutionText}
+                    onChange={setSolutionText}
+                    className="mb-2"
+                />
                 <textarea
+                    ref={solutionTextareaRef}
                     value={solutionText}
                     onChange={(e) => setSolutionText(e.target.value)}
                     placeholder="Explain the solution... (Supports Markdown and LaTeX)"
@@ -528,18 +552,46 @@ export function EditableQuestion({
             </div>
 
             {/* Metadata Row */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                         Topic
                     </label>
-                    <input
-                        type="text"
+                    <select
                         value={topic}
-                        onChange={(e) => setTopic(e.target.value)}
-                        placeholder="e.g., Reading Comprehension, Percentages"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    />
+                        onChange={(e) => {
+                            const nextTopic = e.target.value;
+                            setTopic(nextTopic);
+                            if (!getSubtopicOptions(section, nextTopic).includes(subtopic)) {
+                                setSubtopic('');
+                            }
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                    >
+                        <option value="">— Select Topic —</option>
+                        {topicOptions.map((option) => (
+                            <option key={option} value={option}>
+                                {option}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Subtopic
+                    </label>
+                    <select
+                        value={subtopic}
+                        onChange={(e) => setSubtopic(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                    >
+                        <option value="">— Select Subtopic —</option>
+                        {subtopicOptions.map((option) => (
+                            <option key={option} value={option}>
+                                {option}
+                            </option>
+                        ))}
+                    </select>
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">

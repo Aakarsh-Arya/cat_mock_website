@@ -149,29 +149,32 @@ export function ResultHeader({
 
             {/* Question Stats Bar */}
             <div className="mt-4 bg-white rounded-xl p-4 shadow-sm border flex flex-wrap justify-center gap-6">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <span className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
                         ✓
                     </span>
-                    <span className="text-gray-600">
-                        Correct: <strong className="text-green-600">{correctCount}</strong>
-                    </span>
+                    <div className="leading-tight">
+                        <span className="block text-[10px] uppercase tracking-wide text-gray-400">Correct</span>
+                        <span className="text-sm font-semibold text-green-600">{correctCount}</span>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <span className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
                         ✗
                     </span>
-                    <span className="text-gray-600">
-                        Incorrect: <strong className="text-red-600">{incorrectCount}</strong>
-                    </span>
+                    <div className="leading-tight">
+                        <span className="block text-[10px] uppercase tracking-wide text-gray-400">Incorrect</span>
+                        <span className="text-sm font-semibold text-red-600">{incorrectCount}</span>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <span className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white text-xs font-bold">
                         –
                     </span>
-                    <span className="text-gray-600">
-                        Unanswered: <strong className="text-gray-500">{unansweredCount}</strong>
-                    </span>
+                    <div className="leading-tight">
+                        <span className="block text-[10px] uppercase tracking-wide text-gray-400">Skipped</span>
+                        <span className="text-sm font-semibold text-gray-500">{unansweredCount}</span>
+                    </div>
                 </div>
                 {attemptRate !== null && (
                     <div className="flex items-center gap-2 text-gray-600">

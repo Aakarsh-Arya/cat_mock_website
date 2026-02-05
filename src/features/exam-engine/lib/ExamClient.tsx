@@ -135,6 +135,12 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             ? crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
+    const responsesRef = useRef(responses);
+    const sectionTimersRef = useRef(sectionTimers);
+    const attemptIdRef = useRef(attemptId);
+    const sessionTokenRef = useRef(sessionToken);
+    const currentSectionIndexRef = useRef(currentSectionIndex);
+    const currentQuestionIndexRef = useRef(currentQuestionIndex);
 
     const [sessionConflict, setSessionConflict] = useState<
         | { type: 'save'; payload: Parameters<typeof saveResponse>[0] }
@@ -159,9 +165,46 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         });
     }, []);
 
+    const withTimeout = useCallback(async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+                reject(new Error(`${label} timed out after ${ms}ms`));
+            }, ms);
+        });
+
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+        }
+    }, []);
+
+    useEffect(() => {
+        responsesRef.current = responses;
+    }, [responses]);
+
+    useEffect(() => {
+        sectionTimersRef.current = sectionTimers;
+    }, [sectionTimers]);
+
+    useEffect(() => {
+        attemptIdRef.current = attemptId;
+    }, [attemptId]);
+
+    useEffect(() => {
+        sessionTokenRef.current = sessionToken;
+    }, [sessionToken]);
+
+    useEffect(() => {
+        currentSectionIndexRef.current = currentSectionIndex;
+        currentQuestionIndexRef.current = currentQuestionIndex;
+    }, [currentSectionIndex, currentQuestionIndex]);
+
     // Initialize exam on mount - but only once per session
     // The initializeExam function now handles the case where state is already loaded
     useEffect(() => {
+        if (!hasHydrated) return;
         // PHASE 5: Clean up orphaned temp state
         cleanupOrphanedExamState();
 
@@ -195,19 +238,59 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     }, [attempt.id, setSessionToken]);
 
     const flushInProgressRef = useRef(false);
+    const popstateGuardRef = useRef(false);
     // Prevent race conditions when saving the same question multiple times
     const savingQuestionsRef = useRef<Set<string>>(new Set());
     const getPersistedAnswer = useCallback((status: string, answer: string | null) => {
         return status === 'answered' || status === 'answered_marked' ? answer : null;
     }, []);
 
+    /**
+     * Force get a fresh session token from server.
+     * Always calls API, regardless of existing token.
+     */
+    const forceRefreshSessionToken = useCallback(async (): Promise<string | null> => {
+        if (!attemptId) return null;
+        let result;
+        try {
+            result = await withTimeout(initializeExamSession(attemptId), 8000, 'initializeExamSession');
+        } catch (error) {
+            logger.warn('Failed to refresh session token (timeout)', { attemptId, error });
+            return null;
+        }
+
+        if (result.error) {
+            logger.warn('Failed to refresh session token', { attemptId, error: result.error });
+            return null;
+        }
+
+        if (result.success && result.data?.sessionToken) {
+            setSessionToken(result.data.sessionToken);
+            return result.data.sessionToken;
+        }
+
+        logger.warn('Failed to refresh session token - no token returned', { attemptId });
+        return null;
+    }, [attemptId, setSessionToken, withTimeout]);
+
     const flushNow = useCallback(async () => {
         if (!attemptId) return;
+        if (isSubmitting || isAutoSubmitting) return;
         if (isDevSyncPaused()) return;
         if (flushInProgressRef.current) return;
         flushInProgressRef.current = true;
 
+        let activeSessionToken = sessionToken;
+
         try {
+            if (!activeSessionToken) {
+                const result = await initializeExamSession(attemptId);
+                if (result.success && result.data?.sessionToken) {
+                    activeSessionToken = result.data.sessionToken;
+                    setSessionToken(result.data.sessionToken);
+                }
+            }
+
             const timeRemaining: TimeRemaining = {
                 VARC: sectionTimers.VARC.remainingSeconds,
                 DILR: sectionTimers.DILR.remainingSeconds,
@@ -227,7 +310,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         }
 
         try {
-            if (sessionToken) {
+            if (activeSessionToken) {
                 const batch = Object.entries(responses)
                     .filter(([, response]) => response.answer !== null || response.status !== 'not_visited')
                     .map(([questionId, response]) => ({
@@ -243,11 +326,36 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 if (batch.length > 0) {
                     const batchResult = await saveResponsesBatch({
                         attemptId,
-                        sessionToken,
+                        sessionToken: activeSessionToken,
                         responses: batch,
                     });
                     if (!batchResult.success) {
-                        logger.warn('Flush responses failed', batchResult.error, { attemptId });
+                        if (batchResult.error === 'SESSION_CONFLICT') {
+                            const refreshed = await forceRefreshSessionToken();
+                            if (refreshed) {
+                                const retry = await saveResponsesBatch({
+                                    attemptId,
+                                    sessionToken: refreshed,
+                                    force_resume: true,
+                                    responses: batch,
+                                });
+                                if (!retry.success) {
+                                    // FIX: Don't warn if attempt already submitted - this is expected
+                                    if (retry.error === 'Attempt is not in progress') {
+                                        logger.debug?.('Flush skipped after force resume - attempt already submitted', { attemptId });
+                                    } else {
+                                        logger.warn('Flush responses failed after force resume', retry.error, { attemptId });
+                                    }
+                                }
+                            } else {
+                                logger.warn('Flush responses failed (no session token to force resume)', { attemptId });
+                            }
+                        } else if (batchResult.error === 'Attempt is not in progress') {
+                            // FIX: Don't warn if attempt already submitted - this is expected during/after submit
+                            logger.debug?.('Flush skipped - attempt already submitted', { attemptId });
+                        } else {
+                            logger.warn('Flush responses failed', batchResult.error, { attemptId });
+                        }
                     }
                 }
             }
@@ -256,7 +364,19 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         } finally {
             flushInProgressRef.current = false;
         }
-    }, [attemptId, sectionTimers, currentSectionIndex, currentQuestionIndex, responses, sessionToken, getPersistedAnswer]);
+    }, [
+        attemptId,
+        sectionTimers,
+        currentSectionIndex,
+        currentQuestionIndex,
+        responses,
+        sessionToken,
+        getPersistedAnswer,
+        isSubmitting,
+        isAutoSubmitting,
+        setSessionToken,
+        forceRefreshSessionToken,
+    ]);
 
     // Debounced save to server
     const debouncedSaveProgress = useDebouncedCallback(
@@ -293,20 +413,100 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         return () => clearInterval(interval);
     }, [attemptId, hasHydrated, sectionTimers, debouncedSaveProgress]);
 
-    // Save on exit / visibility changes
+    // Save on exit / visibility changes (best-effort sendBeacon + fallback flush)
     useEffect(() => {
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'hidden') {
+        const sendBeaconProgress = () => {
+            const aId = attemptIdRef.current;
+            if (!aId) return;
+            if (isSubmitting || isAutoSubmitting) return;
+
+            const timers = sectionTimersRef.current;
+            const timeRemaining: TimeRemaining = {
+                VARC: Math.max(0, Math.floor(timers.VARC?.remainingSeconds ?? 0)),
+                DILR: Math.max(0, Math.floor(timers.DILR?.remainingSeconds ?? 0)),
+                QA: Math.max(0, Math.floor(timers.QA?.remainingSeconds ?? 0)),
+            };
+            const currentSection = getSectionByIndex(currentSectionIndexRef.current);
+            const currentQuestion = currentQuestionIndexRef.current + 1;
+
+            if (typeof navigator === 'undefined' || !navigator.sendBeacon) {
+                void updateAttemptProgress({
+                    attemptId: aId,
+                    timeRemaining,
+                    currentSection,
+                    currentQuestion,
+                    sessionToken: sessionTokenRef.current ?? undefined,
+                });
+                return;
+            }
+
+            const payload = JSON.stringify({
+                attemptId: aId,
+                timeRemaining,
+                currentSection,
+                currentQuestion,
+                sessionToken: sessionTokenRef.current ?? undefined,
+            });
+
+            navigator.sendBeacon('/api/progress', new Blob([payload], { type: 'application/json' }));
+        };
+
+        const sendBeaconBatchSave = () => {
+            const aId = attemptIdRef.current;
+            if (!aId) return;
+            if (isSubmitting || isAutoSubmitting) return;
+
+            const snapshot = responsesRef.current;
+            const token = sessionTokenRef.current;
+
+            const responsesPayload = Object.entries(snapshot)
+                .filter(([, response]) => response.answer !== null || response.status !== 'not_visited')
+                .map(([questionId, response]) => ({
+                    questionId,
+                    answer: getPersistedAnswer(response.status, response.answer),
+                    status: response.status,
+                    isMarkedForReview: response.isMarkedForReview,
+                    isVisited: response.status !== 'not_visited',
+                    timeSpentSeconds: response.timeSpentSeconds,
+                    visitCount: response.visitCount,
+                }));
+
+            if (responsesPayload.length === 0) return;
+
+            if (!token || typeof navigator === 'undefined' || !navigator.sendBeacon) {
+                void flushNow();
+                return;
+            }
+
+            const payload = JSON.stringify({
+                attemptId: aId,
+                sessionToken: token,
+                force_resume: true,
+                responses: responsesPayload,
+            });
+
+            const sent = navigator.sendBeacon('/api/save-batch', new Blob([payload], { type: 'application/json' }));
+            if (!sent) {
                 void flushNow();
             }
         };
 
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                sendBeaconBatchSave();
+                sendBeaconProgress();
+            }
+        };
+
         const handlePageHide = () => {
-            void flushNow();
+            sendBeaconBatchSave();
+            sendBeaconProgress();
         };
 
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            if (!attemptId || isSubmitting || isAutoSubmitting) return;
+            if (!attemptIdRef.current || isSubmitting || isAutoSubmitting) return;
+            sendBeaconBatchSave();
+            sendBeaconProgress();
             event.preventDefault();
             event.returnValue = '';
         };
@@ -320,7 +520,76 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             window.removeEventListener('pagehide', handlePageHide);
             window.removeEventListener('beforeunload', handleBeforeUnload);
         };
-    }, [attemptId, isSubmitting, isAutoSubmitting, flushNow]);
+    }, [flushNow, getPersistedAnswer, isSubmitting, isAutoSubmitting, updateAttemptProgress]);
+
+    // Warn + save on browser back (popstate)
+    useEffect(() => {
+        const handlePopState = () => {
+            if (!attemptId || isSubmitting || isAutoSubmitting) return;
+            if (popstateGuardRef.current) {
+                popstateGuardRef.current = false;
+                return;
+            }
+
+            void flushNow();
+            void updateAttemptProgress({
+                attemptId,
+                timeRemaining: {
+                    VARC: Math.max(0, Math.floor(sectionTimersRef.current.VARC?.remainingSeconds ?? 0)),
+                    DILR: Math.max(0, Math.floor(sectionTimersRef.current.DILR?.remainingSeconds ?? 0)),
+                    QA: Math.max(0, Math.floor(sectionTimersRef.current.QA?.remainingSeconds ?? 0)),
+                },
+                currentSection: getSectionByIndex(currentSectionIndexRef.current),
+                currentQuestion: currentQuestionIndexRef.current + 1,
+                sessionToken: sessionTokenRef.current ?? undefined,
+            });
+            const shouldLeave = window.confirm(
+                'You have an active attempt. Leaving will pause your attempt and save progress. Do you want to continue?'
+            );
+            if (!shouldLeave) {
+                popstateGuardRef.current = true;
+                window.history.forward();
+                return;
+            }
+
+            const attemptIdForPause = attemptIdRef.current;
+            if (!attemptIdForPause) return;
+
+            const timers = sectionTimersRef.current;
+            const timeRemaining: TimeRemaining = {
+                VARC: Math.max(0, Math.floor(timers.VARC?.remainingSeconds ?? 0)),
+                DILR: Math.max(0, Math.floor(timers.DILR?.remainingSeconds ?? 0)),
+                QA: Math.max(0, Math.floor(timers.QA?.remainingSeconds ?? 0)),
+            };
+            const currentSection = getSectionByIndex(currentSectionIndexRef.current);
+            const currentQuestion = currentQuestionIndexRef.current + 1;
+
+            const token = sessionTokenRef.current ?? undefined;
+            void pauseExam({
+                attemptId: attemptIdForPause,
+                timeRemaining,
+                currentSection,
+                currentQuestion,
+                sessionToken: token,
+            });
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [attemptId, isSubmitting, isAutoSubmitting, flushNow, updateAttemptProgress]);
+
+    // Ensure progress is flushed when navigating away (SPA route change unmount)
+    // FIX: Skip flush if submit is in progress - submit handles final save
+    useEffect(() => {
+        return () => {
+            // Check refs directly to avoid stale closure issues
+            if (submitLockRef.current) {
+                logger.debug?.('Skipping unmount flush - submit in progress');
+                return;
+            }
+            void flushNow();
+        };
+    }, [flushNow]);
 
     // Handle individual response save
     const handleSaveResponse = useCallback(async (
@@ -341,7 +610,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             if (!response) return;
 
             const persistedAnswer = getPersistedAnswer(response.status, answer);
-            const result = await saveResponse({
+            const payload = {
                 attemptId,
                 questionId,
                 answer: persistedAnswer,
@@ -351,48 +620,87 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 timeSpentSeconds: response.timeSpentSeconds,
                 visitCount: response.visitCount,
                 sessionToken,
-            });
+            };
+
+            const result = await saveResponse(payload);
             if (!result.success && result.error === 'SESSION_CONFLICT') {
-                setSessionConflict({
-                    type: 'save',
-                    payload: {
-                        attemptId,
-                        questionId,
-                        answer: persistedAnswer,
-                        status: response.status,
-                        isMarkedForReview: response.isMarkedForReview,
-                        isVisited: response.status !== 'not_visited',
-                        timeSpentSeconds: response.timeSpentSeconds,
-                        visitCount: response.visitCount,
-                        sessionToken,
-                    },
-                });
+                const refreshed = await forceRefreshSessionToken();
+                if (refreshed) {
+                    const retry = await saveResponse({
+                        ...payload,
+                        sessionToken: refreshed,
+                        force_resume: true,
+                    });
+                    if (!retry.success && retry.error === 'SESSION_CONFLICT') {
+                        setSessionConflict({ type: 'save', payload });
+                    }
+                } else {
+                    setSessionConflict({ type: 'save', payload });
+                }
             }
         } finally {
             savingQuestionsRef.current.delete(questionId);
         }
-    }, [attemptId, responses, sessionToken, getPersistedAnswer]);
+    }, [attemptId, responses, sessionToken, getPersistedAnswer, forceRefreshSessionToken]);
 
     const handleSaveResponsesBatch = useCallback(async (items: BatchSaveItem[]): Promise<BatchSaveResult> => {
         if (!attemptId) return { success: false };
         if (isDevSyncPaused()) return { success: false };
-        if (!sessionToken) return { success: false };
 
-        const result = await saveResponsesBatch({
-            attemptId,
-            sessionToken,
-            responses: items,
-        });
+        let activeSessionToken = sessionToken;
+        if (!activeSessionToken) {
+            activeSessionToken = await forceRefreshSessionToken();
+        }
+
+        if (!activeSessionToken) return { success: false };
+
+        let result;
+        try {
+            result = await withTimeout(
+                saveResponsesBatch({
+                    attemptId,
+                    sessionToken: activeSessionToken,
+                    responses: items,
+                }),
+                8000,
+                'saveResponsesBatch'
+            );
+        } catch (error) {
+            logger.warn('Batch save timed out', { attemptId, error });
+            return { success: false };
+        }
 
         if (!result.success) {
             if (result.error === 'SESSION_CONFLICT') {
+                const refreshed = await forceRefreshSessionToken();
+                if (refreshed) {
+                    let retry;
+                    try {
+                        retry = await withTimeout(
+                            saveResponsesBatch({
+                                attemptId,
+                                sessionToken: refreshed,
+                                force_resume: true,
+                                responses: items,
+                            }),
+                            8000,
+                            'saveResponsesBatch'
+                        );
+                    } catch (error) {
+                        logger.warn('Batch save retry timed out', { attemptId, error });
+                        return { success: false };
+                    }
+                    if (retry.success) {
+                        return { success: true };
+                    }
+                }
                 logger.warn('Session conflict during batch save', { attemptId });
             }
             return { success: false };
         }
 
         return { success: true };
-    }, [attemptId, sessionToken]);
+    }, [attemptId, sessionToken, forceRefreshSessionToken, withTimeout]);
 
     // Handle section expiry
     const handleSectionExpire = useCallback(async (sectionName: SectionName) => {
@@ -401,6 +709,12 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         // Save all current responses for this section before transitioning
         if (!attemptId) return;
         if (isDevSyncPaused()) return;
+
+        // FIX: Skip save if submit is already in progress (prevents race condition)
+        if (submitLockRef.current) {
+            logger.debug?.('Skipping section expire save - submit in progress', { sectionName });
+            return;
+        }
 
         // Find questions in this section and save their responses
         const sectionQuestions = questions.filter(q => q.section === sectionName);
@@ -439,35 +753,16 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                     responses: batch,
                 });
                 if (!batchResult.success) {
-                    logger.warn('Section save batch failed', batchResult.error, { attemptId });
+                    // FIX: Don't warn if error is due to completed submit - this is expected
+                    if (batchResult.error === 'Attempt is not in progress') {
+                        logger.debug?.('Section save skipped - attempt already submitted', { sectionName, attemptId });
+                    } else {
+                        logger.warn('Section save batch failed', batchResult.error, { attemptId });
+                    }
                 }
             }
         }
     }, [attemptId, questions, responses, sessionToken, getPersistedAnswer]);
-
-    /**
-     * Force get a fresh session token from server.
-     * Always calls API, regardless of existing token.
-     */
-    const forceRefreshSessionToken = useCallback(async (): Promise<string | null> => {
-        if (!attemptId) return null;
-
-        const result = await initializeExamSession(attemptId);
-
-        // Handle explicit error cases
-        if (result.error) {
-            logger.warn('Failed to refresh session token', { attemptId, error: result.error });
-            return null;
-        }
-
-        if (result.success && result.data?.sessionToken) {
-            setSessionToken(result.data.sessionToken);
-            return result.data.sessionToken;
-        }
-
-        logger.warn('Failed to refresh session token - no token returned', { attemptId });
-        return null;
-    }, [attemptId, setSessionToken]);
 
     // RACE CONDITION FIX: Mutex lock to prevent concurrent submits
     const submitLockRef = useRef<boolean>(false);
@@ -483,9 +778,9 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         }
         submitLockRef.current = true;
 
-        // Also check isSubmitting/isAutoSubmitting flags
-        if (isSubmitting || isAutoSubmitting) {
-            logger.warn('Submit blocked by isSubmitting/isAutoSubmitting flag', { attemptId, isSubmitting, isAutoSubmitting });
+        // Also check isSubmitting flag. Allow auto-submit to proceed.
+        if (isSubmitting) {
+            logger.warn('Submit blocked by isSubmitting flag', { attemptId, isSubmitting, isAutoSubmitting });
             submitLockRef.current = false;
             return;
         }
@@ -527,11 +822,15 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                     }));
 
                 if (batch.length > 0) {
-                    const batchResult = await saveResponsesBatch({
-                        attemptId: attemptId!,
-                        sessionToken: activeSessionToken,
-                        responses: batch,
-                    });
+                    const batchResult = await withTimeout(
+                        saveResponsesBatch({
+                            attemptId: attemptId!,
+                            sessionToken: activeSessionToken,
+                            responses: batch,
+                        }),
+                        8000,
+                        'saveResponsesBatch'
+                    );
                     if (!batchResult.success) {
                         examDebug.warn('Some saves failed during submit', { error: batchResult.error });
                     }
@@ -542,11 +841,48 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
             updateSubmissionProgress('submitting', 75);
             // Submit exam - proceed regardless of save failures
-            const result = await submitExam({
-                attemptId,
-                sessionToken: activeSessionToken,
-                submissionId: submissionIdRef.current,
-            });
+            const forceResumePreferred = isAutoSubmitting;
+            let result;
+            try {
+                result = await withTimeout(
+                    submitExam({
+                        attemptId,
+                        sessionToken: activeSessionToken,
+                        submissionId: submissionIdRef.current,
+                        force_resume: forceResumePreferred,
+                    }),
+                    30000, // Increased from 15s to 30s to handle slow connections
+                    'submitExam'
+                );
+            } catch (error) {
+                logger.error('Submit timed out', error, { attemptId });
+
+                // FIX: Check if submit actually succeeded on server before showing error
+                try {
+                    const res = await fetch('/api/attempt-status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ attemptId }),
+                    });
+                    const payload = await res.json().catch(() => ({}));
+                    const statusCheck = payload?.data?.status as string | undefined;
+
+                    if (statusCheck === 'submitted' || statusCheck === 'completed') {
+                        // Submit actually succeeded - redirect to results
+                        logger.info('Submit succeeded despite timeout', { attemptId, status: statusCheck });
+                        updateSubmissionProgress('finalizing', 100);
+                        localStorage.removeItem(`cat-exam-state-${attemptId}`);
+                        cleanupOrphanedExamState();
+                        router.push(`/result/${attemptId}`);
+                        return;
+                    }
+                } catch (checkError) {
+                    logger.warn('Failed to check attempt status after timeout', checkError);
+                }
+
+                setUiError('Submitting timed out. Please try again.');
+                return;
+            }
 
             // PHASE 4: Debug logging for submit result
             examDebug.submitResult({
@@ -591,12 +927,46 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 if (refreshed) {
                     // CRITICAL: Use force_resume on retry to bypass validation issues
                     updateSubmissionProgress('submitting', 80);
-                    const retry = await submitExam({
-                        attemptId,
-                        sessionToken: refreshed,
-                        submissionId: submissionIdRef.current,
-                        force_resume: true,  // Force resume on retry
-                    });
+                    let retry;
+                    try {
+                        retry = await withTimeout(
+                            submitExam({
+                                attemptId,
+                                sessionToken: refreshed,
+                                submissionId: submissionIdRef.current,
+                                force_resume: true,  // Force resume on retry
+                            }),
+                            30000, // Increased from 15s to 30s
+                            'submitExam'
+                        );
+                    } catch (error) {
+                        logger.error('Submit retry timed out', error, { attemptId });
+
+                        // FIX: Check server status after retry timeout too
+                        try {
+                            const res = await fetch('/api/attempt-status', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ attemptId }),
+                            });
+                            const payload = await res.json().catch(() => ({}));
+                            const statusCheck = payload?.data?.status as string | undefined;
+
+                            if (statusCheck === 'submitted' || statusCheck === 'completed') {
+                                logger.info('Submit retry succeeded despite timeout', { attemptId });
+                                updateSubmissionProgress('finalizing', 100);
+                                localStorage.removeItem(`cat-exam-state-${attemptId}`);
+                                cleanupOrphanedExamState();
+                                router.push(`/result/${attemptId}`);
+                                return;
+                            }
+                        } catch (checkError) {
+                            logger.warn('Failed to check attempt status after retry timeout', checkError);
+                        }
+
+                        setUiError('Submitting timed out. Please try again.');
+                        return;
+                    }
 
                     if (retry.success) {
                         updateSubmissionProgress('finalizing', 100);
@@ -632,11 +1002,14 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                         ? 'Session expired. Please try submitting again.'
                         : `Failed to submit exam. Please try again. (${result.error || 'Unknown error'})`;
             setUiError(errorMessage);
+        } catch (error) {
+            logger.error('Submit flow failed', error, { attemptId });
+            setUiError('Failed to submit exam. Please try again.');
         } finally {
             submitLockRef.current = false;
             setSubmitting(false);
         }
-    }, [attemptId, responses, router, setUiError, getPersistedAnswer, forceRefreshSessionToken, isSubmitting, isAutoSubmitting, setSubmitting]);
+    }, [attemptId, responses, router, setUiError, getPersistedAnswer, forceRefreshSessionToken, isSubmitting, isAutoSubmitting, setSubmitting, withTimeout]);
 
     const handleResolveConflict = useCallback(async (resumeHere: boolean) => {
         if (!sessionConflict) return;

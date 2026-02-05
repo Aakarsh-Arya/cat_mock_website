@@ -13,7 +13,9 @@ import { SectionalPerformance } from '@/features/exam-engine/ui/SectionalPerform
 import { QuestionAnalysis } from '@/features/exam-engine/ui/QuestionAnalysis';
 import { BackToDashboard } from '@/components/BackToDashboard';
 import { ResultReviewClient } from './ResultReviewClient';
+import { ResultTabsClient } from './ResultTabsClient';
 import { buildLegacyQuestionSetsWithAnswers } from '@/utils/question-sets';
+import { calculateScore } from '@/features/exam-engine/lib/scoring';
 import type {
     Question,
     QuestionSetComplete,
@@ -25,6 +27,7 @@ import type {
     SectionName,
     QuestionType,
 } from '@/types/exam';
+import type { ResponseForScoring } from '@/features/exam-engine/lib/scoring';
 
 interface SectionScore {
     score: number;
@@ -128,8 +131,73 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
 
     const { attempt, questions, responses } = result.data!;
-    const answerMap = Object.fromEntries(responses.map((r) => [r.question_id, r.answer ?? null]));
+
+    const responsesForScoring: ResponseForScoring[] = responses.map((r) => ({
+        question_id: r.question_id,
+        answer: r.answer ?? null,
+        time_spent_seconds: r.time_spent_seconds ?? 0,
+    }));
+
+    const hasAnsweredResponses = responsesForScoring.some((r) => r.answer !== null && r.answer.trim() !== '');
+    const attemptCountsPresent =
+        attempt.correct_count !== null &&
+        attempt.correct_count !== undefined &&
+        attempt.incorrect_count !== null &&
+        attempt.incorrect_count !== undefined &&
+        attempt.unanswered_count !== null &&
+        attempt.unanswered_count !== undefined;
+    const attemptCountTotal = attemptCountsPresent
+        ? attempt.correct_count + attempt.incorrect_count + attempt.unanswered_count
+        : null;
+
+    const shouldDeriveScores =
+        attempt.status !== 'completed' ||
+        !attempt.section_scores ||
+        !attemptCountsPresent ||
+        (hasAnsweredResponses && attemptCountTotal !== questions.length);
+
+    const derivedScore = shouldDeriveScores
+        ? calculateScore(questions as Array<Question & { correct_answer: string }>, responsesForScoring)
+        : null;
+
+    const derivedResultMap = derivedScore
+        ? new Map(derivedScore.question_results.map((qr) => [qr.question_id, qr]))
+        : null;
+
+    const normalizedResponses = derivedResultMap
+        ? responses.map((r) => {
+            const derived = derivedResultMap.get(r.question_id);
+            return {
+                ...r,
+                is_correct: r.is_correct ?? derived?.is_correct ?? null,
+                marks_obtained: r.marks_obtained ?? derived?.marks_obtained ?? null,
+            };
+        })
+        : responses;
+
+    const answerMap = Object.fromEntries(normalizedResponses.map((r) => [r.question_id, r.answer ?? null]));
     const correctAnswerMap = Object.fromEntries(questions.map((q) => [q.id, q.correct_answer ?? '']));
+    const solutionMap = Object.fromEntries(
+        questions.map((q) => [
+            q.id,
+            {
+                solution_text: q.solution_text ?? null,
+                solution_image_url: q.solution_image_url ?? null,
+                video_solution_url: q.video_solution_url ?? null,
+            },
+        ])
+    );
+    const responseMetaMap = Object.fromEntries(
+        normalizedResponses.map((r) => [
+            r.question_id,
+            {
+                time_spent_seconds: r.time_spent_seconds ?? null,
+                visit_count: r.visit_count ?? null,
+                updated_at: r.updated_at ?? null,
+            },
+        ])
+    );
+    const responseStatusMap = Object.fromEntries(normalizedResponses.map((r) => [r.question_id, r.status]));
 
     // Fetch paper details for display
     const supabase = await sbSSR();
@@ -159,6 +227,13 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
 
     const paperTitle = paper?.title || 'Exam Result';
     const totalMarks = paper?.total_marks || attempt.max_possible_score || 198;
+    const totalScore = derivedScore?.total_score ?? attempt.total_score ?? 0;
+    const maxScore = derivedScore?.max_possible_score ?? attempt.max_possible_score ?? totalMarks;
+    const correctCount = derivedScore?.correct_count ?? attempt.correct_count ?? 0;
+    const incorrectCount = derivedScore?.incorrect_count ?? attempt.incorrect_count ?? 0;
+    const unansweredCount = derivedScore?.unanswered_count ?? attempt.unanswered_count ?? 0;
+    const accuracy = derivedScore ? derivedScore.accuracy : (attempt.accuracy ?? null);
+    const attemptRate = derivedScore ? derivedScore.attempt_rate : (attempt.attempt_rate ?? null);
 
     type QuestionSetViewRow = {
         id: string;
@@ -204,6 +279,32 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
 
     let questionSets: QuestionSetComplete[] = [];
+
+    const questionContextIds = Array.from(
+        new Set(
+            questions
+                .map((q) => (q as { context_id?: string | null }).context_id)
+                .filter((id): id is string => Boolean(id))
+        )
+    );
+
+    const contextById = new Map<string, QuestionContext>();
+    if (questionContextIds.length > 0) {
+        const { data: contextsData, error: contextsError } = await supabase
+            .from('question_contexts')
+            .select(
+                'id, title, section, content, context_type, paper_id, display_order, is_active, image_url, created_at, updated_at'
+            )
+            .in('id', questionContextIds);
+
+        if (contextsError) {
+            console.warn('[ResultPage] Failed to fetch question_contexts', contextsError);
+        } else {
+            (contextsData ?? []).forEach((ctx) => {
+                contextById.set(ctx.id as string, ctx as QuestionContext);
+            });
+        }
+    }
 
     if (questionSetRows && questionSetRows.length > 0) {
         questionSets = (questionSetRows as QuestionSetViewRow[]).map((row) => ({
@@ -255,32 +356,53 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
 
     if (questionSets.length === 0) {
         const questionsWithAnswers = questions as QuestionWithAnswer[];
-        const contextIds = Array.from(
-            new Set(
-                questionsWithAnswers
-                    .map((q) => q.context_id)
-                    .filter((id): id is string => Boolean(id))
-            )
-        );
-
-        let contexts: QuestionContext[] = [];
-        if (contextIds.length > 0) {
-            const { data: contextsData, error: contextsError } = await supabase
-                .from('question_contexts')
-                .select(
-                    'id, title, section, content, context_type, paper_id, display_order, is_active, image_url, created_at, updated_at'
-                )
-                .in('id', contextIds);
-
-            if (contextsError) {
-                console.warn('[ResultPage] Failed to fetch question_contexts', contextsError);
-            } else {
-                contexts = (contextsData ?? []) as QuestionContext[];
-            }
-        }
-
+        const contexts = Array.from(contextById.values());
         questionSets = buildLegacyQuestionSetsWithAnswers(questionsWithAnswers, contexts, attempt.paper_id);
     }
+
+    const questionContextMap = new Map<string, { title?: string | null; body?: string | null; imageUrl?: string | null }>();
+    questionSets.forEach((set) => {
+        const hasContext = Boolean(set.context_title || set.context_body || set.context_image_url);
+        if (!hasContext) return;
+        (set.questions ?? []).forEach((q) => {
+            questionContextMap.set(q.id, {
+                title: set.context_title ?? null,
+                body: set.context_body ?? null,
+                imageUrl: set.context_image_url ?? null,
+            });
+        });
+    });
+
+    // Fill in any standalone contexts missing from set-based mapping
+    questions.forEach((q) => {
+        if (questionContextMap.has(q.id)) return;
+        const ctxId = (q as { context_id?: string | null }).context_id;
+        if (!ctxId) return;
+        const ctx = contextById.get(ctxId);
+        if (!ctx) return;
+        questionContextMap.set(q.id, {
+            title: ctx.title ?? null,
+            body: (ctx as { content?: string | null }).content ?? null,
+            imageUrl: (ctx as { image_url?: string | null }).image_url ?? null,
+        });
+    });
+
+    const normalizeSection = (value?: string | null): SectionName => {
+        const normalized = (value ?? '').toUpperCase().trim();
+        if (normalized === 'LRDI') return 'DILR';
+        if (normalized === 'QUANT' || normalized === 'QUANTS') return 'QA';
+        if (normalized === 'VARC' || normalized === 'DILR' || normalized === 'QA') {
+            return normalized as SectionName;
+        }
+        return value as SectionName;
+    };
+
+    const questionSectionMap = new Map<string, SectionName>();
+    questionSets.forEach((set) => {
+        (set.questions ?? []).forEach((q) => {
+            questionSectionMap.set(q.id, set.section as SectionName);
+        });
+    });
 
     // Fetch peer statistics for this paper
     type PaperStats = Record<string, { total: number; options: Record<string, number> }>;
@@ -293,7 +415,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
         paperStats = statsData as PaperStats;
     }
 
-    const sectionScores = (attempt.section_scores || {}) as Record<string, SectionScore>;
+    const sectionScores = (derivedScore?.section_scores || attempt.section_scores || {}) as Record<string, SectionScore>;
 
     return (
         <main className="min-h-screen bg-gray-50">
@@ -315,66 +437,81 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
 
             {/* Main content */}
             <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
-                {/* Result Header - Summary card */}
-                <ResultHeader
-                    paperTitle={paperTitle}
-                    totalScore={attempt.total_score ?? 0}
-                    maxScore={attempt.max_possible_score ?? totalMarks}
-                    accuracy={attempt.accuracy ?? null}
-                    attemptRate={attempt.attempt_rate ?? null}
-                    correctCount={attempt.correct_count ?? 0}
-                    incorrectCount={attempt.incorrect_count ?? 0}
-                    unansweredCount={attempt.unanswered_count ?? 0}
-                    timeTakenSeconds={attempt.time_taken_seconds ?? null}
-                    percentile={attempt.percentile ?? null}
-                    rank={attempt.rank ?? null}
-                    submittedAt={attempt.submitted_at ?? null}
-                    reviewAnchorId="exam-review"
+                <ResultTabsClient
+                    analytics={(
+                        <>
+                            <ResultHeader
+                                paperTitle={paperTitle}
+                                totalScore={totalScore}
+                                maxScore={maxScore}
+                                accuracy={accuracy}
+                                attemptRate={attemptRate}
+                                correctCount={correctCount}
+                                incorrectCount={incorrectCount}
+                                unansweredCount={unansweredCount}
+                                timeTakenSeconds={attempt.time_taken_seconds ?? null}
+                                percentile={attempt.percentile ?? null}
+                                rank={attempt.rank ?? null}
+                                submittedAt={attempt.submitted_at ?? null}
+                                reviewAnchorId="exam-review"
+                            />
+
+                            <SectionalPerformance
+                                sectionScores={sectionScores as Record<string, {
+                                    score: number;
+                                    maxScore: number;
+                                    correct: number;
+                                    incorrect: number;
+                                    unanswered: number;
+                                    timeTakenSeconds?: number;
+                                }>}
+                            />
+
+                            {questions && questions.length > 0 && (
+                                <QuestionAnalysis
+                                    questions={questions.map(q => ({
+                                        ...(questionContextMap.get(q.id)
+                                            ? {
+                                                context_title: questionContextMap.get(q.id)?.title ?? null,
+                                                context_body: questionContextMap.get(q.id)?.body ?? null,
+                                                context_image_url: questionContextMap.get(q.id)?.imageUrl ?? null,
+                                            }
+                                            : {}),
+                                        id: q.id,
+                                        section: questionSectionMap.get(q.id) ?? normalizeSection(q.section as string | null | undefined),
+                                        question_number: q.question_number,
+                                        question_text: q.question_text,
+                                        question_type: q.question_type as 'MCQ' | 'TITA',
+                                        options: q.options as string[] | null,
+                                        correct_answer: q.correct_answer,
+                                        solution_text: q.solution_text ?? null,
+                                        question_image_url: q.question_image_url ?? null,
+                                        topic: q.topic ?? null,
+                                        subtopic: q.subtopic ?? null,
+                                        difficulty: q.difficulty ?? null,
+                                    }))}
+                                    responses={normalizedResponses}
+                                    peerStats={paperStats}
+                                    attemptSequenceLabel={attemptSequenceLabel}
+                                    attemptId={attempt.id}
+                                    showHeader={false}
+                                />
+                            )}
+                        </>
+                    )}
+                    review={questionSets.length > 0 ? (
+                        <ResultReviewClient
+                            paperTitle={paperTitle}
+                            questionSets={questionSets}
+                            answerMap={answerMap}
+                            correctAnswerMap={correctAnswerMap}
+                            solutionMap={solutionMap}
+                            responseMetaMap={responseMetaMap}
+                            responseStatusMap={responseStatusMap}
+                            attemptId={attempt.id}
+                        />
+                    ) : null}
                 />
-
-                {/* Sectional Performance */}
-                <SectionalPerformance
-                    sectionScores={sectionScores as Record<string, {
-                        score: number;
-                        maxScore: number;
-                        correct: number;
-                        incorrect: number;
-                        unanswered: number;
-                        timeTakenSeconds?: number;
-                    }>}
-                />
-
-                {/* Question Analysis (Client Component) */}
-                {questions && questions.length > 0 && (
-                    <QuestionAnalysis
-                        questions={questions.map(q => ({
-                            id: q.id,
-                            section: q.section as 'VARC' | 'DILR' | 'QA',
-                            question_number: q.question_number,
-                            question_text: q.question_text,
-                            question_type: q.question_type as 'MCQ' | 'TITA',
-                            options: q.options as string[] | null,
-                            correct_answer: q.correct_answer,
-                            solution_text: q.solution_text ?? null,
-                            question_image_url: q.question_image_url ?? null,
-                            topic: q.topic ?? null,
-                            difficulty: q.difficulty ?? null,
-                        }))}
-                        responses={responses}
-                        peerStats={paperStats}
-                        attemptSequenceLabel={attemptSequenceLabel}
-                        attemptId={attempt.id}
-                    />
-                )}
-
-                {questionSets.length > 0 && (
-                    <ResultReviewClient
-                        paperTitle={paperTitle}
-                        questionSets={questionSets}
-                        answerMap={answerMap}
-                        correctAnswerMap={correctAnswerMap}
-                    />
-                )}
 
                 {/* Action buttons */}
                 <div className="flex flex-wrap justify-center gap-4 pt-4">
