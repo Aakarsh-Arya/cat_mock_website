@@ -185,9 +185,8 @@ function AssetImage({
     if (!source || failed) {
         return (
             <div
-                className={`relative flex items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/70 ${
-                    containerClassName ?? ''
-                }`}
+                className={`relative flex items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/70 ${containerClassName ?? ''
+                    }`}
                 role="img"
                 aria-label={`${fallbackLabel} placeholder`}
             >
@@ -230,9 +229,8 @@ function MobileDrawer({ open, onClose, onAuth }: DrawerProps) {
             />
             <div
                 ref={panelRef}
-                className={`absolute right-0 top-0 flex h-full w-[86%] max-w-sm flex-col gap-6 bg-white px-6 py-8 shadow-2xl transition-transform ${
-                    open ? 'translate-x-0' : 'translate-x-full'
-                }`}
+                className={`absolute right-0 top-0 flex h-full w-[86%] max-w-sm flex-col gap-6 bg-white px-6 py-8 shadow-2xl transition-transform ${open ? 'translate-x-0' : 'translate-x-full'
+                    }`}
                 role="dialog"
                 aria-modal="true"
                 aria-label="Mobile navigation"
@@ -302,9 +300,8 @@ function AuthModal({ open, onClose, onSignIn, loading }: AuthModalProps) {
                 aria-modal="true"
                 aria-label="Sign in"
                 tabIndex={-1}
-                className={`absolute left-1/2 top-1/2 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-6 shadow-xl transition ${
-                    open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
-                }`}
+                className={`absolute left-1/2 top-1/2 w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-6 shadow-xl transition ${open ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+                    }`}
                 onClick={(event) => event.stopPropagation()}
             >
                 <div className="flex items-start justify-between">
@@ -605,9 +602,8 @@ export default function LandingPageClient() {
                                     imageClassName="h-[360px] w-full rounded-[32px] border border-slate-200 object-cover grayscale transition duration-500 group-hover:grayscale-0"
                                 />
                                 <div
-                                    className={`absolute left-6 top-6 max-w-xs rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-lg transition-all duration-300 ${
-                                        mentorBubbleVisible ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-2'
-                                    }`}
+                                    className={`absolute left-6 top-6 max-w-xs rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-lg transition-all duration-300 ${mentorBubbleVisible ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-2'
+                                        }`}
                                     aria-hidden={!mentorBubbleVisible}
                                 >
                                     "{MENTOR_QUOTE}"
@@ -672,11 +668,10 @@ export default function LandingPageClient() {
                                             key={tab.id}
                                             type="button"
                                             onClick={() => setActiveTab(tab.id)}
-                                            className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
-                                                activeTab === tab.id
+                                            className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${activeTab === tab.id
                                                     ? 'border-slate-900 bg-slate-900 text-white'
                                                     : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                                            }`}
+                                                }`}
                                         >
                                             {tab.label}
                                         </button>
@@ -696,9 +691,8 @@ export default function LandingPageClient() {
                                         {['VARC', 'DILR', 'QA'].map((label, index) => (
                                             <span
                                                 key={label}
-                                                className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                                    index === 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                                                }`}
+                                                className={`rounded-full px-3 py-1 text-xs font-semibold ${index === 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
+                                                    }`}
                                             >
                                                 {label}
                                             </span>
@@ -711,9 +705,8 @@ export default function LandingPageClient() {
                                 {FEATURE_ROWS.map((feature, index) => (
                                     <div
                                         key={feature.title}
-                                        className={`flex flex-col gap-8 ${
-                                            index % 2 === 0 ? 'lg:flex-row' : 'lg:flex-row-reverse'
-                                        }`}
+                                        className={`flex flex-col gap-8 ${index % 2 === 0 ? 'lg:flex-row' : 'lg:flex-row-reverse'
+                                            }`}
                                     >
                                         <div className="flex-1 space-y-4">
                                             <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
