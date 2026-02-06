@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const res = NextResponse.next();
 
     try {
-        const { attemptId, timeRemaining, currentSection, currentQuestion, sessionToken } = await req.json();
+        const { attemptId, timeRemaining, currentSection, currentQuestion, sessionToken, force_resume } = await req.json();
 
         if (!isNonEmptyString(attemptId)) {
             return addVersionHeader(NextResponse.json({ error: 'attemptId is required' }, { status: 400 }));
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
 
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
-                const { data: isValidSession } = await supabase.rpc('validate_session_token', {
+                const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
                     p_attempt_id: attemptId,
                     p_session_token: sessionToken,
                     p_user_id: user.id,
@@ -61,20 +61,67 @@ export async function POST(req: NextRequest) {
                     p_force_resume: false,
                 });
 
-                if (isValidSession === false) {
-                    console.log('API_PROGRESS_SESSION_MISMATCH', {
+                if (validateError) {
+                    examLogger.securityEvent('Progress session validation RPC error', {
                         attemptId,
-                        userId: user.id,
-                        status: null,
-                        errorCode: 'SESSION_CONFLICT',
-                        errorMessage: 'Progress session mismatch',
+                        errorMessage: validateError.message,
+                        errorCode: validateError.code,
                     });
-                    examLogger.securityEvent('Progress session mismatch', { attemptId });
-                    return addVersionHeader(NextResponse.json({
-                        error: 'Session conflict detected',
-                        code: 'SESSION_CONFLICT',
-                        canForceResume: true,
-                    }, { status: 409 }));
+                    if (force_resume === true) {
+                        const { error: forceResumeError } = await supabase.rpc('force_resume_exam_session', {
+                            p_attempt_id: attemptId,
+                            p_new_session_token: sessionToken,
+                        });
+                        if (forceResumeError) {
+                            return addVersionHeader(NextResponse.json(
+                                { error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' },
+                                { status: 500 }
+                            ));
+                        }
+                    } else {
+                        return addVersionHeader(NextResponse.json(
+                            { error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' },
+                            { status: 500 }
+                        ));
+                    }
+                }
+
+                if (isValidSession === false) {
+                    if (force_resume === true) {
+                        const { error: forceResumeError } = await supabase.rpc('force_resume_exam_session', {
+                            p_attempt_id: attemptId,
+                            p_new_session_token: sessionToken,
+                        });
+                        if (forceResumeError) {
+                            if (
+                                forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
+                                forceResumeError.message?.includes('stale')
+                            ) {
+                                return addVersionHeader(NextResponse.json(
+                                    { error: 'Force resume denied. Session is too old.', code: 'FORCE_RESUME_STALE' },
+                                    { status: 409 }
+                                ));
+                            }
+                            return addVersionHeader(NextResponse.json(
+                                { error: 'Failed to force resume session' },
+                                { status: 500 }
+                            ));
+                        }
+                    } else {
+                        console.log('API_PROGRESS_SESSION_MISMATCH', {
+                            attemptId,
+                            userId: user.id,
+                            status: null,
+                            errorCode: 'SESSION_CONFLICT',
+                            errorMessage: 'Progress session mismatch',
+                        });
+                        examLogger.securityEvent('Progress session mismatch', { attemptId });
+                        return addVersionHeader(NextResponse.json({
+                            error: 'Session conflict detected',
+                            code: 'SESSION_CONFLICT',
+                            canForceResume: true,
+                        }, { status: 409 }));
+                    }
                 }
             }
         }

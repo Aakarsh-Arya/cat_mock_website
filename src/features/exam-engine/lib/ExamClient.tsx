@@ -122,6 +122,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const setSessionToken = useExamStore((s) => s.setSessionToken);
     const setSubmitting = useExamStore((s) => s.setSubmitting);
     const hasHydrated = useExamStore((s) => s.hasHydrated);
+    const isInitialized = useExamStore((s) => s.isInitialized);
     const attemptId = attempt.id;
     const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
     const currentQuestionIndex = useExamStore((s) => s.currentQuestionIndex);
@@ -275,6 +276,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
     const flushNow = useCallback(async () => {
         if (!attemptId) return;
+        if (!isInitialized) return;
         if (isSubmitting || isAutoSubmitting) return;
         if (isDevSyncPaused()) return;
         if (flushInProgressRef.current) return;
@@ -376,6 +378,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         isAutoSubmitting,
         setSessionToken,
         forceRefreshSessionToken,
+        isInitialized,
     ]);
 
     // Debounced save to server
@@ -404,20 +407,20 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
     // Auto-save progress periodically
     useEffect(() => {
-        if (!attemptId || !hasHydrated) return;
+        if (!attemptId || !isInitialized) return;
 
         const interval = setInterval(() => {
             debouncedSaveProgress(sectionTimers);
         }, AUTO_SAVE_INTERVAL_MS);
 
         return () => clearInterval(interval);
-    }, [attemptId, hasHydrated, sectionTimers, debouncedSaveProgress]);
+    }, [attemptId, isInitialized, sectionTimers, debouncedSaveProgress]);
 
     // Save on exit / visibility changes (best-effort sendBeacon + fallback flush)
     useEffect(() => {
         const sendBeaconProgress = () => {
             const aId = attemptIdRef.current;
-            if (!aId) return;
+            if (!aId || !isInitialized) return;
             if (isSubmitting || isAutoSubmitting) return;
 
             const timers = sectionTimersRef.current;
@@ -436,6 +439,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                     currentSection,
                     currentQuestion,
                     sessionToken: sessionTokenRef.current ?? undefined,
+                    force_resume: true,
                 });
                 return;
             }
@@ -446,12 +450,14 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 currentSection,
                 currentQuestion,
                 sessionToken: sessionTokenRef.current ?? undefined,
+                force_resume: true,
             });
 
             navigator.sendBeacon('/api/progress', new Blob([payload], { type: 'application/json' }));
         };
 
         const sendBeaconBatchSave = () => {
+            if (!isInitialized) return;
             const aId = attemptIdRef.current;
             if (!aId) return;
             if (isSubmitting || isAutoSubmitting) return;
@@ -504,7 +510,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         };
 
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            if (!attemptIdRef.current || isSubmitting || isAutoSubmitting) return;
+            if (!attemptIdRef.current || !isInitialized || isSubmitting || isAutoSubmitting) return;
             sendBeaconBatchSave();
             sendBeaconProgress();
             event.preventDefault();
@@ -520,12 +526,12 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             window.removeEventListener('pagehide', handlePageHide);
             window.removeEventListener('beforeunload', handleBeforeUnload);
         };
-    }, [flushNow, getPersistedAnswer, isSubmitting, isAutoSubmitting, updateAttemptProgress]);
+    }, [flushNow, getPersistedAnswer, isSubmitting, isAutoSubmitting, updateAttemptProgress, isInitialized]);
 
     // Warn + save on browser back (popstate)
     useEffect(() => {
         const handlePopState = () => {
-            if (!attemptId || isSubmitting || isAutoSubmitting) return;
+            if (!attemptId || !isInitialized || isSubmitting || isAutoSubmitting) return;
             if (popstateGuardRef.current) {
                 popstateGuardRef.current = false;
                 return;
@@ -542,6 +548,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 currentSection: getSectionByIndex(currentSectionIndexRef.current),
                 currentQuestion: currentQuestionIndexRef.current + 1,
                 sessionToken: sessionTokenRef.current ?? undefined,
+                force_resume: true,
             });
             const shouldLeave = window.confirm(
                 'You have an active attempt. Leaving will pause your attempt and save progress. Do you want to continue?'
@@ -576,7 +583,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
-    }, [attemptId, isSubmitting, isAutoSubmitting, flushNow, updateAttemptProgress]);
+    }, [attemptId, isInitialized, isSubmitting, isAutoSubmitting, flushNow, updateAttemptProgress]);
 
     // Ensure progress is flushed when navigating away (SPA route change unmount)
     // FIX: Skip flush if submit is in progress - submit handles final save
@@ -902,6 +909,32 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 return;
             }
 
+            // If backend already marked the attempt submitted, treat as success
+            const invalidStatus =
+                result.error === 'Attempt is not in progress' ||
+                result.error === 'INVALID_ATTEMPT_STATUS';
+            if (invalidStatus) {
+                try {
+                    const res = await fetch('/api/attempt-status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ attemptId }),
+                    });
+                    const payload = await res.json().catch(() => ({}));
+                    const statusCheck = payload?.data?.status as string | undefined;
+
+                    if (statusCheck === 'submitted' || statusCheck === 'completed') {
+                        updateSubmissionProgress('finalizing', 100);
+                        localStorage.removeItem(`cat-exam-state-${attemptId}`);
+                        cleanupOrphanedExamState();
+                        router.push(`/result/${attemptId}`);
+                        return;
+                    }
+                } catch (checkError) {
+                    logger.warn('Failed to check attempt status after invalid status', checkError);
+                }
+            }
+
             if (result.error === 'ATTEMPT_NOT_FOUND' || result.error?.toLowerCase().includes('attempt not found')) {
                 localStorage.removeItem(`cat-exam-state-${attemptId}`);
                 cleanupOrphanedExamState();
@@ -1134,7 +1167,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     }, [attemptId, responses, sectionTimers, currentSectionIndex, currentQuestionIndex, router, sessionToken, forceRefreshSessionToken, setUiError]);
 
     // Show loading while initializing
-    if (!hasHydrated) {
+    if (!hasHydrated || !isInitialized) {
         return (
             <div className="min-h-screen bg-gray-50 flex items-center justify-center">
                 <div className="text-center">

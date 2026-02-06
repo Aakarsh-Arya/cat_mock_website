@@ -113,7 +113,7 @@ function normalizeContextType(raw) {
 function normalizeContentLayout(raw) {
     const value = normalizeToken(raw);
     if (!value) return undefined;
-    if (value === 'text_only') return 'single_focus';
+    if (value === 'text_only') return 'split_passage';
     if (value === 'split_view') return 'split_table';
     return value;
 }
@@ -243,9 +243,13 @@ function parseMarkdownToV3(markdownText) {
                 display_order: order,
                 context_type: normalizedContextType,
                 context_title: data.title,
-                content_layout: normalizedContentLayout,
-                context_image_url: data.image_url ?? null
+                content_layout: normalizedContentLayout
             };
+
+            // Only include context_image_url if it has a valid value (schema requires URI format)
+            if (data.image_url) {
+                currentSet.context_image_url = data.image_url;
+            }
 
             if (normalizedSetType === 'ATOMIC') {
                 delete currentSet.context_type;
@@ -263,7 +267,8 @@ function parseMarkdownToV3(markdownText) {
             setQuestionOrder += 1;
             globalQuestionNumber += 1;
             const dm = (data.m || '').split(',').map((s) => s.trim());
-            const client_question_id = data.id || (paper?.paper_key ? `${paper.paper_key}_Q${globalQuestionNumber}` : `Q${globalQuestionNumber}`);
+            const sanitizedKey = paper?.paper_key ? paper.paper_key.replace(/[^A-Za-z0-9_]/g, '_') : null;
+            const client_question_id = data.id || (sanitizedKey ? `${sanitizedKey}_Q${globalQuestionNumber}` : `Q${globalQuestionNumber}`);
             questionData = {
                 client_question_id,
                 set_ref: currentSet?.client_set_id,

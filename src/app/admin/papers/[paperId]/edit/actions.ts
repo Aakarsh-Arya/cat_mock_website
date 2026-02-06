@@ -87,7 +87,7 @@ async function verifyAdmin(): Promise<{ userId: string; email: string }> {
             }
         }
 
-        if (role !== 'admin') {
+        if (role !== 'admin' && role !== 'dev') {
             const { data: isAdmin, error: rpcError } = await supabase.rpc('is_admin');
             if (rpcError || !isAdmin) {
                 throw new Error('Unauthorized: Admin access required');

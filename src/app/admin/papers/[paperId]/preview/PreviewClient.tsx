@@ -46,6 +46,8 @@ export function PreviewClient({ paper, questionSets }: PreviewClientProps) {
 
     const [navState, setNavState] = useState<PreviewNavState>(DEFAULT_NAV_STATE);
     const hasInitializedRef = useRef(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     const { section: currentSection, setIndex: currentSetIndex, questionIndex: currentQuestionIndex } = navState;
 
@@ -190,6 +192,29 @@ export function PreviewClient({ paper, questionSets }: PreviewClientProps) {
 
     const totalSectionQuestions = sectionCounts[currentSection];
 
+    // Fullscreen toggle handler
+    const toggleFullscreen = useCallback(() => {
+        if (!containerRef.current) return;
+        if (!document.fullscreenElement) {
+            containerRef.current.requestFullscreen().catch(err => {
+                console.error('Failed to enter fullscreen:', err);
+            });
+        } else {
+            document.exitFullscreen().catch(err => {
+                console.error('Failed to exit fullscreen:', err);
+            });
+        }
+    }, []);
+
+    // Listen for fullscreen changes
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []);
+
     useEffect(() => {
         if (process.env.NODE_ENV === 'production') {
             return;
@@ -239,9 +264,9 @@ export function PreviewClient({ paper, questionSets }: PreviewClientProps) {
     }, [currentSection, currentSet, currentSetIndex, currentQuestionIndex, sectionSets.length]);
 
     return (
-        <div className="min-h-screen bg-exam-bg-page flex flex-col">
+        <div ref={containerRef} className="min-h-screen bg-exam-bg-page flex flex-col">
             {/* Preview Header Banner */}
-            <div className="bg-yellow-400 text-yellow-900 px-4 py-2 text-center font-semibold flex items-center justify-center gap-4">
+            <div className={`bg-yellow-400 text-yellow-900 px-4 py-2 text-center font-semibold flex items-center justify-center gap-4 ${isFullscreen ? 'hidden' : ''}`}>
                 <span>🔍 ADMIN PREVIEW MODE - This is how students will see the exam</span>
                 <Link
                     href={`/admin/papers/${paper.id}/edit`}
@@ -255,6 +280,13 @@ export function PreviewClient({ paper, questionSets }: PreviewClientProps) {
                 >
                     All Papers
                 </Link>
+                <button
+                    onClick={toggleFullscreen}
+                    className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
+                    title="Toggle fullscreen to see exact mock layout"
+                >
+                    ⛶ Fullscreen
+                </button>
             </div>
 
             {/* Exam Header */}
@@ -266,6 +298,14 @@ export function PreviewClient({ paper, questionSets }: PreviewClientProps) {
                     </span>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
+                    <button
+                        onClick={toggleFullscreen}
+                        className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded transition-colors"
+                        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                    >
+                        {isFullscreen ? '✕ Exit Fullscreen' : '⛶ Fullscreen'}
+                    </button>
+                    <span className="opacity-80">|</span>
                     <span className="opacity-80">Duration: {paper.duration_minutes} mins</span>
                     <span className="opacity-80">|</span>
                     <span className="opacity-80">Total Marks: {paper.total_marks}</span>

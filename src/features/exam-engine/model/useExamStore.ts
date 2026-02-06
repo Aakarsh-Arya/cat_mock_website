@@ -63,6 +63,8 @@ const createInitialTimerState = (sectionName: SectionName, durationSeconds: numb
 const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActions> = {
     // Hydration
     hasHydrated: false,
+    // Initialization
+    isInitialized: false,
 
     // Exam metadata
     attemptId: null,
@@ -153,6 +155,7 @@ export const createExamStore = (attemptId?: string) => {
                         set({
                             ...initialState,
                             hasHydrated: false,
+                            isInitialized: false,
                         });
                         currentState = get();
                     }
@@ -294,6 +297,7 @@ export const createExamStore = (attemptId?: string) => {
                             lockedSections: Array.from(lockedSections),
                             isSubmitting: false,
                             isAutoSubmitting: false,
+                            isInitialized: true,
                         });
                         return;
                     }
@@ -428,6 +432,7 @@ export const createExamStore = (attemptId?: string) => {
 
                     set({
                         hasHydrated: true,
+                        isInitialized: true,
                         attemptId: attempt.id,
                         paperId: paper.id,
                         sessionToken,
@@ -444,7 +449,10 @@ export const createExamStore = (attemptId?: string) => {
                 },
 
                 setHasHydrated: (hydrated: boolean) => {
-                    set({ hasHydrated: hydrated });
+                    set({
+                        hasHydrated: hydrated,
+                        ...(hydrated ? {} : { isInitialized: false }),
+                    });
                 },
 
                 setSessionToken: (sessionToken: string | null) => {
@@ -930,6 +938,7 @@ export const createExamStore = (attemptId?: string) => {
                     set({
                         ...initialState,
                         hasHydrated: true,
+                        isInitialized: false,
                     });
                 },
             }),
@@ -955,6 +964,7 @@ export const createExamStore = (attemptId?: string) => {
                         state.visitedQuestions = new Set(Array.isArray(state.visitedQuestions) ? state.visitedQuestions : []);
                         state.markedQuestions = new Set(Array.isArray(state.markedQuestions) ? state.markedQuestions : []);
                         state.hasHydrated = true;
+                        state.isInitialized = false;
 
                         // Guard against stale persisted state for a different attempt.
                         if (typeof window !== 'undefined') {

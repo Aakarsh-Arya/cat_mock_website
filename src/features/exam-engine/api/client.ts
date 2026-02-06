@@ -30,6 +30,7 @@ type ProgressPayload = {
     currentSection: SectionName;
     currentQuestion: number;
     sessionToken?: string | null;
+    force_resume?: boolean;
 };
 
 type PausePayload = ProgressPayload & {

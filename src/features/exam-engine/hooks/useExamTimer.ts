@@ -84,7 +84,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
 
     const currentSection = useExamStore(selectCurrentSection);
     const currentTimer = useExamStore(selectCurrentTimer);
-    const hasHydrated = useExamStore((s) => s.hasHydrated);
+    const isInitialized = useExamStore((s) => s.isInitialized);
     const isSubmitting = useExamStore((s) => s.isSubmitting);
     const isAutoSubmitting = useExamStore((s) => s.isAutoSubmitting);
 
@@ -186,7 +186,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
 
                 // If not submitting and not manually paused, resume ticking for the next section
                 const st = useExamStore.getState();
-                if (!isManuallyPausedRef.current && st.hasHydrated && !st.isSubmitting && !st.isAutoSubmitting) {
+                if (!isManuallyPausedRef.current && st.isInitialized && !st.isSubmitting && !st.isAutoSubmitting) {
                     // start will happen via effect too, but doing nothing here keeps it simple
                 }
             }
@@ -196,7 +196,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
 
     const tick = useCallback(() => {
         const st = useExamStore.getState();
-        if (!st.hasHydrated || st.isSubmitting || st.isAutoSubmitting) return;
+        if (!st.isInitialized || st.isSubmitting || st.isAutoSubmitting) return;
         if (isManuallyPausedRef.current) return;
         if (expiryInProgressRef.current) return;
 
@@ -251,7 +251,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
     const resume = useCallback(() => {
         isManuallyPausedRef.current = false;
         const st = useExamStore.getState();
-        if (st.hasHydrated && !st.isSubmitting && !st.isAutoSubmitting) {
+        if (st.isInitialized && !st.isSubmitting && !st.isAutoSubmitting) {
             startTimer();
         }
     }, [startTimer]);
@@ -259,17 +259,17 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
     // Start/stop lifecycle
     useEffect(() => {
         const st = useExamStore.getState();
-        const shouldRun = st.hasHydrated && !st.isSubmitting && !st.isAutoSubmitting && !isManuallyPausedRef.current;
+        const shouldRun = st.isInitialized && !st.isSubmitting && !st.isAutoSubmitting && !isManuallyPausedRef.current;
 
         if (shouldRun) startTimer();
         else stopTimer();
 
         return () => stopTimer();
-    }, [hasHydrated, isSubmitting, isAutoSubmitting, startTimer, stopTimer]);
+    }, [isInitialized, isSubmitting, isAutoSubmitting, startTimer, stopTimer]);
 
     // Ensure expiry is handled even if interval ticks are delayed (tab sleep / throttling)
     useEffect(() => {
-        if (!hasHydrated || isSubmitting || isAutoSubmitting) return;
+        if (!isInitialized || isSubmitting || isAutoSubmitting) return;
         if (isManuallyPausedRef.current) return;
         if (expiryInProgressRef.current) return;
         // CRITICAL: Skip if this section was already processed
@@ -282,11 +282,11 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         if (remaining <= 0) {
             void handleSectionExpiry(currentSection);
         }
-    }, [currentSection, currentTimer, handleSectionExpiry, hasHydrated, isSubmitting, isAutoSubmitting]);
+    }, [currentSection, currentTimer, handleSectionExpiry, isInitialized, isSubmitting, isAutoSubmitting]);
 
     // Recovery: if the current timer is already marked expired after resume, force expiry handling.
     useEffect(() => {
-        if (!hasHydrated || isSubmitting || isAutoSubmitting) return;
+        if (!isInitialized || isSubmitting || isAutoSubmitting) return;
         if (isManuallyPausedRef.current) return;
         if (expiryInProgressRef.current) return;
         // CRITICAL: Skip if this section was already processed
@@ -294,7 +294,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         if (!currentTimer.isExpired) return;
 
         void handleSectionExpiry(currentSection);
-    }, [currentSection, currentTimer.isExpired, handleSectionExpiry, hasHydrated, isSubmitting, isAutoSubmitting]);
+    }, [currentSection, currentTimer.isExpired, handleSectionExpiry, isInitialized, isSubmitting, isAutoSubmitting]);
 
     // Sync on tab focus
     useEffect(() => {

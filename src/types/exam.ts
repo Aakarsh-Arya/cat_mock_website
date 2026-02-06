@@ -515,6 +515,8 @@ export interface SectionTimerState {
 export interface ExamEngineState {
     // Hydration
     hasHydrated: boolean;
+    // Initialization (exam data loaded + merged)
+    isInitialized: boolean;
 
     // Exam metadata
     attemptId: string | null;
@@ -685,7 +687,7 @@ export function getPaperTotalDurationSeconds(sections?: SectionConfig[] | null):
 // =============================================================================
 
 /** Application roles for RBAC */
-export type AppRole = 'user' | 'admin' | 'editor';
+export type AppRole = 'user' | 'admin' | 'editor' | 'dev';
 
 /** User role entity from database */
 export interface UserRole {

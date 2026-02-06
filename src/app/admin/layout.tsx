@@ -48,7 +48,7 @@ export default async function AdminLayout({
             }
         }
 
-        isAdmin = role === 'admin';
+        isAdmin = role === 'admin' || role === 'dev';
 
         // Fallback: Check database function if claims not available
         if (!isAdmin) {

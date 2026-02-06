@@ -223,12 +223,46 @@ function renderMath(token: string, key: number) {
     );
 }
 
+/**
+ * Detect para jumble questions and format sentences with numbers.
+ * Para jumbles typically have an instruction followed by 4 sentences separated by newlines.
+ */
+function formatParaJumbleText(rawText: string): string {
+    // Check if this looks like a para jumble question
+    const lowerText = rawText.toLowerCase();
+    const isParaJumble = (
+        (lowerText.includes('labelled 1, 2, 3') || lowerText.includes('labeled 1, 2, 3')) &&
+        (lowerText.includes('sequenced') || lowerText.includes('sequence'))
+    );
+
+    if (!isParaJumble) return rawText;
+
+    // Split by double newlines to find instruction and sentences
+    const parts = rawText.split(/\n\s*\n/).filter(p => p.trim());
+    if (parts.length < 2) return rawText;
+
+    // First part is the instruction
+    const instruction = parts[0].trim();
+    const sentences = parts.slice(1);
+
+    // If we have 2-6 sentences, number them
+    if (sentences.length >= 2 && sentences.length <= 6) {
+        const numberedSentences = sentences.map((s, i) => `${i + 1}. ${s.trim()}`);
+        return `${instruction}\n\n${numberedSentences.join('\n\n')}`;
+    }
+
+    return rawText;
+}
+
 export function MathText({ text, className }: MathTextProps) {
     if (text === null || text === undefined || text === '') {
         return null;
     }
 
-    const normalizedText = String(text)
+    // Format para jumble questions with numbered sentences
+    const formattedText = formatParaJumbleText(String(text));
+
+    const normalizedText = formattedText
         .replace(/\\\[((?:.|\n)+?)\\\]/g, (_match, math) => `$$${math}$$`)
         .replace(/\\\(((?:.|\n)+?)\\\)/g, (_match, math) => `$${math}$`);
 
@@ -248,6 +282,27 @@ export function MathText({ text, className }: MathTextProps) {
                         rehypePlugins={[rehypeRaw]}
                         components={{
                             p: ({ children }) => <div className="whitespace-pre-wrap">{children}</div>,
+                            ol: ({ children, ...props }) => (
+                                <ol
+                                    {...props}
+                                    className="list-decimal list-inside ml-4 space-y-1"
+                                >
+                                    {children}
+                                </ol>
+                            ),
+                            ul: ({ children, ...props }) => (
+                                <ul
+                                    {...props}
+                                    className="list-disc list-inside ml-4 space-y-1"
+                                >
+                                    {children}
+                                </ul>
+                            ),
+                            li: ({ children, ...props }) => (
+                                <li {...props} className="leading-relaxed">
+                                    {children}
+                                </li>
+                            ),
                             pre: ({ children }) => (
                                 <div className="overflow-x-auto rounded bg-gray-100 p-3 text-xs whitespace-pre font-mono">
                                     {children}

@@ -131,6 +131,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const initializeExam = useExamStore((s) => s.initializeExam);
     const setSessionToken = useExamStore((s) => s.setSessionToken);
     const hasHydrated = useExamStore((s) => s.hasHydrated);
+    const isInitialized = useExamStore((s) => s.isInitialized);
     const attemptId = useExamStore((s) => s.attemptId);
     const currentSectionIndex = useExamStore((s) => s.currentSectionIndex);
     const currentQuestionIndex = useExamStore((s) => s.currentQuestionIndex);
@@ -279,6 +280,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const flushNow = useCallback(async () => {
         const aId = attemptIdRef.current ?? attempt.id;
         if (!aId) return;
+        if (!isInitialized) return;
         if (isDevSyncPaused()) return;
         if (isSubmittingRef.current || isAutoSubmittingRef.current) return;
         if (flushInProgressRef.current) return;
@@ -329,7 +331,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         } finally {
             flushInProgressRef.current = false;
         }
-    }, [attempt.id, ensureSessionToken]);
+    }, [attempt.id, ensureSessionToken, isInitialized]);
 
     // Debounced save to server (wrap in try/catch to avoid unhandled rejections)
     const debouncedSaveProgress = useDebouncedCallback(
@@ -361,7 +363,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
     // Auto-save progress periodically (do NOT re-create interval on every timer tick)
     useEffect(() => {
-        if (!attemptId || !hasHydrated) return;
+        if (!attemptId || !isInitialized) return;
         if (isSubmittingRef.current || isAutoSubmittingRef.current) return;
 
         const interval = setInterval(() => {
@@ -369,12 +371,13 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         }, AUTO_SAVE_INTERVAL_MS);
 
         return () => clearInterval(interval);
-    }, [attemptId, hasHydrated, debouncedSaveProgress]);
+    }, [attemptId, isInitialized, debouncedSaveProgress]);
 
     // Save on exit / visibility changes (bind once; handlers read refs)
     // Use sendBeacon for pagehide/visibility to ensure data is persisted even during unload
     useEffect(() => {
         const sendBeaconBatchSave = () => {
+            if (!isInitialized) return;
             const aId = attemptIdRef.current ?? attempt.id;
             if (!aId || isSubmittingRef.current || isAutoSubmittingRef.current) return;
 
@@ -425,7 +428,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
             const aId = attemptIdRef.current ?? attempt.id;
-            if (!aId || isSubmittingRef.current || isAutoSubmittingRef.current) return;
+            if (!aId || !isInitialized || isSubmittingRef.current || isAutoSubmittingRef.current) return;
 
             // Try to save via sendBeacon before showing prompt
             sendBeaconBatchSave();
@@ -443,7 +446,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             window.removeEventListener('pagehide', handlePageHide);
             window.removeEventListener('beforeunload', handleBeforeUnload);
         };
-    }, [attempt.id, flushNow]);
+    }, [attempt.id, flushNow, isInitialized]);
 
     // Handle individual response save
     const handleSaveResponse = useCallback(
@@ -682,6 +685,29 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 clearLocalExamState();
                 router.push(`/result/${aId}`);
                 return;
+            }
+
+            const invalidStatus =
+                result.error === 'Attempt is not in progress' ||
+                result.error === 'INVALID_ATTEMPT_STATUS';
+            if (invalidStatus) {
+                try {
+                    const res = await fetch('/api/attempt-status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ attemptId: aId }),
+                    });
+                    const payload = await res.json().catch(() => ({}));
+                    const statusCheck = payload?.data?.status as string | undefined;
+
+                    if (statusCheck === 'submitted' || statusCheck === 'completed') {
+                        clearLocalExamState();
+                        router.push(`/result/${aId}`);
+                        return;
+                    }
+                } catch (checkError) {
+                    logger.warn('Failed to check attempt status after invalid status', checkError);
+                }
             }
 
             if (result.error === 'Unauthorized' || result.error === 'Authentication required') {
@@ -937,7 +963,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     }, [attempt.id, ensureSessionToken, router, paper.allow_pause]);
 
     // Show loading while initializing
-    if (!hasHydrated) {
+    if (!hasHydrated || !isInitialized) {
         return (
             <div className="min-h-screen bg-gray-50 flex items-center justify-center">
                 <div className="text-center">

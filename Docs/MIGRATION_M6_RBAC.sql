@@ -19,7 +19,7 @@
 DO $$ 
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_role') THEN
-        CREATE TYPE public.app_role AS ENUM ('user', 'admin', 'editor');
+        CREATE TYPE public.app_role AS ENUM ('user', 'admin', 'editor', 'dev');
     END IF;
 END $$;
 
@@ -64,7 +64,7 @@ CREATE POLICY "Admins can view all roles" ON public.user_roles
     FOR SELECT USING (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
     );
 
@@ -73,7 +73,7 @@ CREATE POLICY "Admins can insert roles" ON public.user_roles
     FOR INSERT WITH CHECK (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
     );
 
@@ -82,7 +82,7 @@ CREATE POLICY "Admins can update roles" ON public.user_roles
     FOR UPDATE USING (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
         AND user_id != auth.uid() -- Cannot modify own role
     );
@@ -92,7 +92,7 @@ CREATE POLICY "Admins can delete roles" ON public.user_roles
     FOR DELETE USING (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
         AND user_id != auth.uid()
     );
@@ -193,46 +193,46 @@ DROP POLICY IF EXISTS "Admins can view all questions" ON public.questions;
 -- Papers: Admins can manage all papers
 CREATE POLICY "Admins can insert papers" ON public.papers
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can update papers" ON public.papers
     FOR UPDATE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can delete papers" ON public.papers
     FOR DELETE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- Questions: Admins can manage all questions
 CREATE POLICY "Admins can insert questions" ON public.questions
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can update questions" ON public.questions
     FOR UPDATE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can delete questions" ON public.questions
     FOR DELETE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- Admins can view ALL questions (including inactive ones)
 CREATE POLICY "Admins can view all questions" ON public.questions
     FOR SELECT USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- ============================================================================
@@ -288,26 +288,26 @@ CREATE POLICY "Authenticated users can view active contexts" ON public.question_
 
 CREATE POLICY "Admins can view all contexts" ON public.question_contexts
     FOR SELECT USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can insert contexts" ON public.question_contexts
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can update contexts" ON public.question_contexts
     FOR UPDATE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can delete contexts" ON public.question_contexts
     FOR DELETE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- ============================================================================
@@ -342,15 +342,15 @@ DROP POLICY IF EXISTS "Admins can insert audit logs" ON public.admin_audit_log;
 -- Only admins can view audit logs
 CREATE POLICY "Admins can view audit logs" ON public.admin_audit_log
     FOR SELECT USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- System/admin can insert logs
 CREATE POLICY "Admins can insert audit logs" ON public.admin_audit_log
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- ============================================================================
@@ -366,7 +366,7 @@ SET search_path = public, pg_catalog
 AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.user_roles
-        WHERE user_id = auth.uid() AND role = 'admin'
+        WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
     );
 $$;
 

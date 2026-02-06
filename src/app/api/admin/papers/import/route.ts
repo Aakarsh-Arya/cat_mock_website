@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
 
         // Check if user is admin (JWT claim first, fallback to profiles via service role)
         const roleFromJwt = user.app_metadata?.user_role ?? user.user_metadata?.role ?? null;
-        let isAdmin = roleFromJwt === 'admin';
+        let isAdmin = roleFromJwt === 'admin' || roleFromJwt === 'dev';
 
         if (!isAdmin) {
             const { data: profile, error: profileError } = await adminClient
@@ -249,7 +249,7 @@ export async function POST(request: NextRequest) {
                 .eq('id', user.id)
                 .single();
 
-            if (!profileError && profile?.role === 'admin') {
+            if (!profileError && (profile?.role === 'admin' || profile?.role === 'dev')) {
                 isAdmin = true;
             }
         }

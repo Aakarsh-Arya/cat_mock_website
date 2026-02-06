@@ -446,7 +446,7 @@ async function importQuestionSetsV3(paperId, sets, options = {}) {
             context_additional_images: set.context_additional_images || null,
             display_order: set.display_order,
             is_active: set.is_active ?? true,
-            is_published: false,
+            is_published: true, // Sets must be published to be visible through question_sets_with_questions view
             metadata: set.metadata || {},
             client_set_id: set.client_set_id, // Store for upsert support
         };

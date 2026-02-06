@@ -460,7 +460,6 @@ export async function submitExam(
 ): Promise<ActionResult<SubmitExamResponse>> {
     // Normalize inputs - use let so we can promote fallback attempt ID if needed
     let normalizedAttemptId = typeof arg1 === 'string' ? arg1 : arg1.attemptId;
-    const originalAttemptId = normalizedAttemptId; // Keep original for logging
     const options =
         typeof arg1 === 'string'
             ? arg2
@@ -514,38 +513,18 @@ export async function submitExam(
                 reason,
             });
 
-            const { data: fallbackAttempt, error: fallbackError } = await adminClient
+            const { data: recentAttempts, error: recentError } = await adminClient
                 .from('attempts')
-                .select('id, user_id, status, paper_id, started_at')
+                .select('id, status, user_id, paper_id, created_at')
                 .eq('user_id', user.id)
-                .eq('status', 'in_progress')
                 .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-            if (fallbackAttempt && !fallbackError) {
-                logger.warn('submitExam using fallback attempt - PROMOTING ID', {
-                    originalAttemptId,
-                    fallbackAttemptId: fallbackAttempt.id,
-                    userId: user.id,
-                });
-                attempt = fallbackAttempt;
-                // CRITICAL FIX: Promote the fallback attempt ID for all downstream operations
-                normalizedAttemptId = fallbackAttempt.id;
-            } else {
-                const { data: recentAttempts, error: recentError } = await adminClient
-                    .from('attempts')
-                    .select('id, status, user_id, paper_id, created_at')
-                    .eq('user_id', user.id)
-                    .order('created_at', { ascending: false })
-                    .limit(5);
-                logger.error('submitExam recent attempts for user', recentError, {
-                    attemptId: normalizedAttemptId,
-                    userId: user.id,
-                    recentAttempts,
-                });
-                return { success: false, error: 'Attempt not found' };
-            }
+                .limit(5);
+            logger.error('submitExam recent attempts for user', recentError, {
+                attemptId: normalizedAttemptId,
+                userId: user.id,
+                recentAttempts,
+            });
+            return { success: false, error: 'Attempt not found' };
         }
         if (attempt.user_id !== user.id) return { success: false, error: 'Unauthorized' };
 

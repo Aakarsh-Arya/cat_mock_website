@@ -46,7 +46,7 @@ export default async function PaperSettingsPage({ params }: PageProps) {
         }
     }
 
-    let isAdmin = role === 'admin';
+    let isAdmin = role === 'admin' || role === 'dev';
     if (!isAdmin) {
         const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin');
         isAdmin = !rpcError && Boolean(isAdminRpc);

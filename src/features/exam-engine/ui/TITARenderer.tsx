@@ -52,6 +52,8 @@ export function TITARenderer({
 
     // Local state for input (debounced save)
     const [localValue, setLocalValue] = useState(answerOverride ?? response?.answer ?? '');
+    const [cursorIndex, setCursorIndex] = useState(() => (answerOverride ?? response?.answer ?? '').length);
+    const inputRef = useRef<HTMLInputElement | null>(null);
 
     // PHASE 3 FIX: Track if we're updating from store to prevent loops
     const isUpdatingFromStore = useRef(false);
@@ -66,6 +68,7 @@ export function TITARenderer({
             setLocalValue(nextValue);
             // Reset flag after state update
             requestAnimationFrame(() => {
+                setCursorIndex(nextValue.length);
                 isUpdatingFromStore.current = false;
             });
         }
@@ -76,9 +79,11 @@ export function TITARenderer({
     const isIncorrect = showCorrectAnswer && localValue && localValue !== correctAnswer;
 
     // Commit value to local state + store (local only, no status change)
-    const commitValue = useCallback((value: string) => {
+    const commitValue = useCallback((value: string, nextCursorIndex?: number) => {
         const oldValue = localValue;
         setLocalValue(value);
+        const clampedCursor = Math.max(0, Math.min(value.length, nextCursorIndex ?? value.length));
+        setCursorIndex(clampedCursor);
         if (!readOnly) {
             // Use setLocalAnswer - does NOT change status, palette stays same color
             setLocalAnswer(question.id, value || null);
@@ -113,37 +118,58 @@ export function TITARenderer({
         });
 
         if (key === 'BACKSPACE') {
-            commitValue(current.slice(0, -1));
+            if (cursorIndex <= 0) return;
+            const nextValue = `${current.slice(0, cursorIndex - 1)}${current.slice(cursorIndex)}`;
+            commitValue(nextValue, cursorIndex - 1);
             return;
         }
 
         if (key === 'CLEAR') {
-            commitValue('');
+            commitValue('', 0);
             return;
         }
 
         if (key === '-') {
-            if (current.startsWith('-') || current.length > 0) return;
-            commitValue('-');
+            if (current.startsWith('-') || current.length > 0 || cursorIndex !== 0) return;
+            commitValue('-', 1);
             return;
         }
 
         if (key === '.') {
             if (current.includes('.')) return;
             if (current === '') {
-                commitValue('0.');
+                commitValue('0.', 2);
             } else if (current === '-') {
-                commitValue('-0.');
+                commitValue('-0.', 3);
             } else {
-                commitValue(`${current}.`);
+                const nextValue = `${current.slice(0, cursorIndex)}.${current.slice(cursorIndex)}`;
+                commitValue(nextValue, cursorIndex + 1);
             }
             return;
         }
 
         if (/^[0-9]$/.test(key)) {
-            commitValue(`${current}${key}`);
+            const nextValue = `${current.slice(0, cursorIndex)}${key}${current.slice(cursorIndex)}`;
+            commitValue(nextValue, cursorIndex + 1);
         }
-    }, [commitValue, localValue, readOnly]);
+    }, [commitValue, localValue, readOnly, cursorIndex]);
+
+    const moveCursor = useCallback((direction: 'left' | 'right') => {
+        if (readOnly) return;
+        setCursorIndex((prev) => {
+            const delta = direction === 'left' ? -1 : 1;
+            return Math.max(0, Math.min(localValue.length, prev + delta));
+        });
+    }, [localValue.length, readOnly]);
+
+    useEffect(() => {
+        if (!inputRef.current) return;
+        try {
+            inputRef.current.setSelectionRange(cursorIndex, cursorIndex);
+        } catch {
+            // ignore selection errors in unsupported environments
+        }
+    }, [cursorIndex, localValue]);
 
     // Get input styles based on state
     let inputStyles = 'border-gray-300 focus:border-blue-500 focus:ring-blue-500';
@@ -168,6 +194,7 @@ export function TITARenderer({
                     <input
                         type="text"
                         id={`tita-${question.id}`}
+                        ref={inputRef}
                         value={localValue}
                         readOnly
                         placeholder="Enter your answer"
@@ -219,74 +246,72 @@ export function TITARenderer({
             </div>
 
             {/* TITA Keypad (keypad-only input) */}
-            <div className="max-w-xs" role="group" aria-label="TITA keypad">
-                <div className="grid grid-cols-3 gap-2">
+            <div
+                className="w-[220px] rounded-md bg-[#f2f2f2] p-[5px]"
+                role="group"
+                aria-label="TITA keypad"
+                style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}
+            >
+                <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => applyKeypadInput('BACKSPACE')}
+                    className="h-10 w-full rounded border border-[#bdbdbd] bg-gradient-to-b from-white to-[#eaeaea] text-sm font-bold font-sans text-gray-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                    aria-label="Backspace"
+                >
+                    Backspace
+                </button>
+
+                <div className="mt-[5px] grid grid-cols-3 gap-[5px]">
                     {[
-                        '1', '2', '3',
-                        '4', '5', '6',
                         '7', '8', '9',
+                        '4', '5', '6',
+                        '1', '2', '3',
+                        '0', '.', '-',
                     ].map((digit) => (
                         <button
                             key={digit}
                             type="button"
                             disabled={readOnly}
                             onClick={() => applyKeypadInput(digit)}
-                            className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
-                            aria-label={`Digit ${digit}`}
+                            className="aspect-square w-full rounded border border-[#bdbdbd] bg-gradient-to-b from-white to-[#eaeaea] text-base font-bold font-sans text-gray-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                            aria-label={digit === '.' ? 'Decimal point' : digit === '-' ? 'Minus sign' : `Digit ${digit}`}
                         >
                             {digit}
                         </button>
                     ))}
+                </div>
 
+                <div className="mt-[5px] grid grid-cols-2 gap-[5px]">
                     <button
                         type="button"
                         disabled={readOnly}
-                        onClick={() => applyKeypadInput('0')}
-                        className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
-                        aria-label="Digit 0"
+                        onClick={() => moveCursor('left')}
+                        className="h-10 rounded border border-[#bdbdbd] bg-gradient-to-b from-white to-[#eaeaea] text-base font-bold font-sans text-gray-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                        aria-label="Move cursor left"
                     >
-                        0
+                        &larr;
                     </button>
                     <button
                         type="button"
                         disabled={readOnly}
-                        onClick={() => applyKeypadInput('.')}
-                        className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
-                        aria-label="Decimal point"
+                        onClick={() => moveCursor('right')}
+                        className="h-10 rounded border border-[#bdbdbd] bg-gradient-to-b from-white to-[#eaeaea] text-base font-bold font-sans text-gray-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                        aria-label="Move cursor right"
                     >
-                        .
-                    </button>
-                    <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => applyKeypadInput('-')}
-                        className="h-12 rounded-lg border border-gray-300 bg-white text-base font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
-                        aria-label="Minus sign"
-                    >
-                        -
+                        &rarr;
                     </button>
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => applyKeypadInput('BACKSPACE')}
-                        className="h-12 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
-                        aria-label="Backspace"
-                    >
-                        Backspace
-                    </button>
-                    <button
-                        type="button"
-                        disabled={readOnly}
-                        onClick={() => applyKeypadInput('CLEAR')}
-                        className="h-12 rounded-lg border border-gray-300 bg-white text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
-                        aria-label="Clear all"
-                    >
-                        Clear All
-                    </button>
-                </div>
+                <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => applyKeypadInput('CLEAR')}
+                    className="mt-[5px] h-10 w-full rounded border border-[#bdbdbd] bg-gradient-to-b from-white to-[#eaeaea] text-sm font-bold font-sans text-gray-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2D89EF]"
+                    aria-label="Clear all"
+                >
+                    Clear All
+                </button>
             </div>
 
             {/* Show correct answer in results */}

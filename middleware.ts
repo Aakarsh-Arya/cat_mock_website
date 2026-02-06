@@ -134,7 +134,7 @@ export async function middleware(req: NextRequest) {
 
                 // Check admin role from app_metadata first (fastest)
                 const role = user.app_metadata?.user_role;
-                if (role === 'admin') {
+                if (role === 'admin' || role === 'dev') {
                     isAdmin = true;
                 }
 

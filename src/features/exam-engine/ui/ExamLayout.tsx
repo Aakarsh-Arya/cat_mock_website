@@ -331,7 +331,7 @@ export function ExamLayout({
     const clearPendingSync = useExamStore((s) => s.clearPendingSync);
     const setLastSyncTimestamp = useExamStore((s) => s.setLastSyncTimestamp);
 
-    const hasHydrated = useExamStore((s) => s.hasHydrated);
+    const isInitialized = useExamStore((s) => s.isInitialized);
     const isSubmitting = useExamStore((s) => s.isSubmitting);
 
     // Persist sidebar visibility to localStorage (prevents “lost sidebar” after refresh)
@@ -566,7 +566,7 @@ export function ExamLayout({
 
     // Track per-question time spent while the exam is active
     useEffect(() => {
-        if (!hasHydrated || isSubmitting || isAutoSubmitting) return;
+        if (!isInitialized || isSubmitting || isAutoSubmitting) return;
         if (!currentQuestion?.id) return;
 
         let lastTick = Date.now();
@@ -584,7 +584,7 @@ export function ExamLayout({
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [currentQuestion?.id, hasHydrated, isSubmitting, isAutoSubmitting, updateTimeSpent]);
+    }, [currentQuestion?.id, isInitialized, isSubmitting, isAutoSubmitting, updateTimeSpent]);
 
     // Tabs are disabled, but keep handler in case you later allow same-section jumps.
     const handleSectionSelect = useCallback(
@@ -715,7 +715,7 @@ export function ExamLayout({
     }, []);
 
     // Loading State
-    if (!hasHydrated) {
+    if (!isInitialized) {
         return (
             <div className="min-h-screen bg-exam-bg-page flex items-center justify-center">
                 <div className="text-center">

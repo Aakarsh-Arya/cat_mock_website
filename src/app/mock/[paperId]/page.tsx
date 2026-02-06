@@ -115,20 +115,61 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             throw new Error('Paper not available');
         }
 
-        // FIX: Check for existing in_progress attempt - reuse instead of creating new
+        // Prepare section durations for attempt validation and initialization
+        const sections = (p.sections as SectionConfig[]) || [];
+        const sectionDurations = getSectionDurationSecondsMap(sections);
+
+        // FIX: Check for existing active attempt (in_progress/paused) - reuse instead of creating new
         const { data: existingAttempt } = await s
             .from('attempts')
-            .select('id')
+            .select('id, time_remaining, current_section, started_at, status')
             .eq('paper_id', p.id)
             .eq('user_id', currentUser.id)
-            .eq('status', 'in_progress')
+            .in('status', ['in_progress', 'paused'])
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
         if (existingAttempt) {
-            // Resume existing attempt instead of creating a new one
-            redirect(`/exam/${existingAttempt.id}`);
+            const normalizeSectionName = (value?: string | null): SectionName => {
+                const normalized = (value ?? '').toUpperCase().trim();
+                if (normalized === 'LRDI') return 'DILR';
+                if (normalized === 'QUANT' || normalized === 'QUANTS') return 'QA';
+                if (normalized === 'VARC' || normalized === 'DILR' || normalized === 'QA') {
+                    return normalized as SectionName;
+                }
+                return 'VARC';
+            };
+
+            const timeRemaining = existingAttempt.time_remaining as Partial<Record<SectionName, number>> | null | undefined;
+            const hasAnyRemaining = !!timeRemaining && Object.values(timeRemaining).some((v) => typeof v === 'number' && v > 0);
+            const currentSection = normalizeSectionName(existingAttempt.current_section as string | null | undefined);
+            const currentRemaining = typeof timeRemaining?.[currentSection] === 'number' ? timeRemaining?.[currentSection] : null;
+
+            const totalDurationSeconds = Object.values(sectionDurations).reduce((sum, v) => sum + v, 0);
+            const startedAtMs = existingAttempt.started_at ? new Date(existingAttempt.started_at).getTime() : null;
+            const elapsedSeconds = startedAtMs ? Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)) : null;
+            // Only use time-based staleness when no remaining time is recorded.
+            // This allows long resumes (e.g., next day) if time_remaining is still > 0.
+            const isExpiredByTime = !hasAnyRemaining &&
+                typeof elapsedSeconds === 'number' &&
+                elapsedSeconds > totalDurationSeconds + 120;
+            const isExpiredByRemaining = currentRemaining !== null ? currentRemaining <= 0 : !hasAnyRemaining;
+
+            if (!isExpiredByTime && !isExpiredByRemaining) {
+                // Resume existing attempt instead of creating a new one
+                redirect(`/exam/${existingAttempt.id}`);
+            }
+
+            // Stale in-progress attempt - mark abandoned and create a new one
+            await s
+                .from('attempts')
+                .update({
+                    status: 'abandoned',
+                    completed_at: new Date().toISOString(),
+                })
+                .eq('id', existingAttempt.id)
+                .in('status', ['in_progress', 'paused']);
         }
 
         const attemptLimitServer = p.attempt_limit ?? null;
@@ -146,8 +187,6 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
         }
 
         // Initialize time remaining for each section
-        const sections = (p.sections as SectionConfig[]) || [];
-        const sectionDurations = getSectionDurationSecondsMap(sections);
         const timeRemaining: Record<SectionName, number> = {
             VARC: sectionDurations.VARC,
             DILR: sectionDurations.DILR,
