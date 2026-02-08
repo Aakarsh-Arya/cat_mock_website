@@ -272,10 +272,18 @@ export function calculateScore(
 /**
  * Calculate time taken from start to submission
  */
-export function calculateTimeTaken(startedAt: string, submittedAt: string): number {
+export function calculateTimeTaken(
+    startedAt: string,
+    submittedAt: string,
+    totalPausedSeconds: number = 0
+): number {
     const start = new Date(startedAt).getTime();
     const end = new Date(submittedAt).getTime();
-    return Math.floor((end - start) / 1000); // seconds
+    const rawSeconds = Math.floor((end - start) / 1000);
+    const pausedSeconds = Number.isFinite(totalPausedSeconds)
+        ? Math.max(0, Math.floor(totalPausedSeconds))
+        : 0;
+    return Math.max(0, rawSeconds - pausedSeconds);
 }
 
 /**

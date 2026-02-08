@@ -112,6 +112,12 @@ export default async function AdminLayout({
                                 >
                                     Bug Reports
                                 </Link>
+                                <Link
+                                    href="/admin/access-control"
+                                    className="text-gray-200 hover:text-white transition-colors"
+                                >
+                                    Access Control
+                                </Link>
                             </nav>
                         </div>
                         <div className="flex items-center gap-4">

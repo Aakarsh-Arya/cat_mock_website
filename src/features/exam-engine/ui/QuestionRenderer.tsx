@@ -67,6 +67,63 @@ interface ContextPaneProps {
 }
 
 export function ContextPane({ questionSet }: ContextPaneProps) {
+    // Get image position from metadata, default to 'before'
+    const imagePosition = questionSet.metadata?.image_position ?? 'before';
+
+    // Helper to render the context image
+    const renderContextImage = () => {
+        if (!questionSet.context_image_url) return null;
+        return (
+            <div className="mb-4">
+                <img
+                    src={questionSet.context_image_url}
+                    alt={questionSet.context_title || 'Context diagram'}
+                    className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm"
+                />
+            </div>
+        );
+    };
+
+    // Helper to render context body with optional image insertion after specific paragraph
+    const renderContextBody = () => {
+        if (!questionSet.context_body) return null;
+
+        // Check if image should be placed after a specific paragraph
+        const afterParaMatch = imagePosition.match(/^after_para_(\d+)$/);
+
+        if (afterParaMatch && questionSet.context_image_url) {
+            const paraNumber = parseInt(afterParaMatch[1], 10);
+            // Split context by double newlines (paragraphs)
+            const paragraphs = questionSet.context_body.split(/\n\n+/);
+
+            return (
+                <div className="prose prose-sm max-w-none text-exam-text-body leading-exam">
+                    {paragraphs.map((para, idx) => (
+                        <div key={idx}>
+                            <MathText text={para} />
+                            {/* Insert image after the specified paragraph */}
+                            {idx + 1 === paraNumber && (
+                                <div className="my-4">
+                                    <img
+                                        src={questionSet.context_image_url}
+                                        alt={questionSet.context_title || 'Context diagram'}
+                                        className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        return (
+            <div className="prose prose-sm max-w-none text-exam-text-body leading-exam">
+                <MathText text={questionSet.context_body} />
+            </div>
+        );
+    };
+
     return (
         <div className="h-full overflow-y-auto border-r border-exam-bg-border bg-exam-bg-white">
             <div className="sticky top-0 bg-exam-bg-pane border-b border-exam-bg-border px-4 py-2 z-10">
@@ -77,23 +134,14 @@ export function ContextPane({ questionSet }: ContextPaneProps) {
             </div>
 
             <div className="p-6">
-                {/* Context Image (for charts, diagrams) */}
-                {questionSet.context_image_url && (
-                    <div className="mb-4">
-                        <img
-                            src={questionSet.context_image_url}
-                            alt={questionSet.context_title || 'Context diagram'}
-                            className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm"
-                        />
-                    </div>
-                )}
+                {/* Image before text (default) */}
+                {imagePosition === 'before' && renderContextImage()}
 
-                {/* Context Body (passage text) */}
-                {questionSet.context_body && (
-                    <div className="prose prose-sm max-w-none text-exam-text-body leading-exam">
-                        <MathText text={questionSet.context_body} />
-                    </div>
-                )}
+                {/* Context Body (passage text) with potential inline image */}
+                {renderContextBody()}
+
+                {/* Image after text */}
+                {imagePosition === 'after' && renderContextImage()}
 
                 {/* Additional Images */}
                 {questionSet.context_additional_images?.map((img, idx) => (
@@ -689,14 +737,14 @@ export function QuestionRenderer({
             onAnswerChange={handleAnswerChange}
             isReviewMode={isReviewMode}
             showInlineContext={useFullWidthForEdgeCase && Boolean(questionSet.context_body)}
-        readOnly={readOnly}
-        showCorrectAnswer={showCorrectAnswer}
-        responses={responses}
-        correctAnswerMap={correctAnswerMap}
-        solutionMap={solutionMap}
-        showBookmarkToggle={showBookmarkToggle}
-        isBookmarked={isBookmarked}
-        onToggleBookmark={onToggleBookmark}
-    />
+            readOnly={readOnly}
+            showCorrectAnswer={showCorrectAnswer}
+            responses={responses}
+            correctAnswerMap={correctAnswerMap}
+            solutionMap={solutionMap}
+            showBookmarkToggle={showBookmarkToggle}
+            isBookmarked={isBookmarked}
+            onToggleBookmark={onToggleBookmark}
+        />
     );
 }

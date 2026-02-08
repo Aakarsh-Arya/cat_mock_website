@@ -1,10 +1,13 @@
 # Bug Repro Steps (Phase 0)
 
+Last reviewed: 2026-02-07
+Status: Unverified (re-run after admin editor changes)
+
 Keep these steps up to date so regressions are easy to spot.
 
 ## Editor refresh bug
 
-Scenario: “Edit Q → refresh → jumps to VARC Q1”.
+Scenario: "Edit Q -> refresh -> jumps to VARC Q1".
 
 Steps:
 1. Open the admin editor for any paper.
@@ -20,12 +23,12 @@ Observed bug:
 
 ## Freeze bug
 
-Scenario: “Do X → UI freezes (Editor + Preview)”.
+Scenario: "Do X -> UI freezes (Editor + Preview)".
 
 Steps:
 1. Open the admin editor for any paper.
 2. Rapidly change sections and questions (palette clicks + section tab changes).
-3. Keep typing in the editor for 10–20 seconds.
+3. Keep typing in the editor for 10-20 seconds.
 
 Expected:
 - UI remains responsive; no long stalls.
@@ -35,7 +38,7 @@ Observed bug:
 
 ## Duplication bug
 
-Scenario: “Edit Q text (delete + rewrite) → Preview/Mock shows old + new”.
+Scenario: "Edit Q text (delete + rewrite) -> Preview/Mock shows old + new".
 
 Steps:
 1. Open the admin editor for any paper.

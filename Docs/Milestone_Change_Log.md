@@ -324,4 +324,39 @@ EXTERNAL - Requires Supabase SQL Editor execution of `002_session_locking.sql`
 
 ---
 
-*Last Updated: January 22, 2026*
+## Change 007: Controlled Soft Launch Access Control
+
+### Change Title
+Signup Mode + Waitlist + Access Gate
+
+### Context (Before)
+- No global signup mode toggle; all new users were active by default.
+- No waitlist or access request tracking.
+- Access enforcement relied on auth only; pending users could start mocks.
+
+### Proposal (After)
+- Add `app_settings.signup_mode` (OPEN/GATED) with admin toggle.
+- Add `user_access` (active/pending/rejected) assigned on signup (fail-closed).
+- Add `access_requests` waitlist inbox (unique by email).
+- Enforce active access in middleware, server actions, and RLS (attempts/responses).
+- Add `/coming-soon` waitlist page and admin approvals UI.
+
+### Files Modified
+- `docs/migrations/023_access_control_foundations.sql`
+- `docs/migrations/024_access_control_rls.sql`
+- `middleware.ts`
+- `src/lib/access-control.ts`
+- `src/app/coming-soon/page.tsx`
+- `src/app/admin/access-control/page.tsx`
+- `src/app/admin/access-control/actions.ts`
+- `src/lib/rate-limit.ts`
+- `src/lib/telemetry.ts`
+
+### Schema Impact
+EXTERNAL - Requires Supabase SQL Editor execution of `023_access_control_foundations.sql` and `024_access_control_rls.sql`
+
+### Status: COMPLETED (Application + DB migrations prepared)
+
+---
+
+*Last Updated: February 7, 2026*

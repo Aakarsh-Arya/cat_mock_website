@@ -112,9 +112,11 @@ CREATE TABLE IF NOT EXISTS public.attempts (
   submitted_at TIMESTAMP WITH TIME ZONE,      -- When user clicked submit
   completed_at TIMESTAMP WITH TIME ZONE,      -- When scoring completed
   time_taken_seconds INTEGER,                  -- Actual time taken
+  session_token UUID,                          -- Server-managed session token
+  last_activity_at TIMESTAMP WITH TIME ZONE,   -- Server-managed activity tracking
   
   -- Status
-  status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'submitted', 'completed', 'abandoned')),
+  status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'paused', 'submitted', 'completed', 'abandoned', 'expired')),
   current_section TEXT,
   current_question INTEGER DEFAULT 1,
   time_remaining JSONB,               -- {"VARC": 2400, "DILR": 2400, "QA": 2400}
@@ -158,6 +160,7 @@ CREATE TABLE IF NOT EXISTS public.responses (
   -- State tracking
   status TEXT DEFAULT 'not_visited' CHECK (status IN ('not_visited', 'visited', 'answered', 'marked', 'answered_marked')),
   is_marked_for_review BOOLEAN DEFAULT FALSE,
+  is_visited BOOLEAN DEFAULT FALSE,
   
   -- Time analytics
   time_spent_seconds INTEGER DEFAULT 0,
@@ -217,6 +220,81 @@ CREATE TABLE IF NOT EXISTS public.user_analytics (
 );
 
 -- ============================================================================
+-- ACCESS CONTROL (SOFT LAUNCH)
+-- ============================================================================
+
+-- Enums
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'signup_mode') THEN
+    CREATE TYPE public.signup_mode AS ENUM ('OPEN', 'GATED');
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_status') THEN
+    CREATE TYPE public.access_status AS ENUM ('active', 'pending', 'rejected');
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_request_status') THEN
+    CREATE TYPE public.access_request_status AS ENUM ('pending', 'approved', 'rejected');
+  END IF;
+END $$;
+
+-- App settings (central brain)
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  setting_key TEXT NOT NULL UNIQUE,
+  setting_value TEXT NOT NULL,
+  updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- User access status
+CREATE TABLE IF NOT EXISTS public.user_access (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+  status public.access_status NOT NULL DEFAULT 'pending',
+  reason TEXT,
+  decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  decided_at TIMESTAMP WITH TIME ZONE,
+  source TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_access_status ON public.user_access(status);
+
+-- Access requests (waitlist inbox)
+CREATE TABLE IF NOT EXISTS public.access_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  email TEXT NOT NULL,
+  status public.access_request_status NOT NULL DEFAULT 'pending',
+  source TEXT,
+  notes TEXT,
+  decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  decided_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS access_requests_email_unique
+ON public.access_requests (LOWER(email));
+
+CREATE UNIQUE INDEX IF NOT EXISTS access_requests_user_unique
+ON public.access_requests (user_id)
+WHERE user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_access_requests_status
+ON public.access_requests (status);
+
+-- ============================================================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================================================
 CREATE INDEX idx_questions_paper_section ON public.questions(paper_id, section);
@@ -239,6 +317,31 @@ ALTER TABLE public.attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.responses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leaderboard ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_analytics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_access ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.access_requests ENABLE ROW LEVEL SECURITY;
+
+-- Access control policies
+CREATE POLICY "Admins can manage app settings" ON public.app_settings
+  FOR ALL USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY "Users can view own access status" ON public.user_access
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can self-create pending access status" ON public.user_access
+  FOR INSERT WITH CHECK (auth.uid() = user_id AND status = 'pending');
+
+CREATE POLICY "Admins can manage access status" ON public.user_access
+  FOR ALL USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY "Users can create own access request" ON public.access_requests
+  FOR INSERT WITH CHECK (auth.uid() = user_id AND status = 'pending');
+
+CREATE POLICY "Users can view own access request" ON public.access_requests
+  FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Admins can manage access requests" ON public.access_requests
+  FOR ALL USING (public.is_admin()) WITH CHECK (public.is_admin());
 
 -- Users policies
 CREATE POLICY "Users can view their own profile" ON public.users
@@ -286,6 +389,13 @@ CREATE POLICY "Users can create attempts within limit" ON public.attempts
   WITH CHECK (
     auth.uid() = user_id
     AND (
+      public.is_admin()
+      OR EXISTS (
+        SELECT 1 FROM public.user_access ua
+        WHERE ua.user_id = auth.uid() AND ua.status = 'active'
+      )
+    )
+    AND (
       (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id) IS NULL
       OR (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id) <= 0
       OR (
@@ -332,11 +442,28 @@ REVOKE UPDATE (session_token) ON public.attempts FROM authenticated;
 CREATE POLICY "Users can create their own responses" ON public.responses
   FOR INSERT WITH CHECK (
     auth.uid() = (SELECT user_id FROM public.attempts WHERE id = attempt_id)
+    AND (
+      public.is_admin()
+      OR EXISTS (
+        SELECT 1 FROM public.user_access ua
+        WHERE ua.user_id = auth.uid() AND ua.status = 'active'
+      )
+    )
   );
 
 CREATE POLICY "Users can update their own responses" ON public.responses
   FOR UPDATE USING (
     auth.uid() = (SELECT user_id FROM public.attempts WHERE id = attempt_id)
+  )
+  WITH CHECK (
+    auth.uid() = (SELECT user_id FROM public.attempts WHERE id = attempt_id)
+    AND (
+      public.is_admin()
+      OR EXISTS (
+        SELECT 1 FROM public.user_access ua
+        WHERE ua.user_id = auth.uid() AND ua.status = 'active'
+      )
+    )
   );
 
 -- Leaderboard policies (everyone can view, system inserts)
@@ -445,6 +572,18 @@ CREATE TRIGGER handle_updated_at_responses
   BEFORE UPDATE ON public.responses
   FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
+CREATE TRIGGER handle_updated_at_app_settings
+  BEFORE UPDATE ON public.app_settings
+  FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+CREATE TRIGGER handle_updated_at_user_access
+  BEFORE UPDATE ON public.user_access
+  FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+CREATE TRIGGER handle_updated_at_access_requests
+  BEFORE UPDATE ON public.access_requests
+  FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
 -- Function to create user profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
@@ -464,6 +603,49 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Assign access status on signup (fail-closed to pending)
+CREATE OR REPLACE FUNCTION public.assign_access_status_on_signup()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_mode TEXT;
+  v_status public.access_status;
+BEGIN
+  SELECT CASE
+    WHEN setting_value = 'OPEN' THEN 'OPEN'
+    WHEN setting_value = 'GATED' THEN 'GATED'
+    ELSE 'GATED'
+  END
+  INTO v_mode
+  FROM public.app_settings
+  WHERE setting_key = 'signup_mode'
+  LIMIT 1;
+
+  IF v_mode IS NULL THEN
+    v_mode := 'GATED';
+  END IF;
+
+  v_status := CASE WHEN v_mode = 'OPEN'
+    THEN 'active'::public.access_status
+    ELSE 'pending'::public.access_status
+  END;
+
+  INSERT INTO public.user_access (user_id, status, source)
+  VALUES (NEW.id, v_status, 'auto_signup')
+  ON CONFLICT (user_id) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog;
+
+CREATE TRIGGER on_auth_user_created_access_status
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.assign_access_status_on_signup();
+
+-- Seed default signup mode (OPEN)
+INSERT INTO public.app_settings (setting_key, setting_value)
+VALUES ('signup_mode', 'OPEN')
+ON CONFLICT (setting_key) DO NOTHING;
 
 -- ============================================================================
 -- SCORING FUNCTION (DEPRECATED)
@@ -631,6 +813,8 @@ ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT 
 -- Add missing columns to attempts
 ALTER TABLE public.attempts ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE public.attempts ADD COLUMN IF NOT EXISTS time_taken_seconds INTEGER;
+ALTER TABLE public.attempts ADD COLUMN IF NOT EXISTS session_token UUID;
+ALTER TABLE public.attempts ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE public.attempts ADD COLUMN IF NOT EXISTS max_possible_score DECIMAL(6,2);
 ALTER TABLE public.attempts ADD COLUMN IF NOT EXISTS correct_count INTEGER DEFAULT 0;
 ALTER TABLE public.attempts ADD COLUMN IF NOT EXISTS incorrect_count INTEGER DEFAULT 0;
@@ -657,7 +841,7 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS best_percentile DECIMAL(5,2);
 -- Update status check constraint for attempts
 ALTER TABLE public.attempts DROP CONSTRAINT IF EXISTS attempts_status_check;
 ALTER TABLE public.attempts ADD CONSTRAINT attempts_status_check 
-  CHECK (status IN ('in_progress', 'submitted', 'completed', 'abandoned'));
+  CHECK (status IN ('in_progress', 'paused', 'submitted', 'completed', 'abandoned', 'expired'));
 
 -- Update section check constraint for questions
 ALTER TABLE public.questions DROP CONSTRAINT IF EXISTS questions_section_check;

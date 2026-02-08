@@ -1,6 +1,18 @@
-# DECISIONS.md – Architecture & SSOT Freeze (v0.1)
+# DECISIONS.md - Architecture & SSOT Freeze (v0.1)
 
 ## Changelog
+
+### 2026-02-07: Controlled Soft Launch Access Control (Phase 0-7)
+- **Added**: Access control foundations (signup_mode, user_access, access_requests) with RLS + signup trigger.
+  - Evidence: `docs/migrations/023_access_control_foundations.sql`
+- **Added**: RLS gating for attempts/responses based on active access.
+  - Evidence: `docs/migrations/024_access_control_rls.sql`
+- **Added**: Middleware + server-side access checks and waitlist flow.
+  - Evidence: `middleware.ts`, `src/lib/access-control.ts`, `src/app/coming-soon/page.tsx`
+- **Added**: Admin controls for signup mode and approvals.
+  - Evidence: `src/app/admin/access-control/page.tsx`, `src/app/admin/access-control/actions.ts`, `src/app/admin/page.tsx`
+- **Added**: Basic rate limits + telemetry for auth callback, access request, and mock start.
+  - Evidence: `src/lib/rate-limit.ts`, `src/lib/telemetry.ts`, `src/app/auth/callback/route.ts`, `src/app/coming-soon/page.tsx`, `src/app/mock/[paperId]/page.tsx`
 
 ### 2026-01-24: Phase A/B Security Verification (Runtime Reads + RBAC Hook)
 - **Verified**: Runtime read paths only use safe view `questions_exam` for exam fetches and result rendering.
@@ -19,7 +31,7 @@
 - **Added**: Back button navigation throughout admin panel
 - **Added**: Toast notifications for save success/error feedback
 - **Updated**: `MIGRATION_M6_RBAC.sql` - Added `question-images` Storage bucket with RLS policies
-- **Changed**: "Pause" button → "Exit Mock" with red styling in exam interface
+- **Changed**: "Pause" button -> "Exit Mock" with red styling in exam interface
 - **UI**: Editor now matches student exam view 1:1 (Mirror Principle)
 - **Storage**: Images upload to `question-images` bucket (5MB limit, admin-only upload)
 
@@ -34,7 +46,7 @@
 ---
 
 ## 1. Tech Stack Choice
-**Frontend:** Next.js 14 (App Router)  
+**Frontend:** Next.js 16 (App Router)  
 **Backend/DB:** Supabase (Auth + Database + Storage)  
 **UI Styling:** TailwindCSS  
 **TypeScript:** Yes  
@@ -43,7 +55,7 @@
 **Rationale:**  
 Next.js App Router allows clean SSR + static hybrid. Supabase offers integrated Auth and SQL DB for free tier. Both integrate smoothly with GitHub for CI/CD.
 
-**Netlify note:** Use the Netlify Next.js runtime/plugin with `netlify.toml`. Env vars live in Netlify → Site settings → Environment.
+**Netlify note:** Use the Netlify Next.js runtime/plugin with `netlify.toml`. Env vars live in Netlify -> Site settings -> Environment.
 ---
 
 ## 2. Trade-offs

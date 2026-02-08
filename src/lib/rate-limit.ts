@@ -89,6 +89,18 @@ export const RATE_LIMITS = {
         windowMs: 60_000,    // per minute
     },
 
+    // Waitlist request submissions
+    ACCESS_REQUEST: {
+        limit: 5,            // 5 requests
+        windowMs: 60_000,    // per minute
+    },
+
+    // Start mock attempts (prevent rapid creation)
+    START_MOCK: {
+        limit: 15,           // 15 attempts
+        windowMs: 60_000,    // per minute
+    },
+
     // General API endpoints - generous for pilot
     GENERAL_API: {
         limit: 300,          // 300 requests (up from 100)

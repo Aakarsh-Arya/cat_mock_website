@@ -14,7 +14,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type {
     QuestionSet,
     QuestionSetType,
@@ -138,6 +138,12 @@ export function QuestionSetEditor({
     const [contextBody, setContextBody] = useState(questionSet?.context_body ?? '');
     const [contextImageUrl, setContextImageUrl] = useState(questionSet?.context_image_url ?? '');
     const [metadata, setMetadata] = useState<QuestionSetMetadata>(questionSet?.metadata ?? {});
+
+    // Count paragraphs in context body for image position options
+    const paragraphCount = useMemo(() => {
+        if (!contextBody) return 0;
+        return contextBody.split(/\n\n+/).filter(p => p.trim()).length;
+    }, [contextBody]);
 
     // Questions
     const [questions, setQuestions] = useState<QuestionDraft[]>(() => {
@@ -514,6 +520,35 @@ export function QuestionSetEditor({
                                         />
                                     )}
                                 </div>
+
+                                {/* Image Position Selector - only show when image URL is provided */}
+                                {contextImageUrl && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Image Placement Position
+                                        </label>
+                                        <select
+                                            value={metadata.image_position ?? 'before'}
+                                            onChange={(e) => setMetadata({
+                                                ...metadata,
+                                                image_position: e.target.value as 'before' | 'after' | `after_para_${number}`
+                                            })}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-section-varc outline-none"
+                                        >
+                                            <option value="before">Before text (top)</option>
+                                            <option value="after">After text (bottom)</option>
+                                            {paragraphCount > 0 && Array.from({ length: paragraphCount }, (_, i) => (
+                                                <option key={`para-${i + 1}`} value={`after_para_${i + 1}`}>
+                                                    After paragraph {i + 1}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            Choose where the image appears relative to the passage text.
+                                            Paragraphs are detected by double line breaks.
+                                        </p>
+                                    </div>
+                                )}
                             </>
                         )}
 
@@ -727,12 +762,12 @@ function QuestionEditor({
                                 >
                                     {label}
                                 </button>
-                                <input
-                                    type="text"
+                                <textarea
                                     value={question.options[idx] ?? ''}
                                     onChange={(e) => onUpdateOption(idx, e.target.value)}
                                     placeholder={`Enter option ${label}...`}
-                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-section-varc outline-none"
+                                    rows={2}
+                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-section-varc outline-none resize-y min-h-[40px]"
                                 />
                                 {question.correct_answer === label && (
                                     <span className="text-status-answered text-sm font-medium">✓ Correct</span>

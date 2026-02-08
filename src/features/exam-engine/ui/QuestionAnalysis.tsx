@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { type SectionName, type QuestionType, type PerformanceReason } from '@/types/exam';
 import { getAnalysisStore } from '@/features/exam-engine/model/useExamStore';
+import { compareAnswers } from '@/features/exam-engine/lib/scoring';
 import { MathText } from './MathText';
 
 interface QuestionData {
@@ -62,6 +63,16 @@ type FilterType = 'all' | 'correct' | 'incorrect' | 'unanswered';
 /** Get response for a question */
 function getResponse(questionId: string, responses: ResponseData[]): ResponseData | undefined {
     return responses.find(r => r.question_id === questionId);
+}
+
+function resolveIsCorrect(question: QuestionData, response?: ResponseData): boolean | null {
+    if (!response) return null;
+    if (typeof response.is_correct === 'boolean') return response.is_correct;
+    const answer = response.answer;
+    if (answer === null || answer.trim() === '') return null;
+    const correct = question.correct_answer;
+    if (!correct || correct.trim() === '') return null;
+    return compareAnswers(answer, correct, question.question_type);
 }
 
 /** Get status styling - ONLY used when answer is revealed */
@@ -163,7 +174,7 @@ export function QuestionAnalysis({
     const baseFilteredQuestions = questions.filter(q => {
         const response = getResponse(q.id, responses);
         const hasAnswer = isAnswered(response);
-        const isCorrect = response?.is_correct;
+        const isCorrect = resolveIsCorrect(q, response);
 
         // Section filter
         if (activeSection !== 'all' && q.section !== activeSection) return false;
@@ -254,11 +265,11 @@ export function QuestionAnalysis({
     const stats = {
         correct: questions.filter(q => {
             const r = getResponse(q.id, responses);
-            return isAnswered(r) && r?.is_correct === true;
+            return isAnswered(r) && resolveIsCorrect(q, r) === true;
         }).length,
         incorrect: questions.filter(q => {
             const r = getResponse(q.id, responses);
-            return isAnswered(r) && r?.is_correct === false;
+            return isAnswered(r) && resolveIsCorrect(q, r) === false;
         }).length,
         unanswered: questions.filter(q => {
             const r = getResponse(q.id, responses);
@@ -350,16 +361,17 @@ export function QuestionAnalysis({
                             filteredQuestions.map((question) => {
                                 const response = getResponse(question.id, responses);
                                 const hasAnswer = isAnswered(response);
+                                const isCorrect = resolveIsCorrect(question, response);
                                 const isExpanded = expandedQuestions.has(question.id);
                                 const isSolutionVisible = visibleSolutions.has(question.id);
                                 // Masked Review Mode: Only show correct/incorrect styling after reveal
                                 const isRevealed = revealedIds.has(question.id);
                                 const style = isRevealed
-                                    ? getStatusStyle(response?.is_correct ?? null, hasAnswer)
+                                    ? getStatusStyle(isCorrect, hasAnswer)
                                     : getMaskedStyle();
                                 const isBookmarked = Boolean(bookmarkedQuestions[question.id]);
                                 const selectedReason = analysisReasons[question.id] ?? null;
-                                const isIncorrect = hasAnswer && response?.is_correct === false;
+                                const isIncorrect = hasAnswer && isCorrect === false;
                                 const isSkipped = !hasAnswer;
                                 const showReasonPicker = isIncorrect || isSkipped;
 
@@ -649,7 +661,7 @@ export function QuestionAnalysis({
                                                                 <h4 className="text-sm font-medium text-gray-500 mb-1">Your Answer</h4>
                                                                 <MathText
                                                                     text={response?.answer || '(Not answered)'}
-                                                                    className={`text-lg font-bold ${response?.is_correct ? 'text-green-600' : 'text-red-600'} [&_p]:my-0`}
+                                                                    className={`text-lg font-bold ${isCorrect === true ? 'text-green-600' : isCorrect === false ? 'text-red-600' : 'text-gray-500'} [&_p]:my-0`}
                                                                 />
                                                             </div>
                                                         </>

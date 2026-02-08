@@ -88,6 +88,13 @@ docs/migrations/014_soften_submit_rls.sql
 docs/migrations/015_landing_assets.sql
 docs/migrations/016_bug_reports.sql
 docs/migrations/017_bug_report_status.sql
+docs/migrations/018_purge_attempts_on_auth_delete.sql
+docs/migrations/019_force_resume_ultra_lenient.sql
+docs/migrations/020_pause_tracking.sql
+docs/migrations/021_validate_session_token_atomic.sql
+docs/migrations/022_validate_session_token_single_signature.sql
+docs/migrations/023_access_control_foundations.sql
+docs/migrations/024_access_control_rls.sql
 docs/Milestone_Change_Log.md
 docs/PHASE_0_LAYOUT_GUARDRAILS.md
 docs/README.md
@@ -102,6 +109,7 @@ middleware.ts
 next-env.d.ts
 next.config.ts
 package.json
+paper_v3.json
 postcss.config.js
 public/file.svg
 public/globe.svg
@@ -122,6 +130,8 @@ scripts/markdown_to_json_parser_v3.mjs
 scripts/parse-md-to-v3.mjs
 scripts/sanitize-question-data.mjs
 scripts/transform-cat-2025-slot-3-md.mjs
+src/app/admin/access-control/actions.ts
+src/app/admin/access-control/page.tsx
 src/app/admin/bug-reports/actions.ts
 src/app/admin/bug-reports/BugReportStatusSelect.tsx
 src/app/admin/bug-reports/page.tsx
@@ -165,6 +175,7 @@ src/app/auth/callback/route.ts
 src/app/auth/logout/route.ts
 src/app/auth/sign-in/page.tsx
 src/app/auth/test-login/page.tsx
+src/app/coming-soon/page.tsx
 src/app/dashboard/page.tsx
 src/app/exam/[attemptId]/ExamClient.tsx
 src/app/exam/[attemptId]/page.tsx
@@ -216,6 +227,7 @@ src/features/exam-engine/ui/ResultHeader.tsx
 src/features/exam-engine/ui/SectionalPerformance.tsx
 src/features/exam-engine/ui/TITARenderer.tsx
 src/features/shared/ui/PaletteShell.tsx
+src/lib/access-control.ts
 src/lib/ajv-validator.ts
 src/lib/cloudinary.ts
 src/lib/devTools.ts
@@ -226,6 +238,7 @@ src/lib/rate-limit.ts
 src/lib/supabase/client.ts
 src/lib/supabase/server.ts
 src/lib/supabase/service-role.ts
+src/lib/telemetry.ts
 src/lib/useLandingAssets.ts
 src/types/exam.ts
 src/types/react-katex.d.ts
@@ -1391,7 +1404,7 @@ USING (
 DO $$ 
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_role') THEN
-        CREATE TYPE public.app_role AS ENUM ('user', 'admin', 'editor');
+        CREATE TYPE public.app_role AS ENUM ('user', 'admin', 'editor', 'dev');
     END IF;
 END $$;
 
@@ -1436,7 +1449,7 @@ CREATE POLICY "Admins can view all roles" ON public.user_roles
     FOR SELECT USING (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
     );
 
@@ -1445,7 +1458,7 @@ CREATE POLICY "Admins can insert roles" ON public.user_roles
     FOR INSERT WITH CHECK (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
     );
 
@@ -1454,7 +1467,7 @@ CREATE POLICY "Admins can update roles" ON public.user_roles
     FOR UPDATE USING (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
         AND user_id != auth.uid() -- Cannot modify own role
     );
@@ -1464,7 +1477,7 @@ CREATE POLICY "Admins can delete roles" ON public.user_roles
     FOR DELETE USING (
         EXISTS (
             SELECT 1 FROM public.user_roles 
-            WHERE user_id = auth.uid() AND role = 'admin'
+            WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
         )
         AND user_id != auth.uid()
     );
@@ -1565,46 +1578,46 @@ DROP POLICY IF EXISTS "Admins can view all questions" ON public.questions;
 -- Papers: Admins can manage all papers
 CREATE POLICY "Admins can insert papers" ON public.papers
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can update papers" ON public.papers
     FOR UPDATE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can delete papers" ON public.papers
     FOR DELETE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- Questions: Admins can manage all questions
 CREATE POLICY "Admins can insert questions" ON public.questions
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can update questions" ON public.questions
     FOR UPDATE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can delete questions" ON public.questions
     FOR DELETE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- Admins can view ALL questions (including inactive ones)
 CREATE POLICY "Admins can view all questions" ON public.questions
     FOR SELECT USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- ============================================================================
@@ -1660,26 +1673,26 @@ CREATE POLICY "Authenticated users can view active contexts" ON public.question_
 
 CREATE POLICY "Admins can view all contexts" ON public.question_contexts
     FOR SELECT USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can insert contexts" ON public.question_contexts
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can update contexts" ON public.question_contexts
     FOR UPDATE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 CREATE POLICY "Admins can delete contexts" ON public.question_contexts
     FOR DELETE USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- ============================================================================
@@ -1714,15 +1727,15 @@ DROP POLICY IF EXISTS "Admins can insert audit logs" ON public.admin_audit_log;
 -- Only admins can view audit logs
 CREATE POLICY "Admins can view audit logs" ON public.admin_audit_log
     FOR SELECT USING (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- System/admin can insert logs
 CREATE POLICY "Admins can insert audit logs" ON public.admin_audit_log
     FOR INSERT WITH CHECK (
-        (auth.jwt() ->> 'user_role') = 'admin'
-        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') = 'admin'
+        (auth.jwt() ->> 'user_role') IN ('admin', 'dev')
+        OR (auth.jwt() -> 'app_metadata' ->> 'user_role') IN ('admin', 'dev')
     );
 
 -- ============================================================================
@@ -1738,7 +1751,7 @@ SET search_path = public, pg_catalog
 AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.user_roles
-        WHERE user_id = auth.uid() AND role = 'admin'
+        WHERE user_id = auth.uid() AND role IN ('admin', 'dev')
     );
 $$;
 
@@ -5323,6 +5336,878 @@ CREATE POLICY "Admins can update bug reports" ON public.bug_reports
 -- SELECT id, status FROM public.bug_reports LIMIT 5;
 ````
 
+## File: docs/migrations/018_purge_attempts_on_auth_delete.sql
+````sql
+-- ============================================================================
+-- Migration 018: Purge Attempts/Responses on Auth User Deletion
+-- ============================================================================
+-- Purpose: Ensure attempts (and cascading responses) are deleted when a user
+--          is removed from auth.users. This prevents stale results from
+--          appearing after account deletion.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.handle_auth_user_delete()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+    -- Delete responses explicitly in case FK cascade is missing.
+    DELETE FROM public.responses
+    WHERE attempt_id IN (SELECT id FROM public.attempts WHERE user_id = OLD.id);
+
+    -- Delete attempts for the auth user.
+    DELETE FROM public.attempts WHERE user_id = OLD.id;
+
+    RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_deleted_cleanup ON auth.users;
+CREATE TRIGGER on_auth_user_deleted_cleanup
+    AFTER DELETE ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.handle_auth_user_delete();
+
+-- ============================================================================
+-- Verification
+-- ============================================================================
+-- 1) Delete a user from auth.users in Supabase.
+-- 2) Confirm their attempts are removed:
+--    SELECT * FROM public.attempts WHERE user_id = '<deleted_user_id>';
+````
+
+## File: docs/migrations/019_force_resume_ultra_lenient.sql
+````sql
+-- ============================================================================
+-- Migration 019: Force Resume Exam Session (Ultra-Lenient Threshold)
+-- ============================================================================
+-- Purpose: Allow force resume even after long gaps (e.g., next-day continuation).
+-- This aligns with mock behavior where attempts can be resumed later.
+-- ============================================================================
+
+DROP FUNCTION IF EXISTS force_resume_exam_session(UUID, UUID);
+
+CREATE FUNCTION force_resume_exam_session(
+    p_attempt_id UUID,
+    p_new_session_token UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_user_id UUID;
+    v_status TEXT;
+    v_last_activity TIMESTAMPTZ;
+    -- Ultra-lenient: allow resume up to 7 days of inactivity.
+    v_stale_threshold INTERVAL := INTERVAL '7 days';
+BEGIN
+    SELECT user_id, status, last_activity_at
+    INTO v_user_id, v_status, v_last_activity
+    FROM attempts
+    WHERE id = p_attempt_id;
+
+    IF v_user_id IS NULL OR v_user_id != auth.uid() THEN
+        RAISE EXCEPTION 'Unauthorized';
+    END IF;
+
+    IF v_status != 'in_progress' THEN
+        RAISE EXCEPTION 'Attempt is not in progress';
+    END IF;
+
+    IF v_last_activity IS NOT NULL AND v_last_activity < NOW() - v_stale_threshold THEN
+        RAISE EXCEPTION 'FORCE_RESUME_STALE';
+    END IF;
+
+    UPDATE attempts
+    SET session_token = p_new_session_token,
+        last_activity_at = NOW()
+    WHERE id = p_attempt_id;
+
+    RETURN TRUE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION force_resume_exam_session(UUID, UUID) TO authenticated;
+
+-- ============================================================================
+-- Rollback
+-- Run 010_force_resume_lenient.sql to restore 3-hour threshold.
+-- ============================================================================
+````
+
+## File: docs/migrations/020_pause_tracking.sql
+````sql
+-- ============================================================================
+-- Migration 020: Pause Tracking for Accurate Time Taken
+-- ============================================================================
+-- Purpose: Track total paused duration so scoring/analytics exclude pause time.
+-- Adds:
+--   - attempts.paused_at
+--   - attempts.total_paused_seconds
+-- Updates:
+--   - pause_exam_state
+--   - initialize_exam_session
+--   - force_resume_exam_session
+-- ============================================================================
+
+ALTER TABLE public.attempts
+    ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS total_paused_seconds INTEGER NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN public.attempts.paused_at IS 'Timestamp when the attempt was last paused.';
+COMMENT ON COLUMN public.attempts.total_paused_seconds IS 'Accumulated paused duration (seconds).';
+
+-- Backfill paused_at for currently paused attempts (best-effort)
+UPDATE public.attempts
+SET paused_at = COALESCE(paused_at, last_activity_at, updated_at, NOW())
+WHERE status = 'paused' AND paused_at IS NULL;
+
+-- --------------------------------------------------------------------------
+-- Pause RPC: set paused_at and keep total_paused_seconds unchanged
+-- --------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.pause_exam_state(UUID, TEXT, INT);
+
+CREATE OR REPLACE FUNCTION public.pause_exam_state(
+    p_attempt_id UUID,
+    p_current_section TEXT,
+    p_current_question INT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_attempt RECORD;
+    v_allow_pause BOOLEAN;
+BEGIN
+    -- Fetch attempt with paper info
+    SELECT a.id, a.user_id, a.status, a.paper_id, a.time_remaining, p.allow_pause
+    INTO v_attempt
+    FROM public.attempts a
+    JOIN public.papers p ON p.id = a.paper_id
+    WHERE a.id = p_attempt_id;
+
+    -- Validate attempt exists
+    IF v_attempt.id IS NULL THEN
+        RAISE EXCEPTION 'Attempt not found' USING ERRCODE = 'P0002';
+    END IF;
+
+    -- Validate ownership
+    IF v_attempt.user_id <> auth.uid() THEN
+        RAISE EXCEPTION 'Unauthorized' USING ERRCODE = '42501';
+    END IF;
+
+    -- Validate status
+    IF v_attempt.status <> 'in_progress' THEN
+        RAISE EXCEPTION 'Attempt is not in progress' USING ERRCODE = '42501';
+    END IF;
+
+    -- Check if pausing is allowed for this paper
+    v_allow_pause := COALESCE(v_attempt.allow_pause, FALSE);
+    IF NOT v_allow_pause THEN
+        RAISE EXCEPTION 'Pausing is not allowed for this exam' USING ERRCODE = '42501';
+    END IF;
+
+    -- Update attempt to paused state
+    UPDATE public.attempts
+    SET
+        status = 'paused',
+        current_section = p_current_section,
+        current_question = p_current_question,
+        last_activity_at = NOW(),
+        updated_at = NOW(),
+        paused_at = NOW()
+    WHERE id = p_attempt_id
+      AND user_id = auth.uid();
+
+    RETURN jsonb_build_object('success', TRUE, 'paused_at', NOW());
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.pause_exam_state(UUID, TEXT, INT) TO authenticated;
+
+-- --------------------------------------------------------------------------
+-- Initialize session: resume paused attempts and add pause duration
+-- --------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.initialize_exam_session(
+    p_attempt_id UUID,
+    p_user_id UUID
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_attempt RECORD;
+    v_new_token UUID;
+    v_paused_delta INTEGER := 0;
+BEGIN
+    -- Fetch attempt
+    SELECT id, user_id, status, session_token, paused_at, total_paused_seconds
+    INTO v_attempt
+    FROM public.attempts
+    WHERE id = p_attempt_id;
+
+    -- Validate
+    IF v_attempt.id IS NULL THEN
+        RAISE EXCEPTION 'Attempt not found' USING ERRCODE = 'P0002';
+    END IF;
+
+    IF v_attempt.user_id <> p_user_id THEN
+        RAISE EXCEPTION 'Unauthorized' USING ERRCODE = '42501';
+    END IF;
+
+    IF v_attempt.status NOT IN ('in_progress', 'paused') THEN
+        RAISE EXCEPTION 'Attempt is not active' USING ERRCODE = '42501';
+    END IF;
+
+    IF v_attempt.status = 'paused' AND v_attempt.paused_at IS NOT NULL THEN
+        v_paused_delta := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - v_attempt.paused_at))::INT);
+    END IF;
+
+    -- Generate new token
+    v_new_token := gen_random_uuid();
+
+    -- Update attempt
+    UPDATE public.attempts
+    SET
+        session_token = v_new_token,
+        status = CASE WHEN v_attempt.status = 'paused' THEN 'in_progress' ELSE status END,
+        last_activity_at = NOW(),
+        updated_at = NOW(),
+        paused_at = CASE WHEN v_attempt.status = 'paused' THEN NULL ELSE paused_at END,
+        total_paused_seconds = COALESCE(total_paused_seconds, 0) + v_paused_delta
+    WHERE id = p_attempt_id
+      AND user_id = p_user_id;
+
+    RETURN v_new_token;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.initialize_exam_session(UUID, UUID) TO authenticated;
+
+-- --------------------------------------------------------------------------
+-- Force resume: resume paused attempts and add pause duration
+-- --------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.force_resume_exam_session(UUID, UUID);
+
+CREATE OR REPLACE FUNCTION public.force_resume_exam_session(
+    p_attempt_id UUID,
+    p_new_session_token UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_attempt RECORD;
+    v_paused_delta INTEGER := 0;
+    v_stale_threshold INTERVAL := INTERVAL '7 days';
+BEGIN
+    -- Get current attempt state
+    SELECT id, user_id, status, session_token, last_activity_at, paused_at, total_paused_seconds
+    INTO v_attempt
+    FROM public.attempts
+    WHERE id = p_attempt_id;
+
+    -- Validate attempt exists
+    IF v_attempt.id IS NULL THEN
+        RAISE EXCEPTION 'Attempt not found' USING ERRCODE = 'P0002';
+    END IF;
+
+    -- Validate ownership
+    IF v_attempt.user_id <> auth.uid() THEN
+        RAISE EXCEPTION 'Unauthorized' USING ERRCODE = '42501';
+    END IF;
+
+    -- Validate status (allow in_progress and paused)
+    IF v_attempt.status NOT IN ('in_progress', 'paused') THEN
+        RAISE EXCEPTION 'Attempt is not resumable (status: %)', v_attempt.status
+            USING ERRCODE = '42501';
+    END IF;
+
+    -- Check staleness (allow long gaps for mocks)
+    IF v_attempt.last_activity_at IS NOT NULL
+       AND v_attempt.last_activity_at < (NOW() - v_stale_threshold) THEN
+        RAISE EXCEPTION 'FORCE_RESUME_STALE';
+    END IF;
+
+    IF v_attempt.status = 'paused' AND v_attempt.paused_at IS NOT NULL THEN
+        v_paused_delta := GREATEST(0, EXTRACT(EPOCH FROM (NOW() - v_attempt.paused_at))::INT);
+    END IF;
+
+    -- Update session token and resume
+    UPDATE public.attempts
+    SET
+        session_token = p_new_session_token,
+        status = CASE WHEN v_attempt.status = 'paused' THEN 'in_progress' ELSE status END,
+        last_activity_at = NOW(),
+        updated_at = NOW(),
+        paused_at = CASE WHEN v_attempt.status = 'paused' THEN NULL ELSE paused_at END,
+        total_paused_seconds = COALESCE(total_paused_seconds, 0) + v_paused_delta
+    WHERE id = p_attempt_id
+      AND user_id = auth.uid();
+
+    RETURN TRUE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.force_resume_exam_session(UUID, UUID) TO authenticated;
+````
+
+## File: docs/migrations/021_validate_session_token_atomic.sql
+````sql
+-- ============================================================================
+-- Migration 021: Validate Session Token (Atomic Init)
+-- ============================================================================
+-- Purpose: Fix TOCTOU race when initializing session_token for the first time.
+-- This makes the "token is NULL -> set token" branch atomic.
+-- ============================================================================
+
+DROP FUNCTION IF EXISTS public.validate_session_token(UUID, UUID, UUID, BOOLEAN);
+DROP FUNCTION IF EXISTS public.validate_session_token(UUID, UUID, UUID);
+
+CREATE OR REPLACE FUNCTION public.validate_session_token(
+    p_attempt_id UUID,
+    p_session_token UUID,
+    p_user_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_stored_token UUID;
+    v_user_id UUID;
+    v_status TEXT;
+    v_rows_updated INTEGER := 0;
+BEGIN
+    -- Get current attempt state
+    SELECT session_token, user_id, status
+    INTO v_stored_token, v_user_id, v_status
+    FROM public.attempts
+    WHERE id = p_attempt_id;
+
+    -- Check if attempt exists
+    IF v_user_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Check ownership
+    IF v_user_id != p_user_id THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Check status (allow in_progress and paused)
+    IF v_status NOT IN ('in_progress', 'paused') THEN
+        RETURN FALSE;
+    END IF;
+
+    -- If no session token set yet (first request), try to set it atomically
+    IF v_stored_token IS NULL THEN
+        UPDATE public.attempts
+        SET session_token = p_session_token,
+            last_activity_at = NOW()
+        WHERE id = p_attempt_id
+          AND user_id = p_user_id
+          AND session_token IS NULL;
+
+        GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+
+        IF v_rows_updated > 0 THEN
+            RETURN TRUE;
+        END IF;
+
+        -- Another request set the token first; re-read it.
+        SELECT session_token INTO v_stored_token
+        FROM public.attempts
+        WHERE id = p_attempt_id;
+    END IF;
+
+    -- Validate token matches
+    IF v_stored_token = p_session_token THEN
+        UPDATE public.attempts
+        SET last_activity_at = NOW()
+        WHERE id = p_attempt_id;
+        RETURN TRUE;
+    END IF;
+
+    -- Token mismatch
+    RETURN FALSE;
+END;
+$$;
+
+-- Overloaded signature used by API routes (keeps compatibility with named args)
+CREATE OR REPLACE FUNCTION public.validate_session_token(
+    p_attempt_id UUID,
+    p_session_token UUID,
+    p_user_id UUID,
+    p_force_resume BOOLEAN DEFAULT FALSE
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+    RETURN public.validate_session_token(p_attempt_id, p_session_token, p_user_id);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.validate_session_token(UUID, UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.validate_session_token(UUID, UUID, UUID, BOOLEAN) TO authenticated;
+````
+
+## File: docs/migrations/022_validate_session_token_single_signature.sql
+````sql
+-- ============================================================================
+-- Migration 022: Validate Session Token (Single Signature)
+-- ============================================================================
+-- Purpose: Remove overloaded signatures to avoid PostgREST ambiguity.
+-- Keeps the atomic init logic from migration 021.
+-- ============================================================================
+
+DROP FUNCTION IF EXISTS public.validate_session_token(UUID, UUID, UUID, BOOLEAN);
+
+CREATE OR REPLACE FUNCTION public.validate_session_token(
+    p_attempt_id UUID,
+    p_session_token UUID,
+    p_user_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_stored_token UUID;
+    v_user_id UUID;
+    v_status TEXT;
+    v_rows_updated INTEGER := 0;
+BEGIN
+    -- Get current attempt state
+    SELECT session_token, user_id, status
+    INTO v_stored_token, v_user_id, v_status
+    FROM public.attempts
+    WHERE id = p_attempt_id;
+
+    -- Check if attempt exists
+    IF v_user_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Check ownership
+    IF v_user_id != p_user_id THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Check status (allow in_progress and paused)
+    IF v_status NOT IN ('in_progress', 'paused') THEN
+        RETURN FALSE;
+    END IF;
+
+    -- If no session token set yet (first request), try to set it atomically
+    IF v_stored_token IS NULL THEN
+        UPDATE public.attempts
+        SET session_token = p_session_token,
+            last_activity_at = NOW()
+        WHERE id = p_attempt_id
+          AND user_id = p_user_id
+          AND session_token IS NULL;
+
+        GET DIAGNOSTICS v_rows_updated = ROW_COUNT;
+
+        IF v_rows_updated > 0 THEN
+            RETURN TRUE;
+        END IF;
+
+        -- Another request set the token first; re-read it.
+        SELECT session_token INTO v_stored_token
+        FROM public.attempts
+        WHERE id = p_attempt_id;
+    END IF;
+
+    -- Validate token matches
+    IF v_stored_token = p_session_token THEN
+        UPDATE public.attempts
+        SET last_activity_at = NOW()
+        WHERE id = p_attempt_id;
+        RETURN TRUE;
+    END IF;
+
+    -- Token mismatch
+    RETURN FALSE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.validate_session_token(UUID, UUID, UUID) TO authenticated;
+````
+
+## File: docs/migrations/023_access_control_foundations.sql
+````sql
+-- ============================================================================
+-- Migration 023: Access Control Foundations (Signup Mode + Waitlist)
+-- ============================================================================
+-- Purpose:
+--   1) Central app settings for signup mode (OPEN/GATED)
+--   2) Per-user access status (active/pending/rejected)
+--   3) Waitlist/access requests inbox
+--   4) Deterministic status assignment on signup (fail-closed)
+-- ============================================================================
+
+-- ============================================================================
+-- STEP 1: ENUM TYPES
+-- ============================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'signup_mode') THEN
+        CREATE TYPE public.signup_mode AS ENUM ('OPEN', 'GATED');
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_status') THEN
+        CREATE TYPE public.access_status AS ENUM ('active', 'pending', 'rejected');
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'access_request_status') THEN
+        CREATE TYPE public.access_request_status AS ENUM ('pending', 'approved', 'rejected');
+    END IF;
+END $$;
+
+-- ============================================================================
+-- STEP 2: APP SETTINGS (CENTRAL BRAIN)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.app_settings (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    setting_key TEXT NOT NULL UNIQUE,
+    setting_value TEXT NOT NULL,
+    updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+ALTER TABLE public.app_settings
+DROP CONSTRAINT IF EXISTS app_settings_signup_mode_check;
+
+ALTER TABLE public.app_settings
+ADD CONSTRAINT app_settings_signup_mode_check
+CHECK (
+    setting_key <> 'signup_mode' OR setting_value IN ('OPEN', 'GATED')
+);
+
+-- Seed default signup mode (OPEN)
+INSERT INTO public.app_settings (setting_key, setting_value)
+VALUES ('signup_mode', 'OPEN')
+ON CONFLICT (setting_key) DO NOTHING;
+
+-- ============================================================================
+-- STEP 3: USER ACCESS STATUS (PASSPORT)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.user_access (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
+    status public.access_status NOT NULL DEFAULT 'pending',
+    reason TEXT,
+    decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    decided_at TIMESTAMP WITH TIME ZONE,
+    source TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_access_status ON public.user_access(status);
+
+-- ============================================================================
+-- STEP 4: WAITLIST / ACCESS REQUESTS (INBOX)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.access_requests (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    email TEXT NOT NULL,
+    status public.access_request_status NOT NULL DEFAULT 'pending',
+    source TEXT,
+    notes TEXT,
+    decided_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    decided_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS access_requests_email_unique
+ON public.access_requests (LOWER(email));
+
+CREATE UNIQUE INDEX IF NOT EXISTS access_requests_user_unique
+ON public.access_requests (user_id)
+WHERE user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_access_requests_status
+ON public.access_requests (status);
+
+-- ============================================================================
+-- STEP 5: UPDATED_AT TRIGGERS (REUSE handle_updated_at)
+-- ============================================================================
+
+DROP TRIGGER IF EXISTS handle_updated_at_app_settings ON public.app_settings;
+CREATE TRIGGER handle_updated_at_app_settings
+BEFORE UPDATE ON public.app_settings
+FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+DROP TRIGGER IF EXISTS handle_updated_at_user_access ON public.user_access;
+CREATE TRIGGER handle_updated_at_user_access
+BEFORE UPDATE ON public.user_access
+FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+DROP TRIGGER IF EXISTS handle_updated_at_access_requests ON public.access_requests;
+CREATE TRIGGER handle_updated_at_access_requests
+BEFORE UPDATE ON public.access_requests
+FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+-- ============================================================================
+-- STEP 6: RLS POLICIES
+-- ============================================================================
+
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_access ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.access_requests ENABLE ROW LEVEL SECURITY;
+
+-- App settings: admins only
+DROP POLICY IF EXISTS "Admins can manage app settings" ON public.app_settings;
+CREATE POLICY "Admins can manage app settings" ON public.app_settings
+    FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- User access: users can view own, admins can manage
+DROP POLICY IF EXISTS "Users can view own access status" ON public.user_access;
+CREATE POLICY "Users can view own access status" ON public.user_access
+    FOR SELECT
+    USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can self-create pending access status" ON public.user_access;
+CREATE POLICY "Users can self-create pending access status" ON public.user_access
+    FOR INSERT
+    WITH CHECK (auth.uid() = user_id AND status = 'pending');
+
+DROP POLICY IF EXISTS "Admins can manage access status" ON public.user_access;
+CREATE POLICY "Admins can manage access status" ON public.user_access
+    FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- Access requests: users can create/view own, admins can manage
+DROP POLICY IF EXISTS "Users can create own access request" ON public.access_requests;
+CREATE POLICY "Users can create own access request" ON public.access_requests
+    FOR INSERT
+    WITH CHECK (auth.uid() = user_id AND status = 'pending');
+
+DROP POLICY IF EXISTS "Users can view own access request" ON public.access_requests;
+CREATE POLICY "Users can view own access request" ON public.access_requests
+    FOR SELECT
+    USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admins can manage access requests" ON public.access_requests;
+CREATE POLICY "Admins can manage access requests" ON public.access_requests
+    FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- ============================================================================
+-- STEP 7: DEFAULT ACCESS STATUS ASSIGNMENT (ON SIGNUP)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION public.assign_access_status_on_signup()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_mode TEXT;
+    v_status public.access_status;
+BEGIN
+    -- Default to GATED if settings are missing or invalid (fail-closed)
+    SELECT CASE
+        WHEN setting_value = 'OPEN' THEN 'OPEN'
+        WHEN setting_value = 'GATED' THEN 'GATED'
+        ELSE 'GATED'
+    END
+    INTO v_mode
+    FROM public.app_settings
+    WHERE setting_key = 'signup_mode'
+    LIMIT 1;
+
+    IF v_mode IS NULL THEN
+        v_mode := 'GATED';
+    END IF;
+
+    v_status := CASE WHEN v_mode = 'OPEN'
+        THEN 'active'::public.access_status
+        ELSE 'pending'::public.access_status
+    END;
+
+    INSERT INTO public.user_access (user_id, status, source)
+    VALUES (NEW.id, v_status, 'auto_signup')
+    ON CONFLICT (user_id) DO NOTHING;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_access_status ON auth.users;
+CREATE TRIGGER on_auth_user_created_access_status
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.assign_access_status_on_signup();
+
+-- Backfill existing users as active (do not retroactively lock)
+INSERT INTO public.user_access (user_id, status, source)
+SELECT id, 'active'::public.access_status, 'backfill'
+FROM auth.users
+ON CONFLICT (user_id) DO NOTHING;
+
+-- ============================================================================
+-- VERIFICATION QUERIES (RUN MANUALLY)
+-- ============================================================================
+-- SELECT * FROM public.app_settings WHERE setting_key = 'signup_mode';
+-- SELECT status, COUNT(*) FROM public.user_access GROUP BY status;
+-- SELECT * FROM public.access_requests ORDER BY created_at DESC LIMIT 5;
+-- SELECT proname FROM pg_proc WHERE proname = 'assign_access_status_on_signup';
+
+-- ============================================================================
+-- ROLLBACK (MANUAL)
+-- ============================================================================
+-- DROP TRIGGER IF EXISTS on_auth_user_created_access_status ON auth.users;
+-- DROP FUNCTION IF EXISTS public.assign_access_status_on_signup();
+-- DROP TABLE IF EXISTS public.access_requests;
+-- DROP TABLE IF EXISTS public.user_access;
+-- DROP TABLE IF EXISTS public.app_settings;
+-- DROP TYPE IF EXISTS public.access_request_status;
+-- DROP TYPE IF EXISTS public.access_status;
+-- DROP TYPE IF EXISTS public.signup_mode;
+````
+
+## File: docs/migrations/024_access_control_rls.sql
+````sql
+-- ============================================================================
+-- Migration 024: Access Control RLS Gate for Attempts/Responses
+-- ============================================================================
+-- Purpose: Prevent non-active users from creating attempts or writing responses.
+-- Dependencies: 023_access_control_foundations.sql (user_access table + enums)
+-- ============================================================================
+
+-- --------------------------------------------------------------------------
+-- STEP 1: Attempts INSERT policy (require active access or admin)
+-- --------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS "Users can create attempts within limit" ON public.attempts;
+
+CREATE POLICY "Users can create attempts within limit" ON public.attempts
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        auth.uid() = user_id
+        AND (
+            public.is_admin()
+            OR EXISTS (
+                SELECT 1
+                FROM public.user_access ua
+                WHERE ua.user_id = auth.uid()
+                  AND ua.status = 'active'
+            )
+        )
+        AND (
+            (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id) IS NULL
+            OR (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id) <= 0
+            OR (
+                SELECT COUNT(*)
+                FROM public.attempts a
+                WHERE a.user_id = auth.uid()
+                  AND a.paper_id = attempts.paper_id
+                  AND a.status <> 'expired'
+            ) < (SELECT attempt_limit FROM public.papers p WHERE p.id = attempts.paper_id)
+        )
+    );
+
+-- --------------------------------------------------------------------------
+-- STEP 2: Responses INSERT/UPDATE policies (require active access or admin)
+-- --------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS "Users can create their own responses" ON public.responses;
+CREATE POLICY "Users can create their own responses" ON public.responses
+    FOR INSERT TO authenticated
+    WITH CHECK (
+        attempt_id IN (
+            SELECT id
+            FROM public.attempts
+            WHERE user_id = auth.uid()
+              AND status IN ('in_progress', 'paused')
+        )
+        AND (
+            public.is_admin()
+            OR EXISTS (
+                SELECT 1
+                FROM public.user_access ua
+                WHERE ua.user_id = auth.uid()
+                  AND ua.status = 'active'
+            )
+        )
+    );
+
+DROP POLICY IF EXISTS "Users can update their own responses" ON public.responses;
+CREATE POLICY "Users can update their own responses" ON public.responses
+    FOR UPDATE TO authenticated
+    USING (
+        attempt_id IN (
+            SELECT id
+            FROM public.attempts
+            WHERE user_id = auth.uid()
+              AND status IN ('in_progress', 'paused')
+        )
+    )
+    WITH CHECK (
+        attempt_id IN (
+            SELECT id
+            FROM public.attempts
+            WHERE user_id = auth.uid()
+              AND status IN ('in_progress', 'paused')
+        )
+        AND (
+            public.is_admin()
+            OR EXISTS (
+                SELECT 1
+                FROM public.user_access ua
+                WHERE ua.user_id = auth.uid()
+                  AND ua.status = 'active'
+            )
+        )
+    );
+
+-- ============================================================================
+-- VERIFICATION (RUN MANUALLY)
+-- ============================================================================
+-- As pending user:
+--   INSERT INTO attempts (...) should fail.
+--   INSERT/UPDATE responses should fail.
+-- As active user:
+--   INSERT INTO attempts (...) should succeed (within attempt limit).
+````
+
 ## File: docs/Milestone_Change_Log.md
 ````markdown
 # M5 Architecture Log (Milestone 5 - Results & Analytics Engine)
@@ -7380,14 +8265,2137 @@ ALTER TABLE public.questions ADD CONSTRAINT questions_section_check
 */
 ````
 
-## File: next-env.d.ts
-````typescript
-/// <reference types="next" />
-/// <reference types="next/image-types/global" />
-import "./.next/dev/types/routes.d.ts";
-
-// NOTE: This file should not be edited
-// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+## File: paper_v3.json
+````json
+{
+  "schema_version": "v3.0",
+  "paper": {
+    "paper_key": "cat-2022-slot-1",
+    "title": "CAT 2022 Slot 1",
+    "slug": "cat-2022-slot-1",
+    "description": "Official CAT 2022 Slot 1 Question Paper inferred from content",
+    "year": 2022,
+    "total_questions": 66,
+    "total_marks": 198,
+    "duration_minutes": 120,
+    "sections": [
+      "VARC",
+      "DILR",
+      "QA"
+    ],
+    "default_positive_marks": 3,
+    "default_negative_marks": 1,
+    "difficulty_level": "medium",
+    "is_free": false,
+    "published": false,
+    "allow_pause": true,
+    "attempt_limit": 0
+  },
+  "question_sets": [
+    {
+      "client_set_id": "VARC_RC_1",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 1,
+      "context_type": "rc_passage",
+      "context_title": "Stoicism & Emotions",
+      "content_layout": "split_passage",
+      "context_body": "Stoicism was founded in 300 BC by the Greek philosopher Zeno and survived into the Roman era until about AD 300\\. According to the Stoics, emotions consist of two movements. The first movement is the immediate feeling and other reactions (e.g., physiological response) that occur when a stimulus or event occurs. For instance, consider what could have happened if an army general accused Marcus Aurelius of treason in front of other officers. The first movement for Marcus may have been (internal) surprise and anger in response to this insult, accompanied perhaps by some involuntary physiological and expressive responses such as face flushing and a movement of the eyebrows. The second movement is what one does next about the emotion. Second movement behaviors occur after thinking and are under one’s control. Examples of second movements for Marcus might have included a plot to seek revenge, actions signifying deference and appeasement, or perhaps proceeding as he would have proceeded whether or not this event occurred: continuing to lead the Romans in a way that Marcus Aurelius believed best benefited them. In the Stoic view, choosing a reasoned, unemotional response as the second movement is the only appropriate response.\nThe Stoics believed that to live the good life and be a good person, we need to free ourselves of nearly all desires such as too much desire for money, power, or sexual gratification. Prior to second movements, we can consider what is important in life. Money, power, and excessive sexual gratification are not important. Character, rationality, and kindness are important. The Epicureans, first associated with the Greek philosopher Epicurus . . . held a similar view, believing that people should enjoy simple pleasures, such as good conversation, friendship, food, and wine, but not be indulgent in these pursuits and not follow passion for those things that hold no real value like power and money. As Oatley (2004) states, “the Epicureans articulated a view —enjoyment of relationship with friends, of things that are real rather than illusory, simple rather than artificially inflated, possible rather than vanishingly unlikely—that is certainly relevant today” . . .\nIn sum, these ancient Greek and Roman philosophers saw emotions, especially strong ones, as potentially dangerous. They viewed emotions as experiences that needed to be \\[reined\\] in and controlled. As Oatley (2004) points out, the Stoic idea bears some similarity to Buddhism. Buddha, living in India in the 6th century BC, argued for cultivating a certain attitude that decreases the probability of (in Stoic terms) destructive second movements. Through meditation and the right attitude, one allows emotions to happen to oneself (it is impossible to prevent this), but one is advised to observe the emotions without necessarily acting on them; one achieves some distance and decides what has value and what does not have value. Additionally, the Stoic idea of developing virtue in oneself, of becoming a good person, which the Stoics believed we could do because we have a touch of the divine, laid the foundation for the three monotheistic religions: Judaism, Christianity, and Islam . . . As with Stoicism, tenets of these religions include controlling our emotions lest we engage in sinful behavior."
+    },
+    {
+      "client_set_id": "VARC_RC_2",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 2,
+      "context_type": "rc_passage",
+      "context_title": "Copies (East vs West)",
+      "content_layout": "split_passage",
+      "context_body": "The Chinese have two different concepts of a copy. Fangzhipin . . . are imitations where the difference from the original is obvious. These are small models or copies that can be purchased in a museum shop, for example. The second concept for a copy is fuzhipin . . . They are exact reproductions of the original, which, for the Chinese, are of equal value to the original. It has absolutely no negative connotations. The discrepancy with regard to the understanding of what a copy is has often led to misunderstandings and arguments between China and Western museums. The Chinese often send copies abroad instead of originals, in the firm belief that they are not essentially different from the originals. The rejection that then comes from the Western museums is perceived by the Chinese as an insult. . . .\nThe Far Eastern notion of identity is also very confusing to the Western observer. The Ise Grand Shrine \\[in Japan\\] is 1,300 years old for the millions of Japanese people who go there on pilgrimage every year. But in reality this temple complex is completely rebuilt from scratch every 20 years. . . . The cathedral of Freiburg Minster in southwest Germany is covered in scaffolding almost all year round. The sandstone from which it is built is a very soft, porous material that does not withstand natural erosion by rain and wind. After a while, it crumbles. As a result, the cathedral is continually being examined for damage, and eroded stones are replaced. And in the cathedral’s dedicated workshop, copies of the damaged sandstone figures are constantly being produced. Of course, attempts are made to preserve the stones from the Middle Ages for as long as possible. But at some point they, too, are removed and replaced with new stones. Fundamentally, this is the same operation as with the Japanese shrine, except in this case the production of a replica takes place very slowly and over long periods of time. . . .\nIn the field of art as well, the idea of an unassailable original developed historically in the Western world. Back in the 17th century \\[in the West\\], excavated artworks from antiquity were treated quite differently from today. They were not restored in a way that was faithful to the original. Instead, there was massive intervention in these works, changing their appearance. . . . It is probably this intellectual position that explains why Asians have far fewer scruples about cloning than Europeans. The South Korean cloning researcher Hwang Woo-suk, who attracted worldwide attention with his cloning experiments in 2004, is a Buddhist. He found a great deal of support and followers among Buddhists, while Christians called for a ban on human cloning. . . . Hwang legitimised his cloning experiments with his religious affiliation: ‘I am Buddhist, and I have no philosophical problem with cloning. And as you know, the basis of Buddhism is that life is recycled through reincarnation. In some ways, I think, therapeutic cloning restarts the circle of life.’"
+    },
+    {
+      "client_set_id": "VARC_RC_3",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 3,
+      "context_type": "rc_passage",
+      "context_title": "The Undead",
+      "content_layout": "split_passage",
+      "context_body": "Stories concerning the Undead have always been with us. From out of the primal darkness of Mankind’s earliest years, come whispers of eerie creatures, not quite alive (or alive in a way which we can understand), yet not quite dead either. These may have been ancient and primitive deities who dwelt deep in the surrounding forests and in remote places, or simply those deceased who refused to remain in their tombs and who wandered about the countryside, physically tormenting and frightening those who were still alive. Mostly they were ill-defined—strange sounds in the night beyond the comforting glow of the fire, or a shape, half-glimpsed in the twilight along the edge of an encampment. They were vague and indistinct, but they were always there with the power to terrify and disturb. They had the power to touch the minds of our early ancestors and to fill them with dread. Such fear formed the basis of the earliest tales although the source and exact nature of such terrors still remained very vague.\nAnd as Mankind became more sophisticated, leaving the gloom of their caves and forming themselves into recognizable communities—towns, cities, whole cultures—so the Undead travelled with them, inhabiting their folklore just as they had in former times. Now they began to take on more definite shapes. They became walking cadavers; the physical embodiment of former deities and things which had existed alongside Man since the Creation. Some still remained vague and ill-defined but, as Mankind strove to explain the horror which it felt towards them, such creatures emerged more readily into the light. In order to confirm their abnormal status, many of the Undead were often accorded attributes, which defied the natural order of things—the power to transform themselves into other shapes, the ability to sustain themselves by drinking human blood, and the ability to influence human minds across a distance. Such powers—described as supernatural—only \\[lent\\] an added dimension to the terror that humans felt regarding them.\nAnd it was only natural, too, that the Undead should become connected with the practice of magic. From very early times, Shamans and witchdoctors had claimed at least some power and control over the spirits of departed ancestors, and this has continued down into more “civilized” times. Formerly, the invisible spirits and forces that thronged around men’s earliest encampments, had spoken “through” the tribal Shamans but now, as entities in their own right, they were subject to magical control and could be physically summoned by a competent sorcerer. However, the relationship between the magician and an Undead creature was often a very tenuous and uncertain one. Some sorcerers might have even become Undead entities once they died, but they might also have been susceptible to the powers of other magicians when they did. From the Middle Ages and into the Age of Enlightenment, theories of the Undead continued to grow and develop. Their names became more familiar—werewolf, vampire, ghoul—each one certain to strike fear into the hearts of ordinary humans."
+    },
+    {
+      "client_set_id": "VARC_RC_4",
+      "section": "VARC",
+      "set_type": "VARC",
+      "display_order": 4,
+      "context_type": "rc_passage",
+      "context_title": "Critical Theory of Technology",
+      "content_layout": "split_passage",
+      "context_body": "Critical theory of technology is a political theory of modernity with a normative dimension. It belongs to a tradition extending from Marx to Foucault and Habermas according to which advances in the formal claims of human rights take center stage while in the background centralization of ever more powerful public institutions and private organizations imposes an authoritarian social order. Marx attributed this trajectory to the capitalist rationalization of production. Today it marks many institutions besides the factory and every modern political system, including so-called socialist systems. This trajectory arose from the problems of command over a disempowered and deskilled labor force; but everywhere \\[that\\] masses are organized \\- whether it be Foucault’s prisons or Habermas’s public sphere \\- the same pattern prevails. Technological design and development is shaped by this pattern as the material base of a distinctive social order. Marcuse would later point to a “project” as the basis of what he called rather confusingly “technological rationality.” Releasing technology from this project is a democratic political task.\nIn accordance with this general line of thought, critical theory of technology regards technologies as an environment rather than as a collection of tools. We live today with and even within technologies that determine our way of life. Along with the constant pressures to build centers of power, many other social values and meanings are inscribed in technological design. A hermeneutics of technology must make explicit the meanings implicit in the devices we use and the rituals they script. Social histories of technologies such as the bicycle, artificial lighting or firearms have made important contributions to this type of analysis. Critical theory of technology attempts to build a methodological approach on the lessons of these histories.\nAs an environment, technologies shape their inhabitants. In this respect, they are comparable to laws and customs. Each of these institutions can be said to represent those who live under their sway through privileging certain dimensions of their human nature. Laws of property represent the interest in ownership and control. Customs such as parental authority represent the interest of childhood in safety and growth. Similarly, the automobile represents its users in so far as they are interested in mobility. Interests such as these constitute the version of human nature sanctioned by society.\nThis notion of representation does not imply an eternal human nature. The concept of nature as non-identity in the Frankfurt School suggests an alternative. On these terms, nature is what lies at the limit of history, at the point at which society loses the capacity to imprint its meanings on things and control them effectively. The reference here is, of course, not to the nature of natural science, but to the lived nature in which we find ourselves and which we are. This nature reveals itself as that which cannot be totally encompassed by the machinery of society. For the Frankfurt School, human nature, in all its transcending force, emerges out of a historical context as that context is \\[depicted\\] in illicit joys, struggles and pathologies. We can perhaps admit a less romantic . . . conception in which those dimensions of human nature recognized by society are also granted theoretical legitimacy."
+    },
+    {
+      "client_set_id": "VARC_ATOMIC_1",
+      "section": "VARC",
+      "set_type": "ATOMIC",
+      "display_order": 5
+    },
+    {
+      "client_set_id": "DILR_SET_1",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 1,
+      "context_type": "dilr_set",
+      "context_title": "Hockey Players",
+      "content_layout": "split_table",
+      "context_body": "The management of a university hockey team was evaluating performance of four women players \\- Amla, Bimla, Harita and Sarita for their possible selection in the university team for next year. For this purpose, the management was looking at the number of goals scored by them in the past 8 matches, numbered 1 through 8\\. The four players together had scored a total of 12 goals in these matches. In the 8 matches, each of them had scored at least one goal. No two players had scored the same total number of goals. The following facts are known about the goals scored by these four players only:\n1\\. Only one goal was scored in every even numbered match.\n2\\. Harita scored more goals than Bimla.\n3\\. The highest goal scorer scored goals in exactly 3 matches including Match 4 and Match 8\\.\n4\\. Bimla scored a goal in Match 1 and one each in three other consecutive matches.\n5\\. An equal number of goals were scored in Match 3 and Match 7, which was different from the number of goals scored in either Match 1 or Match 5\\.\n6\\. The match in which the highest number of goals was scored was unique and it was not Match 5\\."
+    },
+    {
+      "client_set_id": "DILR_SET_2",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 2,
+      "context_type": "dilr_set",
+      "context_title": "Class Get-Together",
+      "content_layout": "split_table",
+      "context_body": "There are 15 girls and some boys among the graduating students in a class. They are planning a get-together, which can be either a 1-day event, or a 2-day event, or a 3-day event. There are 6 singers in the class, 4 of them are boys. There are 10 dancers in the class, 4 of them are girls. No dancer in the class is a singer. Some students are not interested in attending the get-together. Those students who are interested in attending a 3-day event are also interested in attending a 2-day event; those who are interested in attending a 2-day event are also interested in attending a 1-day event. The following facts are also known:\n1\\. All the girls and 80% of the boys are interested in attending a 1-day event. 60% of the boys are interested in attending a 2-day event.\n2\\. Some of the girls are interested in attending a 1-day event, but not a 2-day event; some of the other girls are interested in attending both.\n3\\. 70% of the boys who are interested in attending a 2-day event are neither singers nor dancers. 60% of the girls who are interested in attending a 2-day event are neither singers nor dancers.\n4\\. No girl is interested in attending a 3-day event. All male singers and 2 of the dancers are interested in attending a 3-day event.\n5\\. The number of singers interested in attending a 2-day event is one more than the number of dancers interested in attending a 2-day event."
+    },
+    {
+      "client_set_id": "DILR_SET_3",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 3,
+      "context_type": "dilr_set",
+      "context_title": "Funding Tokens",
+      "content_layout": "split_table",
+      "context_body": "Adhara, Bithi, Chhaya, Dhanavi, Esther, and Fathima are the interviewers in a process that awards funding for new initiatives. Every interviewer individually interviews each of the candidates individually and awards a token only if she recommends funding. A token has a face value of 2, 3, 5, 7, 11, or 13\\. Each interviewer awards tokens of a single face value only. Once all six interviews are over for a candidate, the candidate receives a funding that is Rs.1000 times the product of the face values of all the tokens. For example, if a candidate has tokens with face values 2, 5, and 7, then they get a funding of Rs.1000 × (2 × 5 × 7\\) \\= Rs.70,000. Pragnyaa, Qahira, Rasheeda, Smera, and Tantra were five candidates who received funding. The funds they received, in descending order, were Rs.390,000, Rs.210,000, Rs.165,000, Rs.77,000, and Rs.66,000. The following additional facts are known:\n1\\. Fathima awarded tokens to everyone except Qahira, while Adhara awarded tokens to no one except Pragnyaa.\n2\\. Rasheeda received the highest number of tokens that anyone received, but she did not receive one from Esther.\n3\\. Bithi awarded a token to Smera but not to Qahira, while Dhanavi awarded a token to Qahira but not to Smera."
+    },
+    {
+      "client_set_id": "DILR_SET_4",
+      "section": "DILR",
+      "set_type": "DILR",
+      "display_order": 4,
+      "context_type": "dilr_set",
+      "context_title": "Metro Services",
+      "content_layout": "split_table",
+      "context_body": "Given above is the schematic map of the metro lines in a city with rectangles denoting terminal stations (e.g. A), diamonds denoting junction stations (e.g. R) and small filled-up circles denoting other stations. Each train runs either in east-west or north-south direction, but not both. All trains stop for 2 minutes at each of the junction stations on the way and for 1 minute at each of the other stations. It takes 2 minutes to reach the next station for trains going in east-west direction and 3 minutes to reach the next station for trains going in north-south direction. From each terminal station, the first train starts at 6 am; the last trains leave the terminal stations at midnight. Otherwise, during the service hours, there are metro service every 15 minutes in the north-south lines and every 10 minutes in the east-west lines. A train must rest for at least 15 minutes after completing a trip at the terminal station, before it can undertake the next trip in the reverse direction. (All questions are related to this metro service only. Assume that if someone reaches a station exactly at the time a train is supposed to leave, (s)he can catch that train.)"
+    },
+    {
+      "client_set_id": "QA_ATOMIC_1",
+      "section": "QA",
+      "set_type": "ATOMIC",
+      "display_order": 1
+    }
+  ],
+  "questions": [
+    {
+      "client_question_id": "cat_2022_slot_1_Q1",
+      "set_ref": "VARC_RC_1",
+      "sequence_order": 1,
+      "section": "VARC",
+      "question_number": 1,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_inference",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference & Conclusion",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "“Through meditation and the right attitude, one allows emotions to happen to oneself (it is impossible to prevent this), but one is advised to observe the emotions without necessarily acting on them; one achieves some distance and decides what has value and what does not have value.”\nIn the context of the passage, which one of the following is not a possible implication of the quoted statement?",
+      "options": [
+        {
+          "id": "A",
+          "text": "“Meditation and the right attitude”, in this instance, implies an initially passive reception of all experiences."
+        },
+        {
+          "id": "B",
+          "text": "Meditation allows certain out-of-body experiences that permit us to gain the distance necessary to control our emotions."
+        },
+        {
+          "id": "C",
+          "text": "The observation of emotions in a distant manner corresponds to the second movement referred to earlier in the passage."
+        },
+        {
+          "id": "D",
+          "text": "Emotional responses can make it difficult to distinguish valuable experiences from valueless experiences."
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q2",
+      "set_ref": "VARC_RC_1",
+      "sequence_order": 2,
+      "section": "VARC",
+      "question_number": 2,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_inference",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference & Conclusion",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following statements would be an accurate inference from the example of Marcus Aurelius?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Marcus Aurelius was humiliated by the accusation of treason in front of the other officers."
+        },
+        {
+          "id": "B",
+          "text": "Marcus Aurelius was a Stoic whose philosophy survived into the Roman era."
+        },
+        {
+          "id": "C",
+          "text": "Marcus Aurelius plotted revenge in his quest for justice."
+        },
+        {
+          "id": "D",
+          "text": "Marcus Aurelius was one of the leaders of the Roman army."
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q3",
+      "set_ref": "VARC_RC_1",
+      "sequence_order": 3,
+      "section": "VARC",
+      "question_number": 3,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_detail",
+      "topic": "Reading Comprehension",
+      "subtopic": "Fact-Based / Specific Detail",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following statements, if false, could be seen as contradicting the facts/arguments in the passage?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Despite practising meditation and cultivating the right attitude, emotions cannot ever be controlled."
+        },
+        {
+          "id": "B",
+          "text": "The Greek philosopher Zeno survived into the Roman era until about AD 300\\."
+        },
+        {
+          "id": "C",
+          "text": "In the Epicurean view, indulging in simple pleasures is not desirable."
+        },
+        {
+          "id": "D",
+          "text": "In the Stoic view, choosing a reasoned, unemotional response as the first movement is an appropriate response to emotional situations."
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q4",
+      "set_ref": "VARC_RC_1",
+      "sequence_order": 4,
+      "section": "VARC",
+      "question_number": 4,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_detail",
+      "topic": "Reading Comprehension",
+      "subtopic": "Fact-Based / Specific Detail",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "On the basis of the passage, which one of the following statements can be regarded as true?",
+      "options": [
+        {
+          "id": "A",
+          "text": "The Stoics valorised the pursuit of money, power, and sexual gratification."
+        },
+        {
+          "id": "B",
+          "text": "The Stoic influences can be seen in multiple religions."
+        },
+        {
+          "id": "C",
+          "text": "The Epicureans believed in controlling all emotions."
+        },
+        {
+          "id": "D",
+          "text": "There were no Stoics in India at the time of the Roman civilisation."
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q5",
+      "set_ref": "VARC_RC_2",
+      "sequence_order": 1,
+      "section": "VARC",
+      "question_number": 5,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_inference",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference & Conclusion",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Based on the passage, which one of the following copies would a Chinese museum be unlikely to consider as having less value than the original?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Pablo Picasso’s painting of Vincent van Gogh’s original painting, bearing Picasso’s signature."
+        },
+        {
+          "id": "B",
+          "text": "Pablo Picasso’s painting of Vincent van Gogh’s original painting, identical in every respect."
+        },
+        {
+          "id": "C",
+          "text": "Pablo Picasso’s photograph of Vincent van Gogh’s original painting, printed to exactly the same scale."
+        },
+        {
+          "id": "D",
+          "text": "Pablo Picasso’s miniaturised, but otherwise faithful and accurate painting of Vincent van Gogh’s original painting."
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q6",
+      "set_ref": "VARC_RC_2",
+      "sequence_order": 2,
+      "section": "VARC",
+      "question_number": 6,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_inference",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference & Conclusion",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following scenarios is unlikely to follow from the arguments in the passage?",
+      "options": [
+        {
+          "id": "A",
+          "text": "A 17th-century British painter would have no problem adding personal touches when restoring an ancient Roman painting."
+        },
+        {
+          "id": "B",
+          "text": "A 20th-century Japanese Buddhist monk would value a reconstructed shrine as the original."
+        },
+        {
+          "id": "C",
+          "text": "A 17th-century French artist who adhered to a Christian worldview would need to be completely true to the original intent of a painting when restoring it."
+        },
+        {
+          "id": "D",
+          "text": "A 21st-century Christian scientist is likely to oppose cloning because of his philosophical orientation."
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q7",
+      "set_ref": "VARC_RC_2",
+      "sequence_order": 3,
+      "section": "VARC",
+      "question_number": 7,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_detail",
+      "topic": "Reading Comprehension",
+      "subtopic": "Fact-Based / Specific Detail",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following statements does not correctly express the similarity between the Ise Grand Shrine and the cathedral of Freiburg Minster?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Both were built as places of worship."
+        },
+        {
+          "id": "B",
+          "text": "Both can be regarded as very old structures."
+        },
+        {
+          "id": "C",
+          "text": "Both are continually undergoing restoration."
+        },
+        {
+          "id": "D",
+          "text": "Both will one day be completely rebuilt."
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q8",
+      "set_ref": "VARC_RC_2",
+      "sequence_order": 4,
+      "section": "VARC",
+      "question_number": 8,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_detail",
+      "topic": "Reading Comprehension",
+      "subtopic": "Fact-Based / Specific Detail",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "The value that the modern West assigns to “an unassailable original” has resulted in all of the following EXCEPT:",
+      "options": [
+        {
+          "id": "A",
+          "text": "it discourages them from simultaneous displays of multiple copies of a painting."
+        },
+        {
+          "id": "B",
+          "text": "it allows regular employment for certain craftsmen."
+        },
+        {
+          "id": "C",
+          "text": "it discourages them from making interventions in ancient art."
+        },
+        {
+          "id": "D",
+          "text": "it discourages them from carrying out human cloning."
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q9",
+      "set_ref": "VARC_RC_3",
+      "sequence_order": 1,
+      "section": "VARC",
+      "question_number": 9,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_inference",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference & Conclusion",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "“In order to confirm their abnormal status, many of the Undead were often accorded attributes, which defied the natural order of things . . .”\nWhich one of the following best expresses the claim made in this statement?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Human beings conceptualise the Undead as possessing abnormal features."
+        },
+        {
+          "id": "B",
+          "text": "The Undead are deified in nature’s order by giving them divine attributes."
+        },
+        {
+          "id": "C",
+          "text": "The natural attributes of the Undead are rendered abnormal by changing their status."
+        },
+        {
+          "id": "D",
+          "text": "According the Undead an abnormal status is to reject the natural order of things."
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q10",
+      "set_ref": "VARC_RC_3",
+      "sequence_order": 2,
+      "section": "VARC",
+      "question_number": 10,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_inference",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference & Conclusion",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following observations is a valid conclusion to draw from the statement, “From out of the primal darkness of Mankind’s earliest years, come whispers of eerie creatures, not quite alive (or alive in a way which we can understand), yet not quite dead either.”?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Mankind’s early years were marked by a belief in the existence of eerie creatures that were neither quite alive nor dead."
+        },
+        {
+          "id": "B",
+          "text": "Long ago, eerie creatures used to whisper in the primal darkness that they were not quite dead."
+        },
+        {
+          "id": "C",
+          "text": "Mankind’s primal years were marked by creatures alive with eerie whispers, but seen only in the darkness."
+        },
+        {
+          "id": "D",
+          "text": "We can understand the lives of the eerie creatures in Mankind’s early years through their whispers in the darkness."
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q11",
+      "set_ref": "VARC_RC_3",
+      "sequence_order": 3,
+      "section": "VARC",
+      "question_number": 11,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_main_idea",
+      "topic": "Reading Comprehension",
+      "subtopic": "Main Idea / Central Theme",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following statements best describes what the passage is about?",
+      "options": [
+        {
+          "id": "A",
+          "text": "The writer discusses the transition from primitive thinking to the Age of Enlightenment."
+        },
+        {
+          "id": "B",
+          "text": "The passage discusses the evolution of theories of the Undead from primitive thinking to the Age of Enlightenment."
+        },
+        {
+          "id": "C",
+          "text": "The passage describes the failure of human beings to fully comprehend their environment."
+        },
+        {
+          "id": "D",
+          "text": "The writer describes the ways in which the Undead come to be associated with Shamans and the practice of magic."
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q12",
+      "set_ref": "VARC_RC_3",
+      "sequence_order": 4,
+      "section": "VARC",
+      "question_number": 12,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_detail",
+      "topic": "Reading Comprehension",
+      "subtopic": "Fact-Based / Specific Detail",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "All of the following statements, if false, could be seen as being in accordance with the passage, EXCEPT:",
+      "options": [
+        {
+          "id": "A",
+          "text": "the Undead remained vague and ill-defined, even as Mankind strove to understand the horror they inspired."
+        },
+        {
+          "id": "B",
+          "text": "the transition from the Middle Ages to the Age of Enlightenment saw new theories of the Undead."
+        },
+        {
+          "id": "C",
+          "text": "the growing sophistication of Mankind meant that humans stopped believing in the Undead."
+        },
+        {
+          "id": "D",
+          "text": "the relationship between Shamans and the Undead was believed to be a strong and stable one."
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q13",
+      "set_ref": "VARC_RC_4",
+      "sequence_order": 1,
+      "section": "VARC",
+      "question_number": 13,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_main_idea",
+      "topic": "Reading Comprehension",
+      "subtopic": "Main Idea / Central Theme",
+      "difficulty": "hard",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following statements best reflects the main argument of the fourth paragraph of the passage?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Technology, laws, and customs are comparable, but dissimilar phenomena."
+        },
+        {
+          "id": "B",
+          "text": "Technological environments privilege certain dimensions of human nature as effectively as laws and customs."
+        },
+        {
+          "id": "C",
+          "text": "Automobiles represent the interest in mobility present in human nature."
+        },
+        {
+          "id": "D",
+          "text": "Technology, laws, and customs are not unlike each other if considered as institutions."
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q14",
+      "set_ref": "VARC_RC_4",
+      "sequence_order": 2,
+      "section": "VARC",
+      "question_number": 14,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_argument",
+      "topic": "Reading Comprehension",
+      "subtopic": "Author's Argument (Strengthen/Weaken)",
+      "difficulty": "hard",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following statements could be inferred as supporting the arguments of the passage?",
+      "options": [
+        {
+          "id": "A",
+          "text": "It is not human nature, but human culture that is represented by institutions such as law and custom."
+        },
+        {
+          "id": "B",
+          "text": "Technologies form the environmental context and shape the contours of human society."
+        },
+        {
+          "id": "C",
+          "text": "Nature decides the point at which society loses its capacity to control history."
+        },
+        {
+          "id": "D",
+          "text": "The romantic conception of nature referred to by the passage is the one that requires theoretical legitimacy."
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q15",
+      "set_ref": "VARC_RC_4",
+      "sequence_order": 3,
+      "section": "VARC",
+      "question_number": 15,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_argument",
+      "topic": "Reading Comprehension",
+      "subtopic": "Author's Argument (Strengthen/Weaken)",
+      "difficulty": "hard",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which one of the following statements contradicts the arguments of the passage?",
+      "options": [
+        {
+          "id": "A",
+          "text": "The problems of command over a disempowered and deskilled labour force gave rise to similar patterns of the capitalist rationalisation of production wherever masses were organised."
+        },
+        {
+          "id": "B",
+          "text": "Marx’s understanding of the capitalist rationalisation of production and Marcuse’s understanding of a “project” of “technological rationality” share theoretical inclinations."
+        },
+        {
+          "id": "C",
+          "text": "Masses are organised in patterns set by Foucault’s prisons and Habermas’ public sphere."
+        },
+        {
+          "id": "D",
+          "text": "Paradoxically, the capitalist rationalisation of production is a mark of so-called socialist systems as well."
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q16",
+      "set_ref": "VARC_RC_4",
+      "sequence_order": 4,
+      "section": "VARC",
+      "question_number": 16,
+      "question_type": "MCQ",
+      "taxonomy_type": "rc_inference",
+      "topic": "Reading Comprehension",
+      "subtopic": "Inference & Conclusion",
+      "difficulty": "hard",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "All of the following claims can be inferred from the passage, EXCEPT:",
+      "options": [
+        {
+          "id": "A",
+          "text": "the significance of parental authority to children’s safety does not therefore imply that parental authority is a permanent aspect of human nature."
+        },
+        {
+          "id": "B",
+          "text": "the critical theory of technology argues that, as issues of human rights become more prominent, we lose sight of the ways in which the social order becomes more authoritarian."
+        },
+        {
+          "id": "C",
+          "text": "analyses of technologies must engage with their social histories to be able to reveal their implicit and explicit meanings for us."
+        },
+        {
+          "id": "D",
+          "text": "technologies seek to privilege certain dimensions of human nature at a high cost to lived nature."
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q17",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 1,
+      "section": "VARC",
+      "question_number": 17,
+      "question_type": "MCQ",
+      "taxonomy_type": "para_jumble",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Sentence Completion",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "There is a sentence that is missing in the paragraph below. Look at the paragraph and decide in which blank (option 1, 2, 3, or 4\\) the following sentence would best fit.\nSentence: Having made citizens more and less knowledgeable than their predecessors, the Internet has proved to be both a blessing and a curse.\nParagraph: Never before has a population, nearly all of whom has enjoyed at a least a secondary school education, been exposed to so much information, whether in newspapers and magazines or through YouTube, Google, and Facebook. (1). Yet it is not clear that people today are more knowledgeable than their barely literate predecessors. Contemporary advances in technology offered more serious and inquisitive students access to realms of knowledge previously unimaginable and unavailable. (2). But such readily available knowledge leads many more students away from serious study, the reading of actual texts, and toward an inability to write effectively and grammatically. (3). It has let people choose sources that reinforce their opinions rather than encouraging them to question inherited beliefs. (4).",
+      "options": [
+        {
+          "id": "A",
+          "text": "Option 1"
+        },
+        {
+          "id": "B",
+          "text": "Option 2"
+        },
+        {
+          "id": "C",
+          "text": "Option 3"
+        },
+        {
+          "id": "D",
+          "text": "Option 4"
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q18",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 2,
+      "section": "VARC",
+      "question_number": 18,
+      "question_type": "MCQ",
+      "taxonomy_type": "para_summary",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Para Summary",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "The passage given below is followed by four alternate summaries. Choose the option that best captures the essence of the passage.\nPetitioning is an expeditious democratic tradition, used frequently in prior centuries, by which citizens can bring issues directly to governments. As expressions of collective voice, they support procedural democracy by shaping agendas. They can also recruit citizens to causes, give voice to the voteless, and apply the discipline of rhetorical argument that clarifies a point of view. By contrast, elections are limited in several respects: they involve only a few candidates, and thus fall far short of a representative democracy. Further, voters’ choices are not specific to particular policies or laws, and elections are episodic, whereas the voice of the people needs to be heard and integrated constantly into democratic government.",
+      "options": [
+        {
+          "id": "A",
+          "text": "By giving citizens greater control over shaping political and democratic agendas, political petitions are invaluable as they represent an ideal form of a representative democracy."
+        },
+        {
+          "id": "B",
+          "text": "Citizens become less inclined to petitioning as it enables vocal citizens to shape political agendas, but this needs to change to strengthen democracies today."
+        },
+        {
+          "id": "C",
+          "text": "Petitioning has been important to democratic functioning, as it supplements the electoral process by enabling ongoing engagement with the government."
+        },
+        {
+          "id": "D",
+          "text": "Petitioning is definitely more representative of the collective voice, and the functioning of democratic government could improve if we relied more on petitioning rather than holding periodic elections."
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q19",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 3,
+      "section": "VARC",
+      "question_number": 19,
+      "question_type": "MCQ",
+      "taxonomy_type": "para_jumble",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Sentence Completion",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "There is a sentence that is missing in the paragraph below. Look at the paragraph and decide in which blank (option 1, 2, 3, or 4\\) the following sentence would best fit.\nSentence: Easing the anxiety and pressure of having a “big day” is part of the appeal for many couples who marry in secret.\nParagraph: Wedding season is upon us and \\- after two years of Covid chaos that saw nuptials scaled back you may think the temptation would be to go all out. (1). But instead of expanding the guest list, many couples are opting to have entirely secret ceremonies. With Covid case numbers remaining high and the cost of living crisis meaning that many couples are feeling the pinch, it’s no wonder that some are less than eager to send out invites. (2). Plus, it can’t hurt that in celebrity circles getting married in secret is all the rage. (3). “I would definitely say that secret weddings are becoming more common,” says Landis Bejar, the founder of a therapy practice, which specialises in helping brides and grooms manage wedding stress. “People are looking for ways to get out of the spotlight and avoid the pomp and circumstance of weddings. (4). They just want to get to the part where they are married.”",
+      "options": [
+        {
+          "id": "A",
+          "text": "Option 1"
+        },
+        {
+          "id": "B",
+          "text": "Option 2"
+        },
+        {
+          "id": "C",
+          "text": "Option 3"
+        },
+        {
+          "id": "D",
+          "text": "Option 4"
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q20",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 4,
+      "section": "VARC",
+      "question_number": 20,
+      "question_type": "MCQ",
+      "taxonomy_type": "para_summary",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Para Summary",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "The passage given below is followed by four alternate summaries. Choose the option that best captures the essence of the passage.\nIt’s not that modern historians of medieval Africa have been ignorant about contacts between Ethiopia and Europe; they just had the power dynamic reversed. The traditional narrative stressed Ethiopia as weak and in trouble in the face of aggression from external forces, so Ethiopia sought military assistance from their fellow Christians to the north. But the real story, buried in plain sight in medieval diplomatic texts, simply had not yet been put together by modern scholars. Recent research pushes scholars of medieval Europe to imagine a much more richly connected medieval world: at the beginning of the so-called Age of Exploration, there is evidence that the kings of Ethiopia were sponsoring their own missions of diplomacy, faith and commerce.",
+      "options": [
+        {
+          "id": "A",
+          "text": "Medieval texts have documented how strong connections between the Christian communities of Ethiopia and Europe were invaluable in establishing military and trade links between the two civilisations."
+        },
+        {
+          "id": "B",
+          "text": "Historians were under the illusion that Ethiopia needed military protection from their neighbours, but in fact the country had close commercial and religious connections with them."
+        },
+        {
+          "id": "C",
+          "text": "Medieval texts have been ‘cherry-picked’ to promote a view of Ethiopia as weak and in need of Europe’s military help with aggressive neighbours, but recent studies reveal it was a well-connected and outward looking culture."
+        },
+        {
+          "id": "D",
+          "text": "Medieval historical sources selectively promoted the narrative that powerful European forces were called on to protect weak African civilisations such as Ethiopia, but this is far from reality."
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q21",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 5,
+      "section": "VARC",
+      "question_number": 21,
+      "question_type": "TITA",
+      "taxonomy_type": "para_jumble",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Parajumbles",
+      "difficulty": "medium",
+      "correct_answer": "2143",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "The four sentences (labelled 1, 2, 3 and 4\\) below, when properly sequenced, would yield a coherent paragraph. Decide on the proper sequencing of the order of the sentences and key in the sequence of the four numbers as your answer:\nSome company leaders are basing their decisions on locating offices to foster innovation and growth, as their best-performing inventors suffered the greatest productivity losses when their commutes grew longer.\nShorter commutes support innovation by giving employees more time in the office and greater opportunities for in-person collaboration, while removing the physical strain of a long commute.\nThis is not always the case: remote work does not automatically lead to greater creativity and productivity as office water-cooler conversations are also very important for innovation.\nSome see the link between long commutes and productivity as support for work-from-home scenarios, as many workers have grown accustomed to their commute-free arrangements during the pandemic.",
+      "solution_text": "The correct answer is 2143\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q22",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 6,
+      "section": "VARC",
+      "question_number": 22,
+      "question_type": "TITA",
+      "taxonomy_type": "para_jumble",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Parajumbles",
+      "difficulty": "medium",
+      "correct_answer": "3214",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "The four sentences (labelled 1, 2, 3 and 4\\) below, when properly sequenced, would yield a coherent paragraph. Decide on the proper sequencing of the order of the sentences and key in the sequence of the four numbers as your answer:\nThe creative element in product design has become of paramount importance as it is one of the few ways a firm or industry can sustain a competitive advantage over its rivals.\nIn fact, the creative element in the value of world industry would be larger still, if we added the contribution of the creative element in other industries, such as the design of tech accessories.\nThe creative industry is receiving a lot of attention today as its growth rate is faster than that of the world economy as a whole.\nIt is for this reason that today’s trade issues are increasingly involving intellectual property, as Western countries have an interest in protecting their revenues along with freeing trade in non-tangibles.",
+      "solution_text": "The correct answer is 3214\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q23",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 7,
+      "section": "VARC",
+      "question_number": 23,
+      "question_type": "MCQ",
+      "taxonomy_type": "para_summary",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Para Summary",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "The passage given below is followed by four alternate summaries. Choose the option that best captures the essence of the passage.\nAll that we think we know about how life hangs together is really some kind of illusion that we have perpetrated on ourselves because of our limited vision. What appear to be inanimate objects such as stones turn out not only to be alive in the same way that we are, but also in many infinitesimal ways to be affected by stimuli just as humans are. The distinction between animate and inanimate simply cannot be made when you enter the world of quantum mechanics and try to determine how those apparent subatomic particles, of which you and everything else in our universe is composed, are all tied together. The point is that physics and metaphysics show there is a pattern to the universe that goes beyond our capacity to grasp it with our brains.",
+      "options": [
+        {
+          "id": "A",
+          "text": "The effect of stimuli is similar in inanimate objects when compared to animate objects or living beings."
+        },
+        {
+          "id": "B",
+          "text": "Quantum physics indicates that an astigmatic view of reality results in erroneous assumptions about the universe."
+        },
+        {
+          "id": "C",
+          "text": "The inanimate world is both sentient and cognizant like its animate counterpart."
+        },
+        {
+          "id": "D",
+          "text": "Arbitrary distinctions between inanimate and animate objects disappear at the scale at which quantum mechanics works."
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q24",
+      "set_ref": "VARC_ATOMIC_1",
+      "sequence_order": 8,
+      "section": "VARC",
+      "question_number": 24,
+      "question_type": "TITA",
+      "taxonomy_type": "para_jumble",
+      "topic": "Verbal Ability (VA)",
+      "subtopic": "Parajumbles",
+      "difficulty": "medium",
+      "correct_answer": "2431",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "The four sentences (labelled 1, 2, 3 and 4\\) below, when properly sequenced, would yield a coherent paragraph. Decide on the proper sequencing of the order of the sentences and key in the sequence of the four numbers as your answer:\nFish skin collagen has excellent thermo-stability and tensile strength making it ideal for use as bandage that adheres to the skin and adjusts to body movements.\nCollagen, one of the main structural proteins in connective tissues in the human body, is well known for promoting skin regeneration.\nFish skin swims in here as diseases and bacteria that affect fish are different from most human pathogens.\nThe risk of introducing disease agents into other species through the use of pig and cow collagen proteins for wound healing has inhibited its broader applications in the medical field.",
+      "solution_text": "The correct answer is 2431\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q25",
+      "set_ref": "DILR_SET_1",
+      "sequence_order": 1,
+      "section": "DILR",
+      "question_number": 25,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Data Interpretation",
+      "subtopic": "Caselets",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "How many goals were scored in Match 7?",
+      "options": [
+        {
+          "id": "A",
+          "text": "3"
+        },
+        {
+          "id": "B",
+          "text": "2"
+        },
+        {
+          "id": "C",
+          "text": "1"
+        },
+        {
+          "id": "D",
+          "text": "Cannot be determined"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q26",
+      "set_ref": "DILR_SET_1",
+      "sequence_order": 2,
+      "section": "DILR",
+      "question_number": 26,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Data Interpretation",
+      "subtopic": "Caselets",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which of the following is the correct sequence of goals scored in matches 1, 3, 5 and 7?",
+      "options": [
+        {
+          "id": "A",
+          "text": "5, 1, 0, 1"
+        },
+        {
+          "id": "B",
+          "text": "3, 1, 2, 1"
+        },
+        {
+          "id": "C",
+          "text": "3, 2, 1, 2"
+        },
+        {
+          "id": "D",
+          "text": "4, 1, 2, 1"
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q27",
+      "set_ref": "DILR_SET_1",
+      "sequence_order": 3,
+      "section": "DILR",
+      "question_number": 27,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Data Interpretation",
+      "subtopic": "Caselets",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which of the following statement(s) is/are true?\nStatement-1: Amla and Sarita never scored goals in the same match.\nStatement-2: Harita and Sarita never scored goals in the same match.",
+      "options": [
+        {
+          "id": "A",
+          "text": "Statement-1 only"
+        },
+        {
+          "id": "B",
+          "text": "Statement-2 only"
+        },
+        {
+          "id": "C",
+          "text": "Both the statements"
+        },
+        {
+          "id": "D",
+          "text": "None of the statements"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q28",
+      "set_ref": "DILR_SET_1",
+      "sequence_order": 4,
+      "section": "DILR",
+      "question_number": 28,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Data Interpretation",
+      "subtopic": "Caselets",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which of the following statement(s) is/are false?\nStatement-1: In every match at least one player scored a goal.\nStatement-2: No two players scored goals in the same number of matches.",
+      "options": [
+        {
+          "id": "A",
+          "text": "None of the statements"
+        },
+        {
+          "id": "B",
+          "text": "Statement-1 only"
+        },
+        {
+          "id": "C",
+          "text": "Both the statements"
+        },
+        {
+          "id": "D",
+          "text": "Statement-2 only"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q29",
+      "set_ref": "DILR_SET_1",
+      "sequence_order": 5,
+      "section": "DILR",
+      "question_number": 29,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Data Interpretation",
+      "subtopic": "Caselets",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "If Harita scored goals in one more match as compared to Sarita, which of the following statement(s) is/are necessarily true?\nStatement-1: Amla scored goals in consecutive matches.\nStatement-2: Sarita scored goals in consecutive matches.",
+      "options": [
+        {
+          "id": "A",
+          "text": "Statement-2 only"
+        },
+        {
+          "id": "B",
+          "text": "None of the statements"
+        },
+        {
+          "id": "C",
+          "text": "Statement-1 only"
+        },
+        {
+          "id": "D",
+          "text": "Both the statements"
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q30",
+      "set_ref": "DILR_SET_2",
+      "sequence_order": 1,
+      "section": "DILR",
+      "question_number": 30,
+      "question_type": "TITA",
+      "taxonomy_type": "di_venn",
+      "topic": "Data Interpretation",
+      "subtopic": "Set Theory",
+      "difficulty": "medium",
+      "correct_answer": "50",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "How many boys are there in the class?",
+      "solution_text": "The correct answer is 50\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q31",
+      "set_ref": "DILR_SET_2",
+      "sequence_order": 2,
+      "section": "DILR",
+      "question_number": 31,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_venn",
+      "topic": "Data Interpretation",
+      "subtopic": "Set Theory",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which of the following can be determined from the given information?\nII. The number of female dancers who are interested in attending a 1-day event.",
+      "options": [
+        {
+          "id": "I",
+          "text": "The number of boys who are interested in attending a 1-day event and are neither dancers nor singers."
+        },
+        {
+          "id": "A",
+          "text": "Only I"
+        },
+        {
+          "id": "B",
+          "text": "Neither I nor II"
+        },
+        {
+          "id": "C",
+          "text": "Only II"
+        },
+        {
+          "id": "D",
+          "text": "Both I and II"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q32",
+      "set_ref": "DILR_SET_2",
+      "sequence_order": 3,
+      "section": "DILR",
+      "question_number": 32,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_venn",
+      "topic": "Data Interpretation",
+      "subtopic": "Set Theory",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "What fraction of the class are interested in attending a 2-day event?",
+      "options": [
+        {
+          "id": "A",
+          "text": "7/10"
+        },
+        {
+          "id": "B",
+          "text": "7/13"
+        },
+        {
+          "id": "C",
+          "text": "9/1"
+        },
+        {
+          "id": "D",
+          "text": "2/3"
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q33",
+      "set_ref": "DILR_SET_2",
+      "sequence_order": 4,
+      "section": "DILR",
+      "question_number": 33,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_venn",
+      "topic": "Data Interpretation",
+      "subtopic": "Set Theory",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "What BEST can be concluded about the number of male dancers who are interested in attending a 1-day event?",
+      "options": [
+        {
+          "id": "A",
+          "text": "5 or 6"
+        },
+        {
+          "id": "B",
+          "text": "6"
+        },
+        {
+          "id": "C",
+          "text": "5"
+        },
+        {
+          "id": "D",
+          "text": "4 or 6"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q34",
+      "set_ref": "DILR_SET_2",
+      "sequence_order": 5,
+      "section": "DILR",
+      "question_number": 34,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_venn",
+      "topic": "Data Interpretation",
+      "subtopic": "Set Theory",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "How many female dancers are interested in attending a 2-day event?",
+      "options": [
+        {
+          "id": "A",
+          "text": "2"
+        },
+        {
+          "id": "B",
+          "text": "1"
+        },
+        {
+          "id": "C",
+          "text": "0"
+        },
+        {
+          "id": "D",
+          "text": "Cannot be determined"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q35",
+      "set_ref": "DILR_SET_3",
+      "sequence_order": 1,
+      "section": "DILR",
+      "question_number": 35,
+      "question_type": "TITA",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Logical Reasoning",
+      "subtopic": "Number Puzzles",
+      "difficulty": "medium",
+      "correct_answer": "2",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "How many tokens did Qahira receive?",
+      "solution_text": "The correct answer is 2\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q36",
+      "set_ref": "DILR_SET_3",
+      "sequence_order": 2,
+      "section": "DILR",
+      "question_number": 36,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Logical Reasoning",
+      "subtopic": "Number Puzzles",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Who among the following definitely received a token from Bithi but not from Dhanavi?",
+      "options": [
+        {
+          "id": "A",
+          "text": "Pragnyaa"
+        },
+        {
+          "id": "B",
+          "text": "Rasheeda"
+        },
+        {
+          "id": "C",
+          "text": "Qahira"
+        },
+        {
+          "id": "D",
+          "text": "Tantra"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q37",
+      "set_ref": "DILR_SET_3",
+      "sequence_order": 3,
+      "section": "DILR",
+      "question_number": 37,
+      "question_type": "TITA",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Logical Reasoning",
+      "subtopic": "Number Puzzles",
+      "difficulty": "medium",
+      "correct_answer": "3",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "How many tokens did Chhaya award?",
+      "solution_text": "The correct answer is 3\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q38",
+      "set_ref": "DILR_SET_3",
+      "sequence_order": 4,
+      "section": "DILR",
+      "question_number": 38,
+      "question_type": "TITA",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Logical Reasoning",
+      "subtopic": "Number Puzzles",
+      "difficulty": "medium",
+      "correct_answer": "3",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "How many tokens did Smera receive?",
+      "solution_text": "The correct answer is 3\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q39",
+      "set_ref": "DILR_SET_3",
+      "sequence_order": 5,
+      "section": "DILR",
+      "question_number": 39,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_reasoning",
+      "topic": "Logical Reasoning",
+      "subtopic": "Number Puzzles",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Which of the following could be the amount of funding that Tantra received?\n(a) Rs. 66,000 (b) Rs. 165,000",
+      "options": [
+        {
+          "id": "A",
+          "text": "Neither (a) nor (b)"
+        },
+        {
+          "id": "B",
+          "text": "Only (b)"
+        },
+        {
+          "id": "C",
+          "text": "Only (a)"
+        },
+        {
+          "id": "D",
+          "text": "Both (a) and (b)"
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q40",
+      "set_ref": "DILR_SET_4",
+      "sequence_order": 1,
+      "section": "DILR",
+      "question_number": 40,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_network",
+      "topic": "Logical Reasoning",
+      "subtopic": "Routes & Networks",
+      "difficulty": "hard",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "If Hari is ready to board a train at 8:05 am from station M, then when is the earliest that he can reach station N?",
+      "options": [
+        {
+          "id": "A",
+          "text": "9:11 am"
+        },
+        {
+          "id": "B",
+          "text": "9:06 am"
+        },
+        {
+          "id": "C",
+          "text": "9:01 am"
+        },
+        {
+          "id": "D",
+          "text": "9:13 am"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q41",
+      "set_ref": "DILR_SET_4",
+      "sequence_order": 2,
+      "section": "DILR",
+      "question_number": 41,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_network",
+      "topic": "Logical Reasoning",
+      "subtopic": "Routes & Networks",
+      "difficulty": "hard",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "If Priya is ready to board a train at 10:25 am from station T, then when is the earliest that she can reach station S?",
+      "options": [
+        {
+          "id": "A",
+          "text": "11:12 am"
+        },
+        {
+          "id": "B",
+          "text": "11:22 am"
+        },
+        {
+          "id": "C",
+          "text": "11:07 am"
+        },
+        {
+          "id": "D",
+          "text": "11:28 am"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q42",
+      "set_ref": "DILR_SET_4",
+      "sequence_order": 3,
+      "section": "DILR",
+      "question_number": 42,
+      "question_type": "MCQ",
+      "taxonomy_type": "di_network",
+      "topic": "Logical Reasoning",
+      "subtopic": "Routes & Networks",
+      "difficulty": "hard",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Haripriya is expected to reach station S late. What is the latest time by which she must be ready to board at station S if she must reach station B before 1 am via station R?",
+      "options": [
+        {
+          "id": "A",
+          "text": "11:39 pm"
+        },
+        {
+          "id": "B",
+          "text": "11:49 am"
+        },
+        {
+          "id": "C",
+          "text": "11:35 pm"
+        },
+        {
+          "id": "D",
+          "text": "11:43 pm"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q43",
+      "set_ref": "DILR_SET_4",
+      "sequence_order": 4,
+      "section": "DILR",
+      "question_number": 43,
+      "question_type": "TITA",
+      "taxonomy_type": "di_network",
+      "topic": "Logical Reasoning",
+      "subtopic": "Routes & Networks",
+      "difficulty": "hard",
+      "correct_answer": "8",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "What is the minimum number of trains that are required to provide the service on the AB line (considering both north and south directions)?",
+      "solution_text": "The correct answer is 8\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q44",
+      "set_ref": "DILR_SET_4",
+      "sequence_order": 5,
+      "section": "DILR",
+      "question_number": 44,
+      "question_type": "TITA",
+      "taxonomy_type": "di_network",
+      "topic": "Logical Reasoning",
+      "subtopic": "Routes & Networks",
+      "difficulty": "hard",
+      "correct_answer": "48",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "What is the minimum number of trains that are required to provide the service in this city?",
+      "solution_text": "The correct answer is 48\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q45",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 1,
+      "section": "QA",
+      "question_number": 45,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Ratio, Proportion & Variation",
+      "difficulty": "medium",
+      "correct_answer": "43200",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "In a village, the ratio of the number of males to females is 5 : 4\\. The ratio of the number of literate males to literate females is 2 : 3\\. The ratio of the number of illiterate males to illiterate females is 4 : 3\\. If 3600 males in the village are literate, then the total number of females in the village is ______.",
+      "solution_text": "The correct answer is 43200\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q46",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 2,
+      "section": "QA",
+      "question_number": 46,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Averages, Mixtures & Alligations",
+      "difficulty": "medium",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "The average weight of students in a class increases by 600 gm when some new students join the class. If the average weight of the new students is 3 kg more than the average weight of the original students, then the ratio of the number of original students to the number of new students is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "1 : 4"
+        },
+        {
+          "id": "B",
+          "text": "1 : 2"
+        },
+        {
+          "id": "C",
+          "text": "4 : 1"
+        },
+        {
+          "id": "D",
+          "text": "3 : 1"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q47",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 3,
+      "section": "QA",
+      "question_number": 47,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_algebra",
+      "topic": "Algebra",
+      "subtopic": "Sequence & Series (AP, GP, HP)",
+      "difficulty": "hard",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "For any natural number $n$, suppose the sum of the first $n$ terms of an arithmetic progression is $(n + 2n^2)$. If the $n^{th}$ term of the progression is divisible by 9, then the smallest possible value of $n$ is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "9"
+        },
+        {
+          "id": "B",
+          "text": "4"
+        },
+        {
+          "id": "C",
+          "text": "7"
+        },
+        {
+          "id": "D",
+          "text": "8"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q48",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 4,
+      "section": "QA",
+      "question_number": 48,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_algebra",
+      "topic": "Algebra",
+      "subtopic": "Functions & Graphs",
+      "difficulty": "hard",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Let $0 \\\\le a \\\\le x \\\\le 100$ and $f(x) \\= |x \\- a| + |x \\- 100| + |x \\- a \\- 50|$. Then the maximum value of $f(x)$ becomes 100 when $a$ is equal to:",
+      "options": [
+        {
+          "id": "A",
+          "text": "25"
+        },
+        {
+          "id": "B",
+          "text": "100"
+        },
+        {
+          "id": "C",
+          "text": "50"
+        },
+        {
+          "id": "D",
+          "text": "0"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q49",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 5,
+      "section": "QA",
+      "question_number": 49,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Time, Speed & Distance",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Trains A and B start traveling at the same time towards each other with constant speeds from stations X and Y, respectively. Train A reaches station Y in 10 minutes while train B takes 9 minutes to reach station X after meeting train A. Then the total time taken, in minutes, by train B to travel from station Y to station X is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "6"
+        },
+        {
+          "id": "B",
+          "text": "15"
+        },
+        {
+          "id": "C",
+          "text": "10"
+        },
+        {
+          "id": "D",
+          "text": "12"
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q50",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 6,
+      "section": "QA",
+      "question_number": 50,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_geometry",
+      "topic": "Geometry & Mensuration",
+      "subtopic": "Quadrilaterals & Polygons",
+      "difficulty": "medium",
+      "correct_answer": "66",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "A trapezium ABCD has side AD parallel to BC, $\\\\angle BAD \\= 90^\\\\circ$, $BC \\= 3$ cm and $AD \\= 8$ cm. If the perimeter of this trapezium is 36 cm, then its area, in sq. cm, is ______.",
+      "solution_text": "The correct answer is 66\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q51",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 7,
+      "section": "QA",
+      "question_number": 51,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Profit, Loss & Discount",
+      "difficulty": "hard",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Ankita buys 4 kg cashews, 14 kg peanuts and 6 kg almonds when the cost of 7 kg cashews is the same as that of 30 kg peanuts or 9 kg almonds. She mixes all the three nuts and marks a price for the mixture in order to make a profit of ₹1752. She sells 4 kg of the mixture at this marked price and the remaining at a 20% discount on the marked price, thus making a total profit of ₹744. Then the amount, in rupees, that she had spent in buying almonds is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "1680"
+        },
+        {
+          "id": "B",
+          "text": "1176"
+        },
+        {
+          "id": "C",
+          "text": "2520"
+        },
+        {
+          "id": "D",
+          "text": "1440"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q52",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 8,
+      "section": "QA",
+      "question_number": 52,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_number_system",
+      "topic": "Number Systems",
+      "subtopic": "Factors & Multiples (HCF/LCM)",
+      "difficulty": "hard",
+      "correct_answer": "82",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "Let $A$ be the largest positive integer that divides all the numbers of the form $3^k + 4^k + 5^k$, and let $B$ be the largest positive integer that divides all the numbers of the form $4^k + 3(4^k) + 4^{k+2}$, where $k$ is any positive integer. Then $(A + B)$ equals ______.",
+      "solution_text": "The correct answer is 82\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q53",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 9,
+      "section": "QA",
+      "question_number": 53,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_algebra",
+      "topic": "Algebra",
+      "subtopic": "Quadratic Equations",
+      "difficulty": "hard",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Let $a, b, c$ be non-zero real numbers such that $b^2 \\< 4ac$ and $f(x) \\= ax^2 + bx + c$. If the set $S$ consists of all integers $m$ such that $f(m) \\< 0$, then the set $S$ must necessarily be:",
+      "options": [
+        {
+          "id": "A",
+          "text": "the set of all positive integers"
+        },
+        {
+          "id": "B",
+          "text": "the set of all integers"
+        },
+        {
+          "id": "C",
+          "text": "either the empty set or the set of all integers"
+        },
+        {
+          "id": "D",
+          "text": "the empty set"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q54",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 10,
+      "section": "QA",
+      "question_number": 54,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_modern_math",
+      "topic": "Modern Math",
+      "subtopic": "Permutations & Combinations",
+      "difficulty": "medium",
+      "correct_answer": "84",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "The number of ways of distributing 20 identical balloons among 4 children such that each child gets some balloons but no child gets an odd number of balloons, is ______.",
+      "solution_text": "The correct answer is 84\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q55",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 11,
+      "section": "QA",
+      "question_number": 55,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_algebra",
+      "topic": "Algebra",
+      "subtopic": "Linear Equations",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Let $a$ and $b$ be natural numbers. If $a^2 + ab + a \\= 14$ and $b^2 + ab + b \\= 28$, then $(2a + b)$ equals:",
+      "options": [
+        {
+          "id": "A",
+          "text": "8"
+        },
+        {
+          "id": "B",
+          "text": "7"
+        },
+        {
+          "id": "C",
+          "text": "10"
+        },
+        {
+          "id": "D",
+          "text": "9"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q56",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 12,
+      "section": "QA",
+      "question_number": 56,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Profit, Loss & Discount",
+      "difficulty": "medium",
+      "correct_answer": "160",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "Amal buys 110 kg of syrup and 120 kg of juice, syrup being 20% less costly than juice, per kg. He sells 10 kg of syrup at 10% profit and 20 kg of juice at 20% profit. Mixing the remaining juice and syrup, Amal sells the mixture at ₹ 308.32 per kg and makes an overall profit of 64%. Then, Amal’s cost price for syrup, in rupees per kg, is ______.",
+      "solution_text": "The correct answer is 160\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q57",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 13,
+      "section": "QA",
+      "question_number": 57,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_geometry",
+      "topic": "Geometry & Mensuration",
+      "subtopic": "Quadrilaterals & Polygons",
+      "difficulty": "medium",
+      "correct_answer": "B",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "All the vertices of a rectangle lie on a circle of radius $R$. If the perimeter of the rectangle is $P$, then the area of the rectangle is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "$\\\\frac{P^2}{16} \\- R^2$"
+        },
+        {
+          "id": "B",
+          "text": "$\\\\frac{P^2}{8} \\- 2R^2$"
+        },
+        {
+          "id": "C",
+          "text": "$\\\\frac{P^2}{2} \\- 2PR$"
+        },
+        {
+          "id": "D",
+          "text": "$\\\\frac{P^2}{8} \\- \\\\frac{R^2}{2}$"
+        }
+      ],
+      "solution_text": "The correct answer is B."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q58",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 14,
+      "section": "QA",
+      "question_number": 58,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Averages, Mixtures & Alligations",
+      "difficulty": "easy",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "The average of three integers is 13\\. When a natural number $n$ is included, the average of these four integers remains an odd integer. The minimum possible value of $n$ is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "3"
+        },
+        {
+          "id": "B",
+          "text": "4"
+        },
+        {
+          "id": "C",
+          "text": "5"
+        },
+        {
+          "id": "D",
+          "text": "1"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q59",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 15,
+      "section": "QA",
+      "question_number": 59,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Averages, Mixtures & Alligations",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "A mixture contains lemon juice and sugar syrup in equal proportion. If a new mixture is created by adding this mixture and sugar syrup in the ratio 1 : 3, then the ratio of lemon juice and sugar syrup in the new mixture is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "1 : 4"
+        },
+        {
+          "id": "B",
+          "text": "1 : 5"
+        },
+        {
+          "id": "C",
+          "text": "1 : 6"
+        },
+        {
+          "id": "D",
+          "text": "1 : 7"
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q60",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 16,
+      "section": "QA",
+      "question_number": 60,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_algebra",
+      "topic": "Algebra",
+      "subtopic": "Inequalities & Modulus",
+      "difficulty": "hard",
+      "correct_answer": "C",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "The largest real value of $a$ for which the equation $|x + a| + |x \\- 1| \\= 2$ has an infinite number of solutions for $x$ is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "\\-1"
+        },
+        {
+          "id": "B",
+          "text": "0"
+        },
+        {
+          "id": "C",
+          "text": "1"
+        },
+        {
+          "id": "D",
+          "text": "2"
+        }
+      ],
+      "solution_text": "The correct answer is C."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q61",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 17,
+      "section": "QA",
+      "question_number": 61,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_modern_math",
+      "topic": "Modern Math",
+      "subtopic": "Set Theory",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "In a class of 100 students, 73 like coffee, 80 like tea and 52 like lemonade. It may be possible that some students do not like any of these three drinks. Then the difference between the maximum and minimum possible number of students who like all the three drinks is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "47"
+        },
+        {
+          "id": "B",
+          "text": "53"
+        },
+        {
+          "id": "C",
+          "text": "52"
+        },
+        {
+          "id": "D",
+          "text": "48"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q62",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 18,
+      "section": "QA",
+      "question_number": 62,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_geometry",
+      "topic": "Geometry & Mensuration",
+      "subtopic": "Coordinate Geometry",
+      "difficulty": "medium",
+      "correct_answer": "D",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Let ABCD be a parallelogram such that the coordinates of its three vertices A, B, C are (1, 1), (3, 4\\) and (−2, 8), respectively. Then, the coordinates of the vertex D are:",
+      "options": [
+        {
+          "id": "A",
+          "text": "(0, 11\\)"
+        },
+        {
+          "id": "B",
+          "text": "(4, 5\\)"
+        },
+        {
+          "id": "C",
+          "text": "(−3, 4\\)"
+        },
+        {
+          "id": "D",
+          "text": "(-4, 5\\)"
+        }
+      ],
+      "solution_text": "The correct answer is D."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q63",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 19,
+      "section": "QA",
+      "question_number": 63,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_algebra",
+      "topic": "Algebra",
+      "subtopic": "Linear Equations",
+      "difficulty": "hard",
+      "correct_answer": "34",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "For natural numbers $x, y$, and $z$, if $xy + yz \\= 19$ and $yz + xz \\= 51$, then the minimum possible value of $xyz$ is ______.",
+      "solution_text": "The correct answer is 34\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q64",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 20,
+      "section": "QA",
+      "question_number": 64,
+      "question_type": "MCQ",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Simple & Compound Interest",
+      "difficulty": "medium",
+      "correct_answer": "A",
+      "positive_marks": 3,
+      "negative_marks": 1,
+      "question_text": "Alex invested his savings in two parts. The simple interest earned on the first part at 15% per annum for 4 years is the same as the simple interest earned on the second part at 12% per annum for 3 years. Then, the percentage of his savings invested in the first part is:",
+      "options": [
+        {
+          "id": "A",
+          "text": "37.5%"
+        },
+        {
+          "id": "B",
+          "text": "62.5%"
+        },
+        {
+          "id": "C",
+          "text": "60%"
+        },
+        {
+          "id": "D",
+          "text": "40%"
+        }
+      ],
+      "solution_text": "The correct answer is A."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q65",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 21,
+      "section": "QA",
+      "question_number": 65,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_arithmetic",
+      "topic": "Arithmetic",
+      "subtopic": "Ratio, Proportion & Variation",
+      "difficulty": "medium",
+      "correct_answer": "111",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "Pinky is standing in a queue at a ticket counter. Suppose the ratio of the number of persons standing ahead of Pinky to the number of persons standing behind her in the queue is 3 : 5\\. If the total number of persons in the queue is less than 300, then the maximum possible number of persons standing ahead of Pinky is ______.",
+      "solution_text": "The correct answer is 111\\."
+    },
+    {
+      "client_question_id": "cat_2022_slot_1_Q66",
+      "set_ref": "QA_ATOMIC_1",
+      "sequence_order": 22,
+      "section": "QA",
+      "question_number": 66,
+      "question_type": "TITA",
+      "taxonomy_type": "qa_algebra",
+      "topic": "Algebra",
+      "subtopic": "Functions & Graphs",
+      "difficulty": "hard",
+      "correct_answer": "44",
+      "positive_marks": 3,
+      "negative_marks": 0,
+      "question_text": "For any real number $x$, let $\\[x\\]$ be the largest integer less than or equal to $x$. If $\\\\sum_{n=1}^{N} \\[\\\\frac{1}{5} + \\\\frac{n}{25}\\] \\= 25$, then $N$ is ______.",
+      "solution_text": "The correct answer is 44\\."
+    }
+  ]
+}
 ````
 
 ## File: .editorconfig
@@ -16236,12 +19244,24 @@ See `docs/MIGRATION_M6_RBAC.sql` for complete implementation.
 }
 ````
 
+## File: next-env.d.ts
+````typescript
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+import "./.next/dev/types/routes.d.ts";
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+````
+
 ## File: next.config.ts
 ````typescript
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  images: {
+    formats: ['image/avif', 'image/webp'],
+  },
 };
 
 export default nextConfig;
@@ -17857,1222 +20877,6 @@ main().catch(error => {
 });
 ````
 
-## File: scripts/import-paper-v3.mjs
-````javascript
-#!/usr/bin/env node
-/**
- * @fileoverview Paper Import Script v3 (Sets-First)
- * @description CLI tool to import papers using Schema v3.0 (question_sets → questions)
- * @usage node scripts/import-paper-v3.mjs <path-to-json-file> [options]
- * 
- * Schema v3.0 Structure:
- *   - paper: Paper metadata
- *   - question_sets[]: Parent containers (inserted FIRST)
- *   - questions[]: Children that reference sets via set_ref
- * 
- * Options:
- *   --publish             Publish the paper immediately after import
- *   --dry-run             Validate and show what would be done, but don't write
- *   --upsert              Use upsert mode (requires semantic keys in DB)
- *   --notes <text>        Import notes (optional)
- *   --skip-if-duplicate   Skip import if JSON hash already exists
- *   --help, -h            Show help message
- */
-
-import { readFileSync } from 'fs';
-import { createHash, randomUUID } from 'crypto';
-import { createClient } from '@supabase/supabase-js';
-
-// =============================================================================
-// CONFIGURATION
-// =============================================================================
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-    console.error('❌ Missing environment variables:');
-    console.error('   - NEXT_PUBLIC_SUPABASE_URL');
-    console.error('   - SUPABASE_SERVICE_ROLE_KEY (use service role, not anon key!)');
-    console.error('');
-    console.error('Set them in .env.local or pass via environment.');
-    process.exit(1);
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-    auth: { persistSession: false }
-});
-
-// =============================================================================
-// SCHEMA V3 VALIDATION (Phase 3)
-// =============================================================================
-
-const VALID_SECTIONS = ['VARC', 'DILR', 'QA'];
-const VALID_SET_TYPES = ['VARC', 'DILR', 'CASELET', 'ATOMIC'];
-const VALID_QUESTION_TYPES = ['MCQ', 'TITA'];
-const VALID_CONTEXT_TYPES = [
-    'rc_passage', 'dilr_set', 'caselet', 'data_table', 'graph', 'other_shared_stimulus'
-];
-const VALID_CONTENT_LAYOUTS = [
-    'split_passage', 'split_chart', 'split_table', 'single_focus', 'image_top'
-];
-const COMPOSITE_SET_TYPES = ['VARC', 'DILR', 'CASELET'];
-
-class ValidationError extends Error {
-    constructor(message, errors = []) {
-        super(message);
-        this.name = 'ValidationError';
-        this.errors = errors;
-    }
-}
-
-function validateSchemaVersion(data) {
-    if (data.schema_version !== 'v3.0') {
-        throw new ValidationError(
-            `Schema version must be 'v3.0' for sets-first import. Got: ${data.schema_version || 'undefined'}`,
-            ['Use schema_version: "v3.0" for the sets-first importer']
-        );
-    }
-}
-
-function validatePaper(paper) {
-    const errors = [];
-    const required = ['slug', 'title'];
-
-    for (const field of required) {
-        if (!paper[field]) {
-            errors.push(`paper.${field} is required`);
-        }
-    }
-
-    if (paper.slug && !/^[a-z0-9-]+$/.test(paper.slug)) {
-        errors.push(`paper.slug must be lowercase alphanumeric with hyphens: ${paper.slug}`);
-    }
-
-    if (paper.sections && !Array.isArray(paper.sections)) {
-        errors.push('paper.sections must be an array');
-    }
-
-    if (errors.length > 0) {
-        throw new ValidationError('Paper validation failed', errors);
-    }
-
-    return true;
-}
-
-function validateQuestionSets(sets) {
-    const errors = [];
-    const clientSetIds = new Set();
-
-    if (!Array.isArray(sets)) {
-        throw new ValidationError('question_sets must be an array');
-    }
-
-    sets.forEach((set, index) => {
-        const prefix = `question_sets[${index}]`;
-
-        // Required fields
-        if (!set.client_set_id) {
-            errors.push(`${prefix}.client_set_id is required`);
-        } else if (!/^[A-Z0-9_]+$/.test(set.client_set_id)) {
-            errors.push(`${prefix}.client_set_id must be uppercase alphanumeric with underscores: ${set.client_set_id}`);
-        } else if (clientSetIds.has(set.client_set_id)) {
-            errors.push(`${prefix}.client_set_id is duplicate: ${set.client_set_id}`);
-        } else {
-            clientSetIds.add(set.client_set_id);
-        }
-
-        if (!set.section) {
-            errors.push(`${prefix}.section is required`);
-        } else if (!VALID_SECTIONS.includes(set.section)) {
-            errors.push(`${prefix}.section must be one of ${VALID_SECTIONS.join(', ')}: ${set.section}`);
-        }
-
-        if (!set.set_type) {
-            errors.push(`${prefix}.set_type is required`);
-        } else if (!VALID_SET_TYPES.includes(set.set_type)) {
-            errors.push(`${prefix}.set_type must be one of ${VALID_SET_TYPES.join(', ')}: ${set.set_type}`);
-        }
-
-        if (set.display_order === undefined || set.display_order === null) {
-            errors.push(`${prefix}.display_order is required`);
-        }
-
-        // Composite sets require context_body
-        if (COMPOSITE_SET_TYPES.includes(set.set_type)) {
-            if (!set.context_body || set.context_body.trim() === '') {
-                errors.push(`${prefix}.context_body is required for ${set.set_type} sets`);
-            }
-        }
-
-        // Validate context_type if provided
-        if (set.context_type && !VALID_CONTEXT_TYPES.includes(set.context_type)) {
-            errors.push(`${prefix}.context_type must be one of ${VALID_CONTEXT_TYPES.join(', ')}: ${set.context_type}`);
-        }
-
-        // Validate content_layout if provided
-        if (set.content_layout && !VALID_CONTENT_LAYOUTS.includes(set.content_layout)) {
-            errors.push(`${prefix}.content_layout must be one of ${VALID_CONTENT_LAYOUTS.join(', ')}: ${set.content_layout}`);
-        }
-    });
-
-    if (errors.length > 0) {
-        throw new ValidationError('Question sets validation failed', errors);
-    }
-
-    return clientSetIds;
-}
-
-function validateQuestions(questions, validSetRefs) {
-    const errors = [];
-    const clientQuestionIds = new Set();
-
-    if (!Array.isArray(questions)) {
-        throw new ValidationError('questions must be an array');
-    }
-
-    questions.forEach((q, index) => {
-        const prefix = `questions[${index}]`;
-
-        // Required fields
-        if (!q.client_question_id) {
-            errors.push(`${prefix}.client_question_id is required`);
-        } else if (clientQuestionIds.has(q.client_question_id)) {
-            errors.push(`${prefix}.client_question_id is duplicate: ${q.client_question_id}`);
-        } else {
-            clientQuestionIds.add(q.client_question_id);
-        }
-
-        if (!q.set_ref) {
-            errors.push(`${prefix}.set_ref is required`);
-        } else if (!validSetRefs.has(q.set_ref)) {
-            errors.push(`${prefix}.set_ref references non-existent set: ${q.set_ref}`);
-        }
-
-        if (!q.sequence_order && q.sequence_order !== 0) {
-            errors.push(`${prefix}.sequence_order is required`);
-        }
-
-        if (!q.question_number && q.question_number !== 0) {
-            errors.push(`${prefix}.question_number is required`);
-        }
-
-        if (!q.question_text) {
-            errors.push(`${prefix}.question_text is required`);
-        }
-
-        if (!q.question_type) {
-
-            if (q.question_format && !VALID_QUESTION_TYPES.includes(q.question_format)) {
-                errors.push(`${prefix}.question_format must be one of ${VALID_QUESTION_TYPES.join(', ')}: ${q.question_format}`);
-            }
-
-            if (q.correct_answer !== undefined && q.correct_answer !== null) {
-                if (q.question_type === 'MCQ') {
-                    const isString = typeof q.correct_answer === 'string';
-                    const isStringArray = Array.isArray(q.correct_answer) && q.correct_answer.every(a => typeof a === 'string');
-                    if (!isString && !isStringArray) {
-                        errors.push(`${prefix}.correct_answer must be a string or string[] for MCQ questions`);
-                    }
-                }
-                if (q.question_type === 'TITA') {
-                    const isString = typeof q.correct_answer === 'string';
-                    const isNumber = typeof q.correct_answer === 'number';
-                    if (!isString && !isNumber) {
-                        errors.push(`${prefix}.correct_answer must be a string or number for TITA questions`);
-                    }
-                }
-            }
-            errors.push(`${prefix}.question_type is required`);
-        } else if (!VALID_QUESTION_TYPES.includes(q.question_type)) {
-            errors.push(`${prefix}.question_type must be one of ${VALID_QUESTION_TYPES.join(', ')}: ${q.question_type}`);
-        }
-
-        // MCQ requires options
-        if (q.question_type === 'MCQ') {
-            if (!q.options || !Array.isArray(q.options) || q.options.length === 0) {
-                errors.push(`${prefix}.options is required for MCQ questions`);
-            } else {
-                // Accept either string array ["A text", "B text"] or object array [{id, text}]
-                const firstOpt = q.options[0];
-                const isObjectFormat = typeof firstOpt === 'object' && firstOpt !== null;
-
-                if (isObjectFormat) {
-                    q.options.forEach((opt, optIdx) => {
-                        if (!opt.id) {
-                            errors.push(`${prefix}.options[${optIdx}].id is required`);
-                        }
-                        if (!opt.text && opt.text !== '') {
-                            errors.push(`${prefix}.options[${optIdx}].text is required`);
-                        }
-                    });
-                }
-                // String format is valid as-is
-            }
-        }
-
-        // Section validation
-        if (q.section && !VALID_SECTIONS.includes(q.section)) {
-            errors.push(`${prefix}.section must be one of ${VALID_SECTIONS.join(', ')}: ${q.section}`);
-        }
-    });
-
-    if (errors.length > 0) {
-        throw new ValidationError('Questions validation failed', errors);
-    }
-
-    return true;
-}
-
-function validateV3Data(data) {
-    console.log('🔍 Validating Schema v3.0 payload...\n');
-
-    // Check schema version
-    validateSchemaVersion(data);
-
-    // Check required root keys
-    if (!data.paper) {
-        throw new ValidationError('Missing required root key: paper');
-    }
-    if (!data.question_sets) {
-        throw new ValidationError('Missing required root key: question_sets');
-    }
-    if (!data.questions) {
-        throw new ValidationError('Missing required root key: questions');
-    }
-
-    // Validate paper
-    validatePaper(data.paper);
-    console.log('   ✅ paper validated');
-
-    // Validate question_sets and collect valid client_set_ids
-    const validSetRefs = validateQuestionSets(data.question_sets);
-    console.log(`   ✅ question_sets validated (${data.question_sets.length} sets)`);
-
-    // Validate questions against valid set refs
-    validateQuestions(data.questions, validSetRefs);
-    console.log(`   ✅ questions validated (${data.questions.length} questions)`);
-
-    console.log('\n✅ All validation passed\n');
-    return true;
-}
-
-// =============================================================================
-// HASH FUNCTIONS
-// =============================================================================
-
-function computeJsonHash(data) {
-    const jsonStr = JSON.stringify(data, Object.keys(data).sort());
-    return createHash('sha256').update(jsonStr).digest('hex');
-}
-
-// =============================================================================
-// IMPORT FUNCTIONS (Phase 2 - Sets-First)
-// =============================================================================
-
-async function importPaperV3(paperData, options = {}) {
-    const { upsert = false, dryRun = false } = options;
-
-    console.log(`📄 ${dryRun ? '[DRY RUN] ' : ''}Importing paper: ${paperData.title}`);
-
-    if (dryRun) {
-        console.log(`   Would create/update paper with slug: ${paperData.slug}`);
-        return { id: 'dry-run-id', slug: paperData.slug };
-    }
-
-    // Check if paper exists
-    const { data: existing } = await supabase
-        .from('papers')
-        .select('id')
-        .eq('slug', paperData.slug)
-        .single();
-
-    const paperPayload = {
-        slug: paperData.slug,
-        title: paperData.title,
-        description: paperData.description || null,
-        year: paperData.year || new Date().getFullYear(),
-        total_questions: paperData.total_questions || 0,
-        total_marks: paperData.total_marks || 198,
-        duration_minutes: paperData.duration_minutes || 120,
-        sections: paperData.sections || ['VARC', 'DILR', 'QA'],
-        default_positive_marks: paperData.default_positive_marks || 3.0,
-        default_negative_marks: paperData.default_negative_marks || 1.0,
-        difficulty_level: paperData.difficulty_level || 'medium',
-        is_free: paperData.is_free ?? false,
-        published: paperData.published ?? false,
-        allow_pause: paperData.allow_pause ?? true,
-        attempt_limit: paperData.attempt_limit ?? 0,
-    };
-
-    // Add paper_key if using upsert mode
-    if (upsert && paperData.paper_key) {
-        paperPayload.paper_key = paperData.paper_key;
-    }
-
-    if (existing) {
-        console.log(`   ⚠️  Paper exists (id: ${existing.id}), updating...`);
-
-        const { data, error } = await supabase
-            .from('papers')
-            .update(paperPayload)
-            .eq('id', existing.id)
-            .select()
-            .single();
-
-        if (error) throw error;
-        return data;
-    }
-
-    const { data, error } = await supabase
-        .from('papers')
-        .insert(paperPayload)
-        .select()
-        .single();
-
-    if (error) throw error;
-    console.log(`   ✅ Paper created with id: ${data.id}`);
-    return data;
-}
-
-async function importQuestionSetsV3(paperId, sets, options = {}) {
-    const { upsert = false, dryRun = false } = options;
-
-    console.log(`\n📋 ${dryRun ? '[DRY RUN] ' : ''}Importing ${sets.length} question_sets (SETS-FIRST)...`);
-
-    // Build client_set_id → UUID map
-    const setIdMap = {};
-
-    if (dryRun) {
-        sets.forEach(set => {
-            setIdMap[set.client_set_id] = `dry-run-uuid-${set.client_set_id}`;
-            console.log(`   Would create set: ${set.client_set_id} (${set.set_type})`);
-        });
-        return { count: sets.length, setIdMap };
-    }
-
-    // Delete existing sets (unless upsert mode)
-    if (!upsert) {
-        const { error: deleteError } = await supabase
-            .from('question_sets')
-            .delete()
-            .eq('paper_id', paperId);
-
-        if (deleteError) {
-            console.warn(`   ⚠️  Could not delete existing question_sets: ${deleteError.message}`);
-        }
-    }
-
-    // Prepare sets for insertion
-    const setsToInsert = sets.map(set => {
-        const newId = randomUUID();
-        setIdMap[set.client_set_id] = newId;
-
-        // Infer context_type from set_type if not provided
-        let contextType = set.context_type;
-        if (!contextType && set.set_type !== 'ATOMIC') {
-            contextType = {
-                'VARC': 'rc_passage',
-                'DILR': 'dilr_set',
-                'CASELET': 'caselet'
-            }[set.set_type] || 'other_shared_stimulus';
-        }
-
-        // Infer content_layout
-        let contentLayout = set.content_layout || 'single_focus';
-        if (!set.content_layout) {
-            if (set.context_image_url) {
-                contentLayout = 'image_top';
-            } else if (set.set_type === 'VARC') {
-                contentLayout = 'split_passage';
-            } else if (set.set_type === 'DILR') {
-                contentLayout = 'split_chart';
-            } else if (set.set_type === 'CASELET') {
-                contentLayout = 'split_table';
-            } else {
-                contentLayout = 'single_focus';
-            }
-        }
-
-        return {
-            id: newId,
-            paper_id: paperId,
-            section: set.section,
-            set_type: set.set_type,
-            context_type: contextType,
-            content_layout: contentLayout,
-            context_title: set.context_title || null,
-            context_body: set.context_body || null,
-            context_image_url: set.context_image_url || null,
-            context_additional_images: set.context_additional_images || null,
-            display_order: set.display_order,
-            is_active: set.is_active ?? true,
-            is_published: false,
-            metadata: set.metadata || {},
-            client_set_id: set.client_set_id, // Store for upsert support
-        };
-    });
-
-    // Insert in batches
-    const batchSize = 50;
-    let inserted = 0;
-
-    for (let i = 0; i < setsToInsert.length; i += batchSize) {
-        const batch = setsToInsert.slice(i, i + batchSize);
-        const { error } = await supabase
-            .from('question_sets')
-            .insert(batch);
-
-        if (error) throw error;
-        inserted += batch.length;
-    }
-
-    console.log(`   ✅ Created ${inserted} question_sets`);
-    console.log(`   📍 Set ID map built: ${Object.keys(setIdMap).length} entries`);
-
-    return { count: inserted, setIdMap };
-}
-
-async function importQuestionsV3(paperId, questions, setIdMap, options = {}) {
-    const { upsert = false, dryRun = false } = options;
-
-    console.log(`\n📝 ${dryRun ? '[DRY RUN] ' : ''}Importing ${questions.length} questions (using set_ref → set_id mapping)...`);
-
-    if (dryRun) {
-        questions.forEach(q => {
-            const setId = setIdMap[q.set_ref];
-            console.log(`   Q${q.question_number}: ${q.client_question_id} → set ${q.set_ref} (${setId ? '✅' : '❌'})`);
-        });
-        return questions.length;
-    }
-
-    // Delete existing questions (unless upsert mode)
-    if (!upsert) {
-        const { error: deleteError } = await supabase
-            .from('questions')
-            .delete()
-            .eq('paper_id', paperId);
-
-        if (deleteError) {
-            console.warn(`   ⚠️  Could not delete existing questions: ${deleteError.message}`);
-        }
-    }
-
-    // Prepare questions for insertion
-    const questionsToInsert = questions.map(q => {
-        const setId = setIdMap[q.set_ref];
-        if (!setId) {
-            throw new Error(`Question ${q.client_question_id} references unknown set: ${q.set_ref}`);
-        }
-
-        // Convert options from {id, text} format to string[] format
-        // The MCQRenderer expects options as string array: ["Option A text", "Option B text", ...]
-        let normalizedOptions = null;
-        if (q.options && Array.isArray(q.options) && q.options.length > 0) {
-            const firstOpt = q.options[0];
-            if (typeof firstOpt === 'object' && firstOpt !== null && 'text' in firstOpt) {
-                // Convert {id, text}[] to string[]
-                // Sort by id (A, B, C, D) to ensure correct order
-                const sorted = [...q.options].sort((a, b) => a.id.localeCompare(b.id));
-                normalizedOptions = sorted.map(opt => opt.text);
-            } else {
-                // Already string[] format
-                normalizedOptions = q.options;
-            }
-        }
-
-        return {
-            id: randomUUID(),
-            paper_id: paperId,
-            section: q.section,
-            question_number: q.question_number,
-            question_text: q.question_text,
-            question_type: q.question_type,
-            question_format: q.question_format || q.question_type,
-            taxonomy_type: q.taxonomy_type || null,
-            topic_tag: q.topic_tag || null,
-            difficulty_rationale: q.difficulty_rationale || null,
-            options: normalizedOptions,
-            correct_answer: q.correct_answer,
-            positive_marks: q.positive_marks ?? 3.0,
-            negative_marks: q.negative_marks ?? (q.question_type === 'TITA' ? 0 : 1.0),
-            difficulty: q.difficulty || null,
-            topic: q.topic || null,
-            subtopic: q.subtopic || null,
-            solution_text: q.solution_text || null,
-            solution_image_url: q.solution_image_url || null,
-            video_solution_url: q.video_solution_url || null,
-            set_id: setId,
-            sequence_order: q.sequence_order,
-            is_active: true,
-            client_question_id: q.client_question_id, // Store for upsert support
-        };
-    });
-
-    // Insert in batches
-    const batchSize = 50;
-    let inserted = 0;
-
-    for (let i = 0; i < questionsToInsert.length; i += batchSize) {
-        const batch = questionsToInsert.slice(i, i + batchSize);
-        const { error } = await supabase
-            .from('questions')
-            .insert(batch);
-
-        if (error) throw error;
-        inserted += batch.length;
-        console.log(`   ✅ Inserted ${inserted}/${questions.length} questions`);
-    }
-
-    return inserted;
-}
-
-async function createIngestRun(paperId, canonicalJson, options = {}) {
-    const { notes = null, skipIfDuplicate = false, dryRun = false } = options;
-
-    if (dryRun) {
-        console.log(`\n📦 [DRY RUN] Would create ingest run record`);
-        return { dryRun: true };
-    }
-
-    console.log(`\n📦 Creating ingest run record...`);
-
-    const canonicalHash = computeJsonHash(canonicalJson);
-
-    if (skipIfDuplicate) {
-        const { data: existing } = await supabase
-            .from('paper_ingest_runs')
-            .select('id, version_number')
-            .eq('paper_id', paperId)
-            .eq('canonical_json_hash', canonicalHash)
-            .single();
-
-        if (existing) {
-            console.log(`   ⚠️  Duplicate detected - same JSON already imported as version ${existing.version_number}`);
-            return { skipped: true, existing };
-        }
-    }
-
-    // Get next version number
-    const { data: maxVersion } = await supabase
-        .from('paper_ingest_runs')
-        .select('version_number')
-        .eq('paper_id', paperId)
-        .order('version_number', { ascending: false })
-        .limit(1)
-        .single();
-
-    const nextVersion = (maxVersion?.version_number || 0) + 1;
-
-    const { data: ingestRun, error } = await supabase
-        .from('paper_ingest_runs')
-        .insert({
-            paper_id: paperId,
-            schema_version: 'v3.0',
-            version_number: nextVersion,
-            canonical_paper_json: canonicalJson,
-            canonical_json_hash: canonicalHash,
-            import_notes: notes || 'Imported via v3 sets-first importer',
-        })
-        .select()
-        .single();
-
-    if (error) throw error;
-
-    // Update paper's latest_ingest_run_id
-    await supabase
-        .from('papers')
-        .update({ latest_ingest_run_id: ingestRun.id })
-        .eq('id', paperId);
-
-    console.log(`   ✅ Created ingest run v${nextVersion} (${ingestRun.id})`);
-    return { ingestRun, version: nextVersion };
-}
-
-async function publishPaper(paperId, shouldPublish, dryRun = false) {
-    if (!shouldPublish) {
-        console.log(`\n📋 Paper saved as draft (use --publish to publish)`);
-        return;
-    }
-
-    if (dryRun) {
-        console.log(`\n🚀 [DRY RUN] Would publish paper`);
-        return;
-    }
-
-    const { error: paperError } = await supabase
-        .from('papers')
-        .update({ published: true })
-        .eq('id', paperId);
-
-    if (paperError) throw paperError;
-
-    const { error: setsError } = await supabase
-        .from('question_sets')
-        .update({ is_published: true })
-        .eq('paper_id', paperId);
-
-    if (setsError) {
-        console.warn(`   ⚠️  Could not publish question_sets: ${setsError.message}`);
-    }
-
-    console.log(`\n🚀 Paper published!`);
-}
-
-// =============================================================================
-// MAIN
-// =============================================================================
-
-async function main() {
-    const args = process.argv.slice(2);
-
-    if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
-        console.log(`
-╔══════════════════════════════════════════════════════════════════════╗
-║            CAT Paper Import Tool v3 (Sets-First)                     ║
-╚══════════════════════════════════════════════════════════════════════╝
-
-Usage:
-  node scripts/import-paper-v3.mjs <path-to-json-file> [options]
-
-Options:
-  --publish             Publish the paper immediately after import
-  --dry-run             Validate and show what would be done, but don't write
-  --upsert              Use upsert mode (requires semantic keys in DB)
-  --notes <text>        Import notes (optional)
-  --skip-if-duplicate   Skip import if JSON hash already exists
-  --help, -h            Show this help message
-
-Schema v3.0 (Sets-First) Structure:
-  {
-    "schema_version": "v3.0",
-    "paper": { ... },
-    "question_sets": [
-      { "client_set_id": "VARC_RC_1", "section": "VARC", "set_type": "VARC", ... }
-    ],
-    "questions": [
-      { "client_question_id": "Q1", "set_ref": "VARC_RC_1", ... }
-    ]
-  }
-
-Import Flow:
-  1. Validate schema version = v3.0
-  2. Validate paper metadata
-  3. Validate question_sets (all client_set_id unique)
-  4. Validate questions (all set_ref exist in question_sets)
-  5. Insert paper
-  6. Insert question_sets FIRST (build client_set_id → UUID map)
-  7. Insert questions using set_ref → set_id mapping
-  8. Create ingest run for versioning
-
-Examples:
-  # Dry run to validate
-  node scripts/import-paper-v3.mjs data/paper-v3.json --dry-run
-
-  # Import and publish
-  node scripts/import-paper-v3.mjs data/paper-v3.json --publish
-
-  # Import with notes
-  node scripts/import-paper-v3.mjs data/paper-v3.json --notes "Initial v3 import"
-
-Reference:
-  - Schema: schemas/paper_schema_v3.json
-  - Template: data_sanitized/paper_schema_v3.template.json
-  - Docs: docs/CONTENT-SCHEMA.md
-`);
-        process.exit(0);
-    }
-
-    // Parse arguments
-    const jsonPath = args.find(a => !a.startsWith('--'));
-    const shouldPublish = args.includes('--publish');
-    const dryRun = args.includes('--dry-run');
-    const upsert = args.includes('--upsert');
-    const skipIfDuplicate = args.includes('--skip-if-duplicate');
-
-    let notes = null;
-    const notesIdx = args.indexOf('--notes');
-    if (notesIdx !== -1 && args[notesIdx + 1]) {
-        notes = args[notesIdx + 1];
-    }
-
-    if (!jsonPath) {
-        console.error('❌ Please provide a path to the JSON file');
-        process.exit(1);
-    }
-
-    try {
-        console.log(`
-╔══════════════════════════════════════════════════════════════════════╗
-║            CAT Paper Import Tool v3 (Sets-First)                     ║
-╚══════════════════════════════════════════════════════════════════════╝
-`);
-
-        if (dryRun) {
-            console.log('🔍 DRY RUN MODE - No changes will be made\n');
-        }
-
-        // Read and parse JSON
-        console.log(`📂 Reading ${jsonPath}...`);
-        const content = readFileSync(jsonPath, 'utf-8');
-        const data = JSON.parse(content);
-
-        // Validate v3 schema
-        validateV3Data(data);
-
-        // Import paper
-        const paper = await importPaperV3(data.paper, { upsert, dryRun });
-
-        // Import question_sets FIRST
-        const { count: setCount, setIdMap } = await importQuestionSetsV3(
-            paper.id,
-            data.question_sets,
-            { upsert, dryRun }
-        );
-
-        // Import questions using set_ref → set_id mapping
-        const questionCount = await importQuestionsV3(
-            paper.id,
-            data.questions,
-            setIdMap,
-            { upsert, dryRun }
-        );
-
-        // Create ingest run
-        const ingestResult = await createIngestRun(paper.id, data, {
-            notes,
-            skipIfDuplicate,
-            dryRun
-        });
-
-        if (ingestResult.skipped) {
-            console.log(`
-╔══════════════════════════════════════════════════════════════════════╗
-║                     Import Skipped (Duplicate)                       ║
-╠══════════════════════════════════════════════════════════════════════╣
-║  Paper ID:    ${paper.id}
-║  Slug:        ${paper.slug}
-║  Existing:    Version ${ingestResult.existing.version_number}
-╚══════════════════════════════════════════════════════════════════════╝
-`);
-            return;
-        }
-
-        // Publish if requested
-        await publishPaper(paper.id, shouldPublish, dryRun);
-
-        // Summary
-        console.log(`
-╔══════════════════════════════════════════════════════════════════════╗
-║                    Import Complete! ${dryRun ? '(DRY RUN)' : ''}                          
-╠══════════════════════════════════════════════════════════════════════╣
-║  Paper ID:    ${paper.id}
-║  Slug:        ${data.paper.slug}
-║  Version:     ${ingestResult.version || 'N/A (dry run)'}
-║  Sets:        ${setCount}
-║  Questions:   ${questionCount}
-║  Published:   ${shouldPublish ? 'Yes' : 'No (draft)'}
-╚══════════════════════════════════════════════════════════════════════╝
-`);
-
-    } catch (err) {
-        if (err instanceof ValidationError) {
-            console.error(`\n❌ Validation failed: ${err.message}`);
-            if (err.errors && err.errors.length > 0) {
-                console.error('\nErrors:');
-                err.errors.forEach(e => console.error(`   • ${e}`));
-            }
-        } else {
-            console.error(`\n❌ Import failed: ${err.message}`);
-        }
-        process.exit(1);
-    }
-}
-
-main();
-````
-
-## File: scripts/markdown_to_json_parser_v3.mjs
-````javascript
-#!/usr/bin/env node
-/*
- * markdown_to_json_parser_v3.mjs
- *
- * Parses CPM-AUTO (Compact Paper Markup — Auto Numbering) into JSON schema v3.0.
- * Usage:
- *   node scripts/markdown_to_json_parser_v3.mjs <input.md> [output.json]
- */
-
-import fs from 'fs';
-import path from 'path';
-import { validatePaperSchema } from './ajv-validator.mjs';
-
-function toBool(value) {
-    if (value === undefined || value === null) return undefined;
-    const v = String(value).trim().toLowerCase();
-    if (v === 'true') return true;
-    if (v === 'false') return false;
-    return undefined;
-}
-
-function toInt(value) {
-    if (value === undefined || value === null || value === '') return undefined;
-    const num = Number(value);
-    return Number.isNaN(num) ? undefined : num;
-}
-
-function normalizeLine(line) {
-    return line
-        .replace(/\\_/g, '_')
-        .replace(/\\>/g, '>')
-        .replace(/\\\+/g, '+')
-        .replace(/\\#/g, '#')
-        .trim();
-}
-
-function parsePipeKeyValues(input) {
-    const result = {};
-    const parts = input.split('|').map((p) => p.trim()).filter(Boolean);
-    for (const part of parts) {
-        const eqIndex = part.indexOf('=');
-        if (eqIndex === -1) continue;
-        const key = part.slice(0, eqIndex).trim();
-        const value = part.slice(eqIndex + 1).trim();
-        result[key] = value;
-    }
-    return result;
-}
-
-function parsePaperLine(line) {
-    const payload = line.replace(/^@P\s*/, '').trim();
-    const data = parsePipeKeyValues(payload);
-    const dm = (data.dm || '').split(',').map((s) => s.trim());
-    const flags = {};
-    if (data.flags) {
-        for (const entry of data.flags.split(';')) {
-            const [k, v] = entry.split('=').map((s) => s.trim());
-            if (!k) continue;
-            const boolVal = toBool(v);
-            flags[k] = boolVal !== undefined ? boolVal : v;
-        }
-    }
-
-    const schemaVersionRaw = data.v || '3.0';
-    const schema_version = schemaVersionRaw.startsWith('v') ? schemaVersionRaw : `v${schemaVersionRaw}`;
-
-    return {
-        schema_version,
-        paper: {
-            paper_key: data.key,
-            title: data.title,
-            slug: data.slug,
-            description: data.desc,
-            year: toInt(data.year),
-            total_questions: toInt(data.tq),
-            total_marks: toInt(data.tm),
-            duration_minutes: toInt(data.dur),
-            sections: data.secs ? data.secs.split(',').map((s) => s.trim()).filter(Boolean) : [],
-            default_positive_marks: toInt(dm[0]),
-            default_negative_marks: toInt(dm[1]),
-            difficulty_level: data.diff,
-            is_free: toBool(flags.is_free) ?? undefined,
-            published: toBool(flags.published) ?? undefined,
-            allow_pause: toBool(flags.allow_pause) ?? undefined,
-            attempt_limit: toInt(flags.attempt_limit)
-        }
-    };
-}
-
-function parseSetLine(line) {
-    const payload = line.replace(/^@SET\s*/, '').trim();
-    const firstSplit = payload.split('|');
-    const setId = firstSplit[0].trim();
-    const rest = firstSplit.slice(1).join('|');
-    const data = parsePipeKeyValues(rest);
-    return {
-        setId,
-        data
-    };
-}
-
-function normalizeToken(value) {
-    if (value === undefined || value === null) return value;
-    return String(value).replace(/\\/g, '').trim();
-}
-
-function normalizeContextType(raw) {
-    const value = normalizeToken(raw);
-    if (!value) return undefined;
-    return value;
-}
-
-function normalizeContentLayout(raw) {
-    const value = normalizeToken(raw);
-    if (!value) return undefined;
-    if (value === 'text_only') return 'single_focus';
-    if (value === 'split_view') return 'split_table';
-    return value;
-}
-
-function parseQuestionLine(line) {
-    const payload = line.replace(/^@Q\s*/, '').trim();
-    const data = parsePipeKeyValues(payload);
-    return data;
-}
-
-function parseMarkdownToV3(markdownText) {
-    const lines = markdownText.split(/\r?\n/);
-
-    let schema_version = 'v3.0';
-    let paper = null;
-    const question_sets = [];
-    const questions = [];
-
-    let currentSection = null;
-    let currentSet = null;
-    let sectionSetOrder = {};
-    let setQuestionOrder = 0;
-    let globalQuestionNumber = 0;
-
-    let inContext = false;
-    let contextBuffer = [];
-
-    let inQuestion = false;
-    let questionData = null;
-    let questionTextLines = [];
-    let solutionLines = [];
-    let options = [];
-    let inSolution = false;
-
-    function finalizeContext() {
-        if (currentSet && contextBuffer.length) {
-            currentSet.context_body = contextBuffer.join('\n').trim();
-        }
-        contextBuffer = [];
-        inContext = false;
-    }
-
-    function finalizeQuestion() {
-        if (!questionData) return;
-        const question_text = questionTextLines.join('\n').trim();
-        const solution_text = solutionLines.join('\n').trim();
-        const question = {
-            ...questionData,
-            question_text
-        };
-        if (options.length) {
-            question.options = options;
-        }
-        if (solution_text) {
-            question.solution_text = solution_text;
-        }
-        questions.push(question);
-
-        inQuestion = false;
-        inSolution = false;
-        questionData = null;
-        questionTextLines = [];
-        solutionLines = [];
-        options = [];
-    }
-
-    for (const rawLine of lines) {
-        const line = normalizeLine(rawLine);
-        if (!line || line.startsWith('#')) {
-            continue;
-        }
-
-        if (line === '@END_CTX') {
-            finalizeContext();
-            continue;
-        }
-
-        if (line === '@END_Q') {
-            finalizeQuestion();
-            continue;
-        }
-
-        if (line === '@END_SET') {
-            currentSet = null;
-            setQuestionOrder = 0;
-            continue;
-        }
-
-        if (line === '@END_S') {
-            currentSection = null;
-            continue;
-        }
-
-        if (line === '@CTX') {
-            inContext = true;
-            continue;
-        }
-
-        if (line.startsWith('@P ')) {
-            const paperPayload = parsePaperLine(line);
-            schema_version = paperPayload.schema_version;
-            paper = paperPayload.paper;
-            continue;
-        }
-
-        if (line.startsWith('@S ')) {
-            currentSection = line.replace(/^@S\s*/, '').trim();
-            if (!sectionSetOrder[currentSection]) {
-                sectionSetOrder[currentSection] = 0;
-            }
-            continue;
-        }
-
-        if (line.startsWith('@SET ')) {
-            finalizeContext();
-            const { setId, data } = parseSetLine(line);
-            const order = (sectionSetOrder[currentSection] || 0) + 1;
-            sectionSetOrder[currentSection] = order;
-            const normalizedSetId = normalizeToken(setId);
-            const normalizedContextType = normalizeContextType(data.ctx);
-            const normalizedContentLayout = normalizeContentLayout(data.layout);
-            const normalizedSetType = normalizeToken(data.type);
-            currentSet = {
-                client_set_id: normalizedSetId,
-                section: currentSection,
-                set_type: normalizedSetType,
-                display_order: order,
-                context_type: normalizedContextType,
-                context_title: data.title,
-                content_layout: normalizedContentLayout,
-                context_image_url: data.image_url ?? null
-            };
-
-            if (normalizedSetType === 'ATOMIC') {
-                delete currentSet.context_type;
-                delete currentSet.content_layout;
-            }
-
-            question_sets.push(currentSet);
-            setQuestionOrder = 0;
-            continue;
-        }
-
-        if (line.startsWith('@Q ')) {
-            finalizeQuestion();
-            const data = parseQuestionLine(line);
-            setQuestionOrder += 1;
-            globalQuestionNumber += 1;
-            const dm = (data.m || '').split(',').map((s) => s.trim());
-            const client_question_id = data.id || (paper?.paper_key ? `${paper.paper_key}_Q${globalQuestionNumber}` : `Q${globalQuestionNumber}`);
-            questionData = {
-                client_question_id,
-                set_ref: currentSet?.client_set_id,
-                sequence_order: setQuestionOrder,
-                section: currentSection,
-                question_number: globalQuestionNumber,
-                question_type: data.type,
-                taxonomy_type: data.tax,
-                topic: data.topic,
-                subtopic: data.sub,
-                difficulty: data.diff,
-                correct_answer: data.ans,
-                positive_marks: toInt(dm[0]) ?? paper?.default_positive_marks,
-                negative_marks: toInt(dm[1]) ?? paper?.default_negative_marks
-            };
-            inQuestion = true;
-            inSolution = false;
-            continue;
-        }
-
-        if (inContext) {
-            contextBuffer.push(rawLine.replace(/\r?\n?$/, ''));
-            continue;
-        }
-
-        if (inQuestion) {
-            if (line.startsWith('?')) {
-                questionTextLines.push(line.replace(/^\?\s?/, ''));
-                continue;
-            }
-            if (/^[A-Z]\./.test(line)) {
-                const optionId = line[0];
-                const optionText = line.slice(2).trim();
-                options.push({ id: optionId, text: optionText });
-                continue;
-            }
-            if (line.startsWith('>')) {
-                inSolution = true;
-                solutionLines.push(line.replace(/^>\s?/, ''));
-                continue;
-            }
-            if (inSolution) {
-                solutionLines.push(line);
-                continue;
-            }
-            if (questionTextLines.length) {
-                questionTextLines.push(line);
-            }
-        }
-    }
-
-    finalizeContext();
-    finalizeQuestion();
-
-    return {
-        schema_version,
-        paper,
-        question_sets,
-        questions
-    };
-}
-
-function formatAjvErrors(errors = []) {
-    return errors.map((err) => {
-        const path = err.instancePath || '(root)';
-        const message = err.message || err.keyword || 'schema validation error';
-        return `${path} ${message}`.trim();
-    });
-}
-
-function main() {
-    const inputPath = process.argv[2];
-    const outputPath = process.argv[3];
-
-    if (!inputPath) {
-        console.error('Usage: node scripts/markdown_to_json_parser_v3.mjs <input.md> [output.json]');
-        process.exit(1);
-    }
-
-    const markdownText = fs.readFileSync(inputPath, 'utf8');
-    const result = parseMarkdownToV3(markdownText);
-    const ajvResult = validatePaperSchema(result);
-    const ajvErrors = ajvResult.valid ? [] : formatAjvErrors(ajvResult.errors);
-
-    if (ajvErrors.length > 0) {
-        console.error('❌ AJV schema validation errors:');
-        ajvErrors.forEach((e) => console.error(`   - ${e}`));
-        console.error('');
-        console.log('⚠️  Writing output anyway for debugging...');
-    }
-
-    const output = JSON.stringify(result, null, 2);
-
-    if (outputPath) {
-        fs.writeFileSync(outputPath, output, 'utf8');
-    } else {
-        const derivedPath = path.join(process.cwd(), 'paper_v3.json');
-        fs.writeFileSync(derivedPath, output, 'utf8');
-        console.log(`Wrote ${derivedPath}`);
-    }
-
-    if (ajvErrors.length > 0) {
-        process.exit(1);
-    }
-}
-
-if (process.argv[1] && process.argv[1].includes('markdown_to_json_parser_v3.mjs')) {
-    main();
-}
-
-export { parseMarkdownToV3 };
-````
-
 ## File: scripts/sanitize-question-data.mjs
 ````javascript
 #!/usr/bin/env node
@@ -20266,6 +22070,1227 @@ main().catch(error => {
 });
 ````
 
+## File: scripts/import-paper-v3.mjs
+````javascript
+#!/usr/bin/env node
+/**
+ * @fileoverview Paper Import Script v3 (Sets-First)
+ * @description CLI tool to import papers using Schema v3.0 (question_sets → questions)
+ * @usage node scripts/import-paper-v3.mjs <path-to-json-file> [options]
+ * 
+ * Schema v3.0 Structure:
+ *   - paper: Paper metadata
+ *   - question_sets[]: Parent containers (inserted FIRST)
+ *   - questions[]: Children that reference sets via set_ref
+ * 
+ * Options:
+ *   --publish             Publish the paper immediately after import
+ *   --dry-run             Validate and show what would be done, but don't write
+ *   --upsert              Use upsert mode (requires semantic keys in DB)
+ *   --notes <text>        Import notes (optional)
+ *   --skip-if-duplicate   Skip import if JSON hash already exists
+ *   --help, -h            Show help message
+ */
+
+import { readFileSync } from 'fs';
+import { createHash, randomUUID } from 'crypto';
+import { createClient } from '@supabase/supabase-js';
+
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    console.error('❌ Missing environment variables:');
+    console.error('   - NEXT_PUBLIC_SUPABASE_URL');
+    console.error('   - SUPABASE_SERVICE_ROLE_KEY (use service role, not anon key!)');
+    console.error('');
+    console.error('Set them in .env.local or pass via environment.');
+    process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false }
+});
+
+// =============================================================================
+// SCHEMA V3 VALIDATION (Phase 3)
+// =============================================================================
+
+const VALID_SECTIONS = ['VARC', 'DILR', 'QA'];
+const VALID_SET_TYPES = ['VARC', 'DILR', 'CASELET', 'ATOMIC'];
+const VALID_QUESTION_TYPES = ['MCQ', 'TITA'];
+const VALID_CONTEXT_TYPES = [
+    'rc_passage', 'dilr_set', 'caselet', 'data_table', 'graph', 'other_shared_stimulus'
+];
+const VALID_CONTENT_LAYOUTS = [
+    'split_passage', 'split_chart', 'split_table', 'single_focus', 'image_top'
+];
+const COMPOSITE_SET_TYPES = ['VARC', 'DILR', 'CASELET'];
+
+class ValidationError extends Error {
+    constructor(message, errors = []) {
+        super(message);
+        this.name = 'ValidationError';
+        this.errors = errors;
+    }
+}
+
+function validateSchemaVersion(data) {
+    if (data.schema_version !== 'v3.0') {
+        throw new ValidationError(
+            `Schema version must be 'v3.0' for sets-first import. Got: ${data.schema_version || 'undefined'}`,
+            ['Use schema_version: "v3.0" for the sets-first importer']
+        );
+    }
+}
+
+function validatePaper(paper) {
+    const errors = [];
+    const required = ['slug', 'title'];
+
+    for (const field of required) {
+        if (!paper[field]) {
+            errors.push(`paper.${field} is required`);
+        }
+    }
+
+    if (paper.slug && !/^[a-z0-9-]+$/.test(paper.slug)) {
+        errors.push(`paper.slug must be lowercase alphanumeric with hyphens: ${paper.slug}`);
+    }
+
+    if (paper.sections && !Array.isArray(paper.sections)) {
+        errors.push('paper.sections must be an array');
+    }
+
+    if (errors.length > 0) {
+        throw new ValidationError('Paper validation failed', errors);
+    }
+
+    return true;
+}
+
+function validateQuestionSets(sets) {
+    const errors = [];
+    const clientSetIds = new Set();
+
+    if (!Array.isArray(sets)) {
+        throw new ValidationError('question_sets must be an array');
+    }
+
+    sets.forEach((set, index) => {
+        const prefix = `question_sets[${index}]`;
+
+        // Required fields
+        if (!set.client_set_id) {
+            errors.push(`${prefix}.client_set_id is required`);
+        } else if (!/^[A-Z0-9_]+$/.test(set.client_set_id)) {
+            errors.push(`${prefix}.client_set_id must be uppercase alphanumeric with underscores: ${set.client_set_id}`);
+        } else if (clientSetIds.has(set.client_set_id)) {
+            errors.push(`${prefix}.client_set_id is duplicate: ${set.client_set_id}`);
+        } else {
+            clientSetIds.add(set.client_set_id);
+        }
+
+        if (!set.section) {
+            errors.push(`${prefix}.section is required`);
+        } else if (!VALID_SECTIONS.includes(set.section)) {
+            errors.push(`${prefix}.section must be one of ${VALID_SECTIONS.join(', ')}: ${set.section}`);
+        }
+
+        if (!set.set_type) {
+            errors.push(`${prefix}.set_type is required`);
+        } else if (!VALID_SET_TYPES.includes(set.set_type)) {
+            errors.push(`${prefix}.set_type must be one of ${VALID_SET_TYPES.join(', ')}: ${set.set_type}`);
+        }
+
+        if (set.display_order === undefined || set.display_order === null) {
+            errors.push(`${prefix}.display_order is required`);
+        }
+
+        // Composite sets require context_body
+        if (COMPOSITE_SET_TYPES.includes(set.set_type)) {
+            if (!set.context_body || set.context_body.trim() === '') {
+                errors.push(`${prefix}.context_body is required for ${set.set_type} sets`);
+            }
+        }
+
+        // Validate context_type if provided
+        if (set.context_type && !VALID_CONTEXT_TYPES.includes(set.context_type)) {
+            errors.push(`${prefix}.context_type must be one of ${VALID_CONTEXT_TYPES.join(', ')}: ${set.context_type}`);
+        }
+
+        // Validate content_layout if provided
+        if (set.content_layout && !VALID_CONTENT_LAYOUTS.includes(set.content_layout)) {
+            errors.push(`${prefix}.content_layout must be one of ${VALID_CONTENT_LAYOUTS.join(', ')}: ${set.content_layout}`);
+        }
+    });
+
+    if (errors.length > 0) {
+        throw new ValidationError('Question sets validation failed', errors);
+    }
+
+    return clientSetIds;
+}
+
+function validateQuestions(questions, validSetRefs) {
+    const errors = [];
+    const clientQuestionIds = new Set();
+
+    if (!Array.isArray(questions)) {
+        throw new ValidationError('questions must be an array');
+    }
+
+    questions.forEach((q, index) => {
+        const prefix = `questions[${index}]`;
+
+        // Required fields
+        if (!q.client_question_id) {
+            errors.push(`${prefix}.client_question_id is required`);
+        } else if (clientQuestionIds.has(q.client_question_id)) {
+            errors.push(`${prefix}.client_question_id is duplicate: ${q.client_question_id}`);
+        } else {
+            clientQuestionIds.add(q.client_question_id);
+        }
+
+        if (!q.set_ref) {
+            errors.push(`${prefix}.set_ref is required`);
+        } else if (!validSetRefs.has(q.set_ref)) {
+            errors.push(`${prefix}.set_ref references non-existent set: ${q.set_ref}`);
+        }
+
+        if (!q.sequence_order && q.sequence_order !== 0) {
+            errors.push(`${prefix}.sequence_order is required`);
+        }
+
+        if (!q.question_number && q.question_number !== 0) {
+            errors.push(`${prefix}.question_number is required`);
+        }
+
+        if (!q.question_text) {
+            errors.push(`${prefix}.question_text is required`);
+        }
+
+        if (!q.question_type) {
+
+            if (q.question_format && !VALID_QUESTION_TYPES.includes(q.question_format)) {
+                errors.push(`${prefix}.question_format must be one of ${VALID_QUESTION_TYPES.join(', ')}: ${q.question_format}`);
+            }
+
+            if (q.correct_answer !== undefined && q.correct_answer !== null) {
+                if (q.question_type === 'MCQ') {
+                    const isString = typeof q.correct_answer === 'string';
+                    const isStringArray = Array.isArray(q.correct_answer) && q.correct_answer.every(a => typeof a === 'string');
+                    if (!isString && !isStringArray) {
+                        errors.push(`${prefix}.correct_answer must be a string or string[] for MCQ questions`);
+                    }
+                }
+                if (q.question_type === 'TITA') {
+                    const isString = typeof q.correct_answer === 'string';
+                    const isNumber = typeof q.correct_answer === 'number';
+                    if (!isString && !isNumber) {
+                        errors.push(`${prefix}.correct_answer must be a string or number for TITA questions`);
+                    }
+                }
+            }
+            errors.push(`${prefix}.question_type is required`);
+        } else if (!VALID_QUESTION_TYPES.includes(q.question_type)) {
+            errors.push(`${prefix}.question_type must be one of ${VALID_QUESTION_TYPES.join(', ')}: ${q.question_type}`);
+        }
+
+        // MCQ requires options
+        if (q.question_type === 'MCQ') {
+            if (!q.options || !Array.isArray(q.options) || q.options.length === 0) {
+                errors.push(`${prefix}.options is required for MCQ questions`);
+            } else {
+                // Accept either string array ["A text", "B text"] or object array [{id, text}]
+                const firstOpt = q.options[0];
+                const isObjectFormat = typeof firstOpt === 'object' && firstOpt !== null;
+
+                if (isObjectFormat) {
+                    q.options.forEach((opt, optIdx) => {
+                        if (!opt.id) {
+                            errors.push(`${prefix}.options[${optIdx}].id is required`);
+                        }
+                        if (!opt.text && opt.text !== '') {
+                            errors.push(`${prefix}.options[${optIdx}].text is required`);
+                        }
+                    });
+                }
+                // String format is valid as-is
+            }
+        }
+
+        // Section validation
+        if (q.section && !VALID_SECTIONS.includes(q.section)) {
+            errors.push(`${prefix}.section must be one of ${VALID_SECTIONS.join(', ')}: ${q.section}`);
+        }
+    });
+
+    if (errors.length > 0) {
+        throw new ValidationError('Questions validation failed', errors);
+    }
+
+    return true;
+}
+
+function validateV3Data(data) {
+    console.log('🔍 Validating Schema v3.0 payload...\n');
+
+    // Check schema version
+    validateSchemaVersion(data);
+
+    // Check required root keys
+    if (!data.paper) {
+        throw new ValidationError('Missing required root key: paper');
+    }
+    if (!data.question_sets) {
+        throw new ValidationError('Missing required root key: question_sets');
+    }
+    if (!data.questions) {
+        throw new ValidationError('Missing required root key: questions');
+    }
+
+    // Validate paper
+    validatePaper(data.paper);
+    console.log('   ✅ paper validated');
+
+    // Validate question_sets and collect valid client_set_ids
+    const validSetRefs = validateQuestionSets(data.question_sets);
+    console.log(`   ✅ question_sets validated (${data.question_sets.length} sets)`);
+
+    // Validate questions against valid set refs
+    validateQuestions(data.questions, validSetRefs);
+    console.log(`   ✅ questions validated (${data.questions.length} questions)`);
+
+    console.log('\n✅ All validation passed\n');
+    return true;
+}
+
+// =============================================================================
+// HASH FUNCTIONS
+// =============================================================================
+
+function computeJsonHash(data) {
+    const jsonStr = JSON.stringify(data, Object.keys(data).sort());
+    return createHash('sha256').update(jsonStr).digest('hex');
+}
+
+// =============================================================================
+// IMPORT FUNCTIONS (Phase 2 - Sets-First)
+// =============================================================================
+
+async function importPaperV3(paperData, options = {}) {
+    const { upsert = false, dryRun = false } = options;
+
+    console.log(`📄 ${dryRun ? '[DRY RUN] ' : ''}Importing paper: ${paperData.title}`);
+
+    if (dryRun) {
+        console.log(`   Would create/update paper with slug: ${paperData.slug}`);
+        return { id: 'dry-run-id', slug: paperData.slug };
+    }
+
+    // Check if paper exists
+    const { data: existing } = await supabase
+        .from('papers')
+        .select('id')
+        .eq('slug', paperData.slug)
+        .single();
+
+    const paperPayload = {
+        slug: paperData.slug,
+        title: paperData.title,
+        description: paperData.description || null,
+        year: paperData.year || new Date().getFullYear(),
+        total_questions: paperData.total_questions || 0,
+        total_marks: paperData.total_marks || 198,
+        duration_minutes: paperData.duration_minutes || 120,
+        sections: paperData.sections || ['VARC', 'DILR', 'QA'],
+        default_positive_marks: paperData.default_positive_marks || 3.0,
+        default_negative_marks: paperData.default_negative_marks || 1.0,
+        difficulty_level: paperData.difficulty_level || 'medium',
+        is_free: paperData.is_free ?? false,
+        published: paperData.published ?? false,
+        allow_pause: paperData.allow_pause ?? true,
+        attempt_limit: paperData.attempt_limit ?? 0,
+    };
+
+    // Add paper_key if using upsert mode
+    if (upsert && paperData.paper_key) {
+        paperPayload.paper_key = paperData.paper_key;
+    }
+
+    if (existing) {
+        console.log(`   ⚠️  Paper exists (id: ${existing.id}), updating...`);
+
+        const { data, error } = await supabase
+            .from('papers')
+            .update(paperPayload)
+            .eq('id', existing.id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    }
+
+    const { data, error } = await supabase
+        .from('papers')
+        .insert(paperPayload)
+        .select()
+        .single();
+
+    if (error) throw error;
+    console.log(`   ✅ Paper created with id: ${data.id}`);
+    return data;
+}
+
+async function importQuestionSetsV3(paperId, sets, options = {}) {
+    const { upsert = false, dryRun = false } = options;
+
+    console.log(`\n📋 ${dryRun ? '[DRY RUN] ' : ''}Importing ${sets.length} question_sets (SETS-FIRST)...`);
+
+    // Build client_set_id → UUID map
+    const setIdMap = {};
+
+    if (dryRun) {
+        sets.forEach(set => {
+            setIdMap[set.client_set_id] = `dry-run-uuid-${set.client_set_id}`;
+            console.log(`   Would create set: ${set.client_set_id} (${set.set_type})`);
+        });
+        return { count: sets.length, setIdMap };
+    }
+
+    // Delete existing sets (unless upsert mode)
+    if (!upsert) {
+        const { error: deleteError } = await supabase
+            .from('question_sets')
+            .delete()
+            .eq('paper_id', paperId);
+
+        if (deleteError) {
+            console.warn(`   ⚠️  Could not delete existing question_sets: ${deleteError.message}`);
+        }
+    }
+
+    // Prepare sets for insertion
+    const setsToInsert = sets.map(set => {
+        const newId = randomUUID();
+        setIdMap[set.client_set_id] = newId;
+
+        // Infer context_type from set_type if not provided
+        let contextType = set.context_type;
+        if (!contextType && set.set_type !== 'ATOMIC') {
+            contextType = {
+                'VARC': 'rc_passage',
+                'DILR': 'dilr_set',
+                'CASELET': 'caselet'
+            }[set.set_type] || 'other_shared_stimulus';
+        }
+
+        // Infer content_layout
+        let contentLayout = set.content_layout || 'single_focus';
+        if (!set.content_layout) {
+            if (set.context_image_url) {
+                contentLayout = 'image_top';
+            } else if (set.set_type === 'VARC') {
+                contentLayout = 'split_passage';
+            } else if (set.set_type === 'DILR') {
+                contentLayout = 'split_chart';
+            } else if (set.set_type === 'CASELET') {
+                contentLayout = 'split_table';
+            } else {
+                contentLayout = 'single_focus';
+            }
+        }
+
+        return {
+            id: newId,
+            paper_id: paperId,
+            section: set.section,
+            set_type: set.set_type,
+            context_type: contextType,
+            content_layout: contentLayout,
+            context_title: set.context_title || null,
+            context_body: set.context_body || null,
+            context_image_url: set.context_image_url || null,
+            context_additional_images: set.context_additional_images || null,
+            display_order: set.display_order,
+            is_active: set.is_active ?? true,
+            is_published: true, // Sets must be published to be visible through question_sets_with_questions view
+            metadata: set.metadata || {},
+            client_set_id: set.client_set_id, // Store for upsert support
+        };
+    });
+
+    // Insert in batches
+    const batchSize = 50;
+    let inserted = 0;
+
+    for (let i = 0; i < setsToInsert.length; i += batchSize) {
+        const batch = setsToInsert.slice(i, i + batchSize);
+        const { error } = await supabase
+            .from('question_sets')
+            .insert(batch);
+
+        if (error) throw error;
+        inserted += batch.length;
+    }
+
+    console.log(`   ✅ Created ${inserted} question_sets`);
+    console.log(`   📍 Set ID map built: ${Object.keys(setIdMap).length} entries`);
+
+    return { count: inserted, setIdMap };
+}
+
+async function importQuestionsV3(paperId, questions, setIdMap, options = {}) {
+    const { upsert = false, dryRun = false } = options;
+
+    console.log(`\n📝 ${dryRun ? '[DRY RUN] ' : ''}Importing ${questions.length} questions (using set_ref → set_id mapping)...`);
+
+    if (dryRun) {
+        questions.forEach(q => {
+            const setId = setIdMap[q.set_ref];
+            console.log(`   Q${q.question_number}: ${q.client_question_id} → set ${q.set_ref} (${setId ? '✅' : '❌'})`);
+        });
+        return questions.length;
+    }
+
+    // Delete existing questions (unless upsert mode)
+    if (!upsert) {
+        const { error: deleteError } = await supabase
+            .from('questions')
+            .delete()
+            .eq('paper_id', paperId);
+
+        if (deleteError) {
+            console.warn(`   ⚠️  Could not delete existing questions: ${deleteError.message}`);
+        }
+    }
+
+    // Prepare questions for insertion
+    const questionsToInsert = questions.map(q => {
+        const setId = setIdMap[q.set_ref];
+        if (!setId) {
+            throw new Error(`Question ${q.client_question_id} references unknown set: ${q.set_ref}`);
+        }
+
+        // Convert options from {id, text} format to string[] format
+        // The MCQRenderer expects options as string array: ["Option A text", "Option B text", ...]
+        let normalizedOptions = null;
+        if (q.options && Array.isArray(q.options) && q.options.length > 0) {
+            const firstOpt = q.options[0];
+            if (typeof firstOpt === 'object' && firstOpt !== null && 'text' in firstOpt) {
+                // Convert {id, text}[] to string[]
+                // Sort by id (A, B, C, D) to ensure correct order
+                const sorted = [...q.options].sort((a, b) => a.id.localeCompare(b.id));
+                normalizedOptions = sorted.map(opt => opt.text);
+            } else {
+                // Already string[] format
+                normalizedOptions = q.options;
+            }
+        }
+
+        return {
+            id: randomUUID(),
+            paper_id: paperId,
+            section: q.section,
+            question_number: q.question_number,
+            question_text: q.question_text,
+            question_type: q.question_type,
+            question_format: q.question_format || q.question_type,
+            taxonomy_type: q.taxonomy_type || null,
+            topic_tag: q.topic_tag || null,
+            difficulty_rationale: q.difficulty_rationale || null,
+            options: normalizedOptions,
+            correct_answer: q.correct_answer,
+            positive_marks: q.positive_marks ?? 3.0,
+            negative_marks: q.negative_marks ?? (q.question_type === 'TITA' ? 0 : 1.0),
+            difficulty: q.difficulty || null,
+            topic: q.topic || null,
+            subtopic: q.subtopic || null,
+            solution_text: q.solution_text || null,
+            solution_image_url: q.solution_image_url || null,
+            video_solution_url: q.video_solution_url || null,
+            set_id: setId,
+            sequence_order: q.sequence_order,
+            is_active: true,
+            client_question_id: q.client_question_id, // Store for upsert support
+        };
+    });
+
+    // Insert in batches
+    const batchSize = 50;
+    let inserted = 0;
+
+    for (let i = 0; i < questionsToInsert.length; i += batchSize) {
+        const batch = questionsToInsert.slice(i, i + batchSize);
+        const { error } = await supabase
+            .from('questions')
+            .insert(batch);
+
+        if (error) throw error;
+        inserted += batch.length;
+        console.log(`   ✅ Inserted ${inserted}/${questions.length} questions`);
+    }
+
+    return inserted;
+}
+
+async function createIngestRun(paperId, canonicalJson, options = {}) {
+    const { notes = null, skipIfDuplicate = false, dryRun = false } = options;
+
+    if (dryRun) {
+        console.log(`\n📦 [DRY RUN] Would create ingest run record`);
+        return { dryRun: true };
+    }
+
+    console.log(`\n📦 Creating ingest run record...`);
+
+    const canonicalHash = computeJsonHash(canonicalJson);
+
+    if (skipIfDuplicate) {
+        const { data: existing } = await supabase
+            .from('paper_ingest_runs')
+            .select('id, version_number')
+            .eq('paper_id', paperId)
+            .eq('canonical_json_hash', canonicalHash)
+            .single();
+
+        if (existing) {
+            console.log(`   ⚠️  Duplicate detected - same JSON already imported as version ${existing.version_number}`);
+            return { skipped: true, existing };
+        }
+    }
+
+    // Get next version number
+    const { data: maxVersion } = await supabase
+        .from('paper_ingest_runs')
+        .select('version_number')
+        .eq('paper_id', paperId)
+        .order('version_number', { ascending: false })
+        .limit(1)
+        .single();
+
+    const nextVersion = (maxVersion?.version_number || 0) + 1;
+
+    const { data: ingestRun, error } = await supabase
+        .from('paper_ingest_runs')
+        .insert({
+            paper_id: paperId,
+            schema_version: 'v3.0',
+            version_number: nextVersion,
+            canonical_paper_json: canonicalJson,
+            canonical_json_hash: canonicalHash,
+            import_notes: notes || 'Imported via v3 sets-first importer',
+        })
+        .select()
+        .single();
+
+    if (error) throw error;
+
+    // Update paper's latest_ingest_run_id
+    await supabase
+        .from('papers')
+        .update({ latest_ingest_run_id: ingestRun.id })
+        .eq('id', paperId);
+
+    console.log(`   ✅ Created ingest run v${nextVersion} (${ingestRun.id})`);
+    return { ingestRun, version: nextVersion };
+}
+
+async function publishPaper(paperId, shouldPublish, dryRun = false) {
+    if (!shouldPublish) {
+        console.log(`\n📋 Paper saved as draft (use --publish to publish)`);
+        return;
+    }
+
+    if (dryRun) {
+        console.log(`\n🚀 [DRY RUN] Would publish paper`);
+        return;
+    }
+
+    const { error: paperError } = await supabase
+        .from('papers')
+        .update({ published: true })
+        .eq('id', paperId);
+
+    if (paperError) throw paperError;
+
+    const { error: setsError } = await supabase
+        .from('question_sets')
+        .update({ is_published: true })
+        .eq('paper_id', paperId);
+
+    if (setsError) {
+        console.warn(`   ⚠️  Could not publish question_sets: ${setsError.message}`);
+    }
+
+    console.log(`\n🚀 Paper published!`);
+}
+
+// =============================================================================
+// MAIN
+// =============================================================================
+
+async function main() {
+    const args = process.argv.slice(2);
+
+    if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+        console.log(`
+╔══════════════════════════════════════════════════════════════════════╗
+║            CAT Paper Import Tool v3 (Sets-First)                     ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Usage:
+  node scripts/import-paper-v3.mjs <path-to-json-file> [options]
+
+Options:
+  --publish             Publish the paper immediately after import
+  --dry-run             Validate and show what would be done, but don't write
+  --upsert              Use upsert mode (requires semantic keys in DB)
+  --notes <text>        Import notes (optional)
+  --skip-if-duplicate   Skip import if JSON hash already exists
+  --help, -h            Show this help message
+
+Schema v3.0 (Sets-First) Structure:
+  {
+    "schema_version": "v3.0",
+    "paper": { ... },
+    "question_sets": [
+      { "client_set_id": "VARC_RC_1", "section": "VARC", "set_type": "VARC", ... }
+    ],
+    "questions": [
+      { "client_question_id": "Q1", "set_ref": "VARC_RC_1", ... }
+    ]
+  }
+
+Import Flow:
+  1. Validate schema version = v3.0
+  2. Validate paper metadata
+  3. Validate question_sets (all client_set_id unique)
+  4. Validate questions (all set_ref exist in question_sets)
+  5. Insert paper
+  6. Insert question_sets FIRST (build client_set_id → UUID map)
+  7. Insert questions using set_ref → set_id mapping
+  8. Create ingest run for versioning
+
+Examples:
+  # Dry run to validate
+  node scripts/import-paper-v3.mjs data/paper-v3.json --dry-run
+
+  # Import and publish
+  node scripts/import-paper-v3.mjs data/paper-v3.json --publish
+
+  # Import with notes
+  node scripts/import-paper-v3.mjs data/paper-v3.json --notes "Initial v3 import"
+
+Reference:
+  - Schema: schemas/paper_schema_v3.json
+  - Template: data_sanitized/paper_schema_v3.template.json
+  - Docs: docs/CONTENT-SCHEMA.md
+`);
+        process.exit(0);
+    }
+
+    // Parse arguments
+    const jsonPath = args.find(a => !a.startsWith('--'));
+    const shouldPublish = args.includes('--publish');
+    const dryRun = args.includes('--dry-run');
+    const upsert = args.includes('--upsert');
+    const skipIfDuplicate = args.includes('--skip-if-duplicate');
+
+    let notes = null;
+    const notesIdx = args.indexOf('--notes');
+    if (notesIdx !== -1 && args[notesIdx + 1]) {
+        notes = args[notesIdx + 1];
+    }
+
+    if (!jsonPath) {
+        console.error('❌ Please provide a path to the JSON file');
+        process.exit(1);
+    }
+
+    try {
+        console.log(`
+╔══════════════════════════════════════════════════════════════════════╗
+║            CAT Paper Import Tool v3 (Sets-First)                     ║
+╚══════════════════════════════════════════════════════════════════════╝
+`);
+
+        if (dryRun) {
+            console.log('🔍 DRY RUN MODE - No changes will be made\n');
+        }
+
+        // Read and parse JSON
+        console.log(`📂 Reading ${jsonPath}...`);
+        const content = readFileSync(jsonPath, 'utf-8');
+        const data = JSON.parse(content);
+
+        // Validate v3 schema
+        validateV3Data(data);
+
+        // Import paper
+        const paper = await importPaperV3(data.paper, { upsert, dryRun });
+
+        // Import question_sets FIRST
+        const { count: setCount, setIdMap } = await importQuestionSetsV3(
+            paper.id,
+            data.question_sets,
+            { upsert, dryRun }
+        );
+
+        // Import questions using set_ref → set_id mapping
+        const questionCount = await importQuestionsV3(
+            paper.id,
+            data.questions,
+            setIdMap,
+            { upsert, dryRun }
+        );
+
+        // Create ingest run
+        const ingestResult = await createIngestRun(paper.id, data, {
+            notes,
+            skipIfDuplicate,
+            dryRun
+        });
+
+        if (ingestResult.skipped) {
+            console.log(`
+╔══════════════════════════════════════════════════════════════════════╗
+║                     Import Skipped (Duplicate)                       ║
+╠══════════════════════════════════════════════════════════════════════╣
+║  Paper ID:    ${paper.id}
+║  Slug:        ${paper.slug}
+║  Existing:    Version ${ingestResult.existing.version_number}
+╚══════════════════════════════════════════════════════════════════════╝
+`);
+            return;
+        }
+
+        // Publish if requested
+        await publishPaper(paper.id, shouldPublish, dryRun);
+
+        // Summary
+        console.log(`
+╔══════════════════════════════════════════════════════════════════════╗
+║                    Import Complete! ${dryRun ? '(DRY RUN)' : ''}                          
+╠══════════════════════════════════════════════════════════════════════╣
+║  Paper ID:    ${paper.id}
+║  Slug:        ${data.paper.slug}
+║  Version:     ${ingestResult.version || 'N/A (dry run)'}
+║  Sets:        ${setCount}
+║  Questions:   ${questionCount}
+║  Published:   ${shouldPublish ? 'Yes' : 'No (draft)'}
+╚══════════════════════════════════════════════════════════════════════╝
+`);
+
+    } catch (err) {
+        if (err instanceof ValidationError) {
+            console.error(`\n❌ Validation failed: ${err.message}`);
+            if (err.errors && err.errors.length > 0) {
+                console.error('\nErrors:');
+                err.errors.forEach(e => console.error(`   • ${e}`));
+            }
+        } else {
+            console.error(`\n❌ Import failed: ${err.message}`);
+        }
+        process.exit(1);
+    }
+}
+
+main();
+````
+
+## File: scripts/markdown_to_json_parser_v3.mjs
+````javascript
+#!/usr/bin/env node
+/*
+ * markdown_to_json_parser_v3.mjs
+ *
+ * Parses CPM-AUTO (Compact Paper Markup — Auto Numbering) into JSON schema v3.0.
+ * Usage:
+ *   node scripts/markdown_to_json_parser_v3.mjs <input.md> [output.json]
+ */
+
+import fs from 'fs';
+import path from 'path';
+import { validatePaperSchema } from './ajv-validator.mjs';
+
+function toBool(value) {
+    if (value === undefined || value === null) return undefined;
+    const v = String(value).trim().toLowerCase();
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return undefined;
+}
+
+function toInt(value) {
+    if (value === undefined || value === null || value === '') return undefined;
+    const num = Number(value);
+    return Number.isNaN(num) ? undefined : num;
+}
+
+function normalizeLine(line) {
+    return line
+        .replace(/\\_/g, '_')
+        .replace(/\\>/g, '>')
+        .replace(/\\\+/g, '+')
+        .replace(/\\#/g, '#')
+        .trim();
+}
+
+function parsePipeKeyValues(input) {
+    const result = {};
+    const parts = input.split('|').map((p) => p.trim()).filter(Boolean);
+    for (const part of parts) {
+        const eqIndex = part.indexOf('=');
+        if (eqIndex === -1) continue;
+        const key = part.slice(0, eqIndex).trim();
+        const value = part.slice(eqIndex + 1).trim();
+        result[key] = value;
+    }
+    return result;
+}
+
+function parsePaperLine(line) {
+    const payload = line.replace(/^@P\s*/, '').trim();
+    const data = parsePipeKeyValues(payload);
+    const dm = (data.dm || '').split(',').map((s) => s.trim());
+    const flags = {};
+    if (data.flags) {
+        for (const entry of data.flags.split(';')) {
+            const [k, v] = entry.split('=').map((s) => s.trim());
+            if (!k) continue;
+            const boolVal = toBool(v);
+            flags[k] = boolVal !== undefined ? boolVal : v;
+        }
+    }
+
+    const schemaVersionRaw = data.v || '3.0';
+    const schema_version = schemaVersionRaw.startsWith('v') ? schemaVersionRaw : `v${schemaVersionRaw}`;
+
+    return {
+        schema_version,
+        paper: {
+            paper_key: data.key,
+            title: data.title,
+            slug: data.slug,
+            description: data.desc,
+            year: toInt(data.year),
+            total_questions: toInt(data.tq),
+            total_marks: toInt(data.tm),
+            duration_minutes: toInt(data.dur),
+            sections: data.secs ? data.secs.split(',').map((s) => s.trim()).filter(Boolean) : [],
+            default_positive_marks: toInt(dm[0]),
+            default_negative_marks: toInt(dm[1]),
+            difficulty_level: data.diff,
+            is_free: toBool(flags.is_free) ?? undefined,
+            published: toBool(flags.published) ?? undefined,
+            allow_pause: toBool(flags.allow_pause) ?? undefined,
+            attempt_limit: toInt(flags.attempt_limit)
+        }
+    };
+}
+
+function parseSetLine(line) {
+    const payload = line.replace(/^@SET\s*/, '').trim();
+    const firstSplit = payload.split('|');
+    const setId = firstSplit[0].trim();
+    const rest = firstSplit.slice(1).join('|');
+    const data = parsePipeKeyValues(rest);
+    return {
+        setId,
+        data
+    };
+}
+
+function normalizeToken(value) {
+    if (value === undefined || value === null) return value;
+    return String(value).replace(/\\/g, '').trim();
+}
+
+function normalizeContextType(raw) {
+    const value = normalizeToken(raw);
+    if (!value) return undefined;
+    return value;
+}
+
+function normalizeContentLayout(raw) {
+    const value = normalizeToken(raw);
+    if (!value) return undefined;
+    if (value === 'text_only') return 'split_passage';
+    if (value === 'split_view') return 'split_table';
+    return value;
+}
+
+function parseQuestionLine(line) {
+    const payload = line.replace(/^@Q\s*/, '').trim();
+    const data = parsePipeKeyValues(payload);
+    return data;
+}
+
+function parseMarkdownToV3(markdownText) {
+    const lines = markdownText.split(/\r?\n/);
+
+    let schema_version = 'v3.0';
+    let paper = null;
+    const question_sets = [];
+    const questions = [];
+
+    let currentSection = null;
+    let currentSet = null;
+    let sectionSetOrder = {};
+    let setQuestionOrder = 0;
+    let globalQuestionNumber = 0;
+
+    let inContext = false;
+    let contextBuffer = [];
+
+    let inQuestion = false;
+    let questionData = null;
+    let questionTextLines = [];
+    let solutionLines = [];
+    let options = [];
+    let inSolution = false;
+
+    function finalizeContext() {
+        if (currentSet && contextBuffer.length) {
+            currentSet.context_body = contextBuffer.join('\n').trim();
+        }
+        contextBuffer = [];
+        inContext = false;
+    }
+
+    function finalizeQuestion() {
+        if (!questionData) return;
+        const question_text = questionTextLines.join('\n').trim();
+        const solution_text = solutionLines.join('\n').trim();
+        const question = {
+            ...questionData,
+            question_text
+        };
+        if (options.length) {
+            question.options = options;
+        }
+        if (solution_text) {
+            question.solution_text = solution_text;
+        }
+        questions.push(question);
+
+        inQuestion = false;
+        inSolution = false;
+        questionData = null;
+        questionTextLines = [];
+        solutionLines = [];
+        options = [];
+    }
+
+    for (const rawLine of lines) {
+        const line = normalizeLine(rawLine);
+        if (!line || line.startsWith('#')) {
+            continue;
+        }
+
+        if (line === '@END_CTX') {
+            finalizeContext();
+            continue;
+        }
+
+        if (line === '@END_Q') {
+            finalizeQuestion();
+            continue;
+        }
+
+        if (line === '@END_SET') {
+            currentSet = null;
+            setQuestionOrder = 0;
+            continue;
+        }
+
+        if (line === '@END_S') {
+            currentSection = null;
+            continue;
+        }
+
+        if (line === '@CTX') {
+            inContext = true;
+            continue;
+        }
+
+        if (line.startsWith('@P ')) {
+            const paperPayload = parsePaperLine(line);
+            schema_version = paperPayload.schema_version;
+            paper = paperPayload.paper;
+            continue;
+        }
+
+        if (line.startsWith('@S ')) {
+            currentSection = line.replace(/^@S\s*/, '').trim();
+            if (!sectionSetOrder[currentSection]) {
+                sectionSetOrder[currentSection] = 0;
+            }
+            continue;
+        }
+
+        if (line.startsWith('@SET ')) {
+            finalizeContext();
+            const { setId, data } = parseSetLine(line);
+            const order = (sectionSetOrder[currentSection] || 0) + 1;
+            sectionSetOrder[currentSection] = order;
+            const normalizedSetId = normalizeToken(setId);
+            const normalizedContextType = normalizeContextType(data.ctx);
+            const normalizedContentLayout = normalizeContentLayout(data.layout);
+            const normalizedSetType = normalizeToken(data.type);
+            currentSet = {
+                client_set_id: normalizedSetId,
+                section: currentSection,
+                set_type: normalizedSetType,
+                display_order: order,
+                context_type: normalizedContextType,
+                context_title: data.title,
+                content_layout: normalizedContentLayout
+            };
+
+            // Only include context_image_url if it has a valid value (schema requires URI format)
+            if (data.image_url) {
+                currentSet.context_image_url = data.image_url;
+            }
+
+            if (normalizedSetType === 'ATOMIC') {
+                delete currentSet.context_type;
+                delete currentSet.content_layout;
+            }
+
+            question_sets.push(currentSet);
+            setQuestionOrder = 0;
+            continue;
+        }
+
+        if (line.startsWith('@Q ')) {
+            finalizeQuestion();
+            const data = parseQuestionLine(line);
+            setQuestionOrder += 1;
+            globalQuestionNumber += 1;
+            const dm = (data.m || '').split(',').map((s) => s.trim());
+            const sanitizedKey = paper?.paper_key ? paper.paper_key.replace(/[^A-Za-z0-9_]/g, '_') : null;
+            const client_question_id = data.id || (sanitizedKey ? `${sanitizedKey}_Q${globalQuestionNumber}` : `Q${globalQuestionNumber}`);
+            questionData = {
+                client_question_id,
+                set_ref: currentSet?.client_set_id,
+                sequence_order: setQuestionOrder,
+                section: currentSection,
+                question_number: globalQuestionNumber,
+                question_type: data.type,
+                taxonomy_type: data.tax,
+                topic: data.topic,
+                subtopic: data.sub,
+                difficulty: data.diff,
+                correct_answer: data.ans,
+                positive_marks: toInt(dm[0]) ?? paper?.default_positive_marks,
+                negative_marks: toInt(dm[1]) ?? paper?.default_negative_marks
+            };
+            inQuestion = true;
+            inSolution = false;
+            continue;
+        }
+
+        if (inContext) {
+            contextBuffer.push(rawLine.replace(/\r?\n?$/, ''));
+            continue;
+        }
+
+        if (inQuestion) {
+            if (line.startsWith('?')) {
+                questionTextLines.push(line.replace(/^\?\s?/, ''));
+                continue;
+            }
+            if (/^[A-Z]\./.test(line)) {
+                const optionId = line[0];
+                const optionText = line.slice(2).trim();
+                options.push({ id: optionId, text: optionText });
+                continue;
+            }
+            if (line.startsWith('>')) {
+                inSolution = true;
+                solutionLines.push(line.replace(/^>\s?/, ''));
+                continue;
+            }
+            if (inSolution) {
+                solutionLines.push(line);
+                continue;
+            }
+            if (questionTextLines.length) {
+                questionTextLines.push(line);
+            }
+        }
+    }
+
+    finalizeContext();
+    finalizeQuestion();
+
+    return {
+        schema_version,
+        paper,
+        question_sets,
+        questions
+    };
+}
+
+function formatAjvErrors(errors = []) {
+    return errors.map((err) => {
+        const path = err.instancePath || '(root)';
+        const message = err.message || err.keyword || 'schema validation error';
+        return `${path} ${message}`.trim();
+    });
+}
+
+function main() {
+    const inputPath = process.argv[2];
+    const outputPath = process.argv[3];
+
+    if (!inputPath) {
+        console.error('Usage: node scripts/markdown_to_json_parser_v3.mjs <input.md> [output.json]');
+        process.exit(1);
+    }
+
+    const markdownText = fs.readFileSync(inputPath, 'utf8');
+    const result = parseMarkdownToV3(markdownText);
+    const ajvResult = validatePaperSchema(result);
+    const ajvErrors = ajvResult.valid ? [] : formatAjvErrors(ajvResult.errors);
+
+    if (ajvErrors.length > 0) {
+        console.error('❌ AJV schema validation errors:');
+        ajvErrors.forEach((e) => console.error(`   - ${e}`));
+        console.error('');
+        console.log('⚠️  Writing output anyway for debugging...');
+    }
+
+    const output = JSON.stringify(result, null, 2);
+
+    if (outputPath) {
+        fs.writeFileSync(outputPath, output, 'utf8');
+    } else {
+        const derivedPath = path.join(process.cwd(), 'paper_v3.json');
+        fs.writeFileSync(derivedPath, output, 'utf8');
+        console.log(`Wrote ${derivedPath}`);
+    }
+
+    if (ajvErrors.length > 0) {
+        process.exit(1);
+    }
+}
+
+if (process.argv[1] && process.argv[1].includes('markdown_to_json_parser_v3.mjs')) {
+    main();
+}
+
+export { parseMarkdownToV3 };
+````
+
 ## File: scripts/parse-md-to-v3.mjs
 ````javascript
 #!/usr/bin/env node
@@ -20955,62 +23980,6 @@ Options:
 main();
 ````
 
-## File: .github/workflows/ci.yml
-````yaml
-name: CI
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Enable corepack
-        run: corepack enable
-
-      - name: Set up pnpm
-        run: corepack prepare pnpm@latest --activate
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Type check
-        run: pnpm exec tsc --noEmit
-
-      - name: Build
-        run: pnpm build
-
-      - name: Blueprint guard
-        run: node scripts/blueprint-guard.mjs
-
-      - name: Check bundle size
-        run: node scripts/check-bundle.mjs
-
-      - name: Ensure no .env files are committed
-        run: |
-          if git ls-files | grep -E '(^|/).*\.env($|\.)' ; then
-            echo "Error: .env files should not be committed. Use .env.example and environment secrets instead." >&2
-            exit 1
-          fi
-````
-
 ## File: .nvmrc
 ````
 20
@@ -21137,6 +24106,62 @@ try {
   console.error('❌ Blueprint Guard Error:', error.message);
   process.exit(1);
 }
+````
+
+## File: .github/workflows/ci.yml
+````yaml
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Set up pnpm
+        run: corepack prepare pnpm@latest --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+
+      - name: Build
+        run: pnpm build
+
+      - name: Blueprint guard
+        run: node scripts/blueprint-guard.mjs
+
+      - name: Check bundle size
+        run: node scripts/check-bundle.mjs
+
+      - name: Ensure no .env files are committed
+        run: |
+          if git ls-files | grep -E '(^|/).*\.env($|\.)' | grep -v -E '(^|/)\.env(\.[^/]+)?\.example$' ; then
+            echo "Error: .env files should not be committed. Use .env.example and environment secrets instead." >&2
+            exit 1
+          fi
 ````
 
 ## File: README.md
@@ -21379,6 +24404,8 @@ Thumbs.db
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { fetchAccessStatus, resolveIsAdmin } from '@/lib/access-control';
+import { incrementMetric } from '@/lib/telemetry';
 
 /**
  * Apply security headers to response
@@ -21449,7 +24476,9 @@ export async function middleware(req: NextRequest) {
     // Determine if route needs protection
     const isProtected = pathname.startsWith('/exam/') ||
         pathname.startsWith('/result/') ||
-        pathname.startsWith('/dashboard');
+        pathname.startsWith('/dashboard') ||
+        pathname.startsWith('/mocks') ||
+        pathname.startsWith('/mock/');
     const isAdminRoute = pathname.startsWith('/admin');
 
     // Only create Supabase client if we need to check auth
@@ -21490,40 +24519,34 @@ export async function middleware(req: NextRequest) {
             return NextResponse.redirect(redirect);
         }
 
+        const env = process.env.NODE_ENV;
+        const skipAdminCheck =
+            process.env.SKIP_ADMIN_CHECK === 'true' && (env === 'development' || env === 'test');
+
+        const isAdmin = skipAdminCheck ? true : await resolveIsAdmin(supabase, user);
+
         // Admin routes require admin role
-        if (isAdminRoute) {
-            // DEV MODE: Skip RBAC check only in explicitly non-production environments
-            const env = process.env.NODE_ENV;
-            const skipAdminCheck =
-                process.env.SKIP_ADMIN_CHECK === 'true' && (env === 'development' || env === 'test');
+        if (isAdminRoute && !skipAdminCheck && !isAdmin) {
+            const redirect = new URL('/dashboard', req.url);
+            redirect.searchParams.set('error', 'unauthorized');
+            return NextResponse.redirect(redirect);
+        }
 
-            if (!skipAdminCheck) {
-                let isAdmin = false;
-
-                // Check admin role from app_metadata first (fastest)
-                const role = user.app_metadata?.user_role;
-                if (role === 'admin') {
-                    isAdmin = true;
-                }
-
-                // If not found in app_metadata, check via RPC
-                if (!isAdmin) {
-                    const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin');
-                    isAdmin = !rpcError && Boolean(isAdminRpc);
-                }
-
-                if (!isAdmin) {
-                    // Not an admin - redirect to dashboard with error message
-                    const redirect = new URL('/dashboard', req.url);
-                    redirect.searchParams.set('error', 'unauthorized');
-                    return NextResponse.redirect(redirect);
-                }
+        // Access gating for protected routes (non-admins only)
+        if (isProtected && !isAdmin) {
+            const accessStatus = await fetchAccessStatus(supabase, user.id);
+            if (accessStatus !== 'active') {
+                const redirect = new URL('/coming-soon', req.url);
+                const returnTo = pathname + (req.nextUrl.search || '');
+                redirect.searchParams.set('redirect_to', returnTo);
+                return NextResponse.redirect(redirect);
             }
         }
 
         return res;
     } catch (err) {
         console.error('Middleware error:', err);
+        incrementMetric('middleware_error');
         // On error, allow request to proceed - let page handle the error
         return res;
     }
@@ -21534,7 +24557,10 @@ export const config = {
         '/dashboard/:path*',
         '/exam/:path*',
         '/result/:path*',
+        '/mocks/:path*',
+        '/mock/:path*',
         '/admin/:path*',
+        '/coming-soon',
         '/auth/test-login',
         // API routes included only for security headers - auth skipped
         '/api/:path*',

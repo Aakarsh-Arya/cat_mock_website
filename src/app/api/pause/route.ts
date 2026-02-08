@@ -52,14 +52,12 @@ export async function POST(req: NextRequest) {
                 },
             });
 
-            const { data: { user } } = await supabase.auth.getUser();
+                const { data: { user } } = await supabase.auth.getUser();
             if (user) {
                 const { data: isValidSession } = await supabase.rpc('validate_session_token', {
                     p_attempt_id: attemptId,
                     p_session_token: sessionToken,
                     p_user_id: user.id,
-                    // Disambiguate overloaded RPC (uuid vs text signature)
-                    p_force_resume: false,
                 });
 
                 if (isValidSession === false) {

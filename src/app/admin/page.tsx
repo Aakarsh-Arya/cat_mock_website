@@ -6,6 +6,7 @@
 import { sbSSR } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { updateSignupMode } from './access-control/actions';
 
 export default async function AdminPage() {
     const supabase = await sbSSR();
@@ -48,6 +49,28 @@ export default async function AdminPage() {
         supabase.from('questions').select('id', { count: 'exact' }),
         supabase.from('attempts').select('id, status', { count: 'exact' }),
     ]);
+
+    let signupMode = 'GATED';
+    let pendingAccessRequests = 0;
+
+    try {
+        const { data: settingRow } = await supabase
+            .from('app_settings')
+            .select('setting_value')
+            .eq('setting_key', 'signup_mode')
+            .maybeSingle();
+        if (settingRow?.setting_value === 'OPEN' || settingRow?.setting_value === 'GATED') {
+            signupMode = settingRow.setting_value;
+        }
+
+        const { count } = await supabase
+            .from('access_requests')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'pending');
+        pendingAccessRequests = count ?? 0;
+    } catch {
+        // Ignore missing tables during early migrations.
+    }
 
     const totalPapers = papersResult.count || 0;
     const publishedPapers = papersResult.data?.filter(p => p.published).length || 0;
@@ -127,6 +150,41 @@ export default async function AdminPage() {
                 </div>
             </div>
 
+            {/* Access Control */}
+            <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 className="text-lg font-semibold text-gray-900">Launch Controls</h2>
+                        <p className="text-sm text-gray-500">Pending requests: {pendingAccessRequests}</p>
+                    </div>
+                    <Link
+                        href="/admin/access-control"
+                        className="text-sm text-indigo-600 hover:text-indigo-700"
+                    >
+                        Manage access
+                    </Link>
+                </div>
+                <form action={updateSignupMode} className="flex flex-wrap items-center gap-3">
+                    <select
+                        name="signup_mode"
+                        defaultValue={signupMode}
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    >
+                        <option value="OPEN">OPEN (auto-approve)</option>
+                        <option value="GATED">GATED (waitlist)</option>
+                    </select>
+                    <button
+                        type="submit"
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700"
+                    >
+                        Update mode
+                    </button>
+                    <span className={`text-xs font-semibold px-2 py-1 rounded ${signupMode === 'OPEN' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {signupMode}
+                    </span>
+                </form>
+            </div>
+
             {/* Quick Actions */}
             <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
@@ -174,6 +232,21 @@ export default async function AdminPage() {
                         <div>
                             <p className="font-medium text-gray-900">Add Question</p>
                             <p className="text-sm text-gray-500">Add a question to a paper</p>
+                        </div>
+                    </Link>
+
+                    <Link
+                        href="/admin/access-control"
+                        className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-colors"
+                    >
+                        <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                            <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5s-3 1.343-3 3 1.343 3 3 3zm0 0c-2.21 0-4 1.79-4 4v2h8v-2c0-2.21-1.79-4-4-4z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p className="font-medium text-gray-900">Access Control</p>
+                            <p className="text-sm text-gray-500">Review waitlist & mode</p>
                         </div>
                     </Link>
 

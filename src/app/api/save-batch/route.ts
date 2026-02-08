@@ -25,6 +25,35 @@ type BatchItem = {
     visitCount?: number;
 };
 
+type ValidateSessionResult = { data: boolean | null; error: { code?: string; message?: string } | null };
+
+function isMissingValidateFn(error?: { code?: string; message?: string } | null): boolean {
+    if (!error) return false;
+    return error.code === '42883' || Boolean(error.message?.includes('validate_session_token'));
+}
+
+async function validateSessionTokenRpc(
+    supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<ValidateSessionResult> },
+    attemptId: string,
+    sessionToken: string,
+    userId: string
+): Promise<ValidateSessionResult> {
+    const primary = await supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+    });
+
+    if (!primary.error || !isMissingValidateFn(primary.error)) return primary;
+
+    return supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+        p_force_resume: false,
+    });
+}
+
 export async function POST(req: NextRequest) {
     const res = NextResponse.next();
 
@@ -99,10 +128,11 @@ export async function POST(req: NextRequest) {
         // FIX: Allow saves during submit transition grace period (60 seconds after submit)
         // This prevents data loss when submit times out but actually succeeds on server
         const isInProgress = attempt.status === 'in_progress';
+        const isPaused = attempt.status === 'paused';
         const isRecentlySubmitted = attempt.status === 'submitted' && attempt.submitted_at &&
             (Date.now() - new Date(attempt.submitted_at as string).getTime()) < 60000; // 60 second grace
 
-        if (!isInProgress && !isRecentlySubmitted) {
+        if (!isInProgress && !isPaused && !isRecentlySubmitted) {
             // Log for debugging - don't error if attempt is completed/submitted beyond grace
             console.log('Save-batch rejected - attempt not in progress', {
                 attemptId,
@@ -116,12 +146,12 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Missing session token' }, { status: 400 });
         }
 
-        const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
-            p_attempt_id: attemptId,
-            p_session_token: sessionToken,
-            p_user_id: session.user.id,
-            p_force_resume: false,
-        });
+        const { data: isValidSession, error: validateError } = await validateSessionTokenRpc(
+            supabase,
+            attemptId,
+            sessionToken,
+            session.user.id
+        );
 
         if (validateError) {
             examLogger.securityEvent('Save-batch session validation RPC error', {

@@ -11,6 +11,7 @@ import 'server-only';
 
 import { sbSSR } from '@/lib/supabase/server';
 import { logger, examLogger } from '@/lib/logger';
+import { ensureActiveAccess } from '@/lib/access-control';
 import {
     FetchPaperRequestSchema,
     SaveResponseRequestSchema,
@@ -28,13 +29,45 @@ export interface ActionResult<T> {
     error?: string;
 }
 
+type ValidateSessionResult = { data: boolean | null; error: { code?: string; message?: string } | null };
+
+function isMissingValidateFn(error?: { code?: string; message?: string } | null): boolean {
+    if (!error) return false;
+    return error.code === '42883' || Boolean(error.message?.includes('validate_session_token'));
+}
+
+async function validateSessionTokenRpc(
+    supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<ValidateSessionResult> },
+    attemptId: string,
+    sessionToken: string,
+    userId: string
+): Promise<ValidateSessionResult> {
+    const primary = await supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+    });
+
+    if (!primary.error || !isMissingValidateFn(primary.error)) return primary;
+
+    return supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+        p_force_resume: false,
+    });
+}
+
 // =============================================================================
 // FETCH PAPER WITH QUESTIONS
 // =============================================================================
 
-export async function fetchPaperForExam(paperId: string): Promise<ActionResult<FetchPaperResponse>> {
+export async function fetchPaperForExam(
+    paperId: string,
+    options?: { resume?: boolean }
+): Promise<ActionResult<FetchPaperResponse>> {
     try {
-        const parsed = FetchPaperRequestSchema.safeParse({ paperId });
+        const parsed = FetchPaperRequestSchema.safeParse({ paperId, resume: options?.resume });
         if (!parsed.success) return { success: false, error: 'Invalid paper ID' };
 
         const supabase = await sbSSR();
@@ -44,6 +77,9 @@ export async function fetchPaperForExam(paperId: string): Promise<ActionResult<F
             error: authError,
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
+
+        const access = await ensureActiveAccess(supabase, user.id, user);
+        if (!access.allowed) return { success: false, error: 'Access pending' };
 
         const { data: paper, error: paperError } = await supabase
             .from('papers')
@@ -146,14 +182,18 @@ export async function fetchPaperForExam(paperId: string): Promise<ActionResult<F
             return { ...q, exam_order: examOrderInSection };
         });
 
-        // Resume existing in-progress attempt (if any)
+        const shouldResume = options?.resume === true;
+
+        // Resume existing in-progress attempt (if explicitly requested)
         // BUG FIX: .single() would throw when 0 rows; use maybeSingle() to safely detect absence.
         const { data: existingAttempt, error: existingAttemptError } = await supabase
             .from('attempts')
             .select('*')
             .eq('user_id', user.id)
             .eq('paper_id', paperId)
-            .eq('status', 'in_progress')
+            .in('status', ['in_progress', 'paused'])
+            .order('created_at', { ascending: false })
+            .limit(1)
             .maybeSingle();
 
         if (existingAttemptError) {
@@ -162,9 +202,30 @@ export async function fetchPaperForExam(paperId: string): Promise<ActionResult<F
 
         let attempt: Attempt;
 
-        if (existingAttempt) {
+        if (existingAttempt && shouldResume) {
             attempt = existingAttempt as Attempt;
         } else {
+            if (existingAttempt && !shouldResume) {
+                try {
+                    const { getServiceRoleClient } = await import('@/lib/supabase/service-role');
+                    const adminClient = getServiceRoleClient();
+                    await adminClient
+                        .from('attempts')
+                        .update({
+                            status: 'abandoned',
+                            completed_at: new Date().toISOString(),
+                        })
+                        .eq('id', existingAttempt.id)
+                        .eq('user_id', user.id)
+                        .in('status', ['in_progress', 'paused']);
+                } catch (error) {
+                    logger.warn('Failed to abandon existing attempt', error, {
+                        attemptId: existingAttempt.id,
+                        userId: user.id,
+                    });
+                }
+            }
+
             const durations = getSectionDurationSecondsMap(paper.sections);
             const initialTimeRemaining: TimeRemaining = {
                 VARC: durations.VARC,
@@ -229,6 +290,9 @@ export async function initializeExamSession(attemptId: string): Promise<ActionRe
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
 
+        const access = await ensureActiveAccess(supabase, user.id, user);
+        if (!access.allowed) return { success: false, error: 'Access pending' };
+
         const { data: token, error: rpcError } = await supabase.rpc('initialize_exam_session', {
             p_attempt_id: attemptId,
             p_user_id: user.id,
@@ -285,13 +349,12 @@ export async function saveResponse(data: {
         if (attempt.status !== 'in_progress') return { success: false, error: 'Attempt is not in progress' };
         if (!data.sessionToken) return { success: false, error: 'Missing session token' };
 
-        const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
-            p_attempt_id: data.attemptId,
-            p_session_token: data.sessionToken,
-            p_user_id: user.id,
-            // Disambiguate overloaded RPC (uuid vs text signature)
-            p_force_resume: false,
-        });
+        const { data: isValidSession, error: validateError } = await validateSessionTokenRpc(
+            supabase,
+            data.attemptId,
+            data.sessionToken,
+            user.id
+        );
 
         if (validateError) {
             logger.error('saveResponse validate_session_token error', validateError, { attemptId: data.attemptId });
@@ -488,10 +551,13 @@ export async function submitExam(
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
 
+        const access = await ensureActiveAccess(supabase, user.id, user);
+        if (!access.allowed) return { success: false, error: 'Access pending' };
+
         // CRITICAL: Select 'id' so we can promote fallback attempt ID
         let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, paper_id, started_at')
+            .select('id, user_id, status, paper_id, started_at, paused_at, total_paused_seconds')
             .eq('id', normalizedAttemptId)
             .maybeSingle();
 
@@ -544,16 +610,28 @@ export async function submitExam(
                 } as unknown as SubmitExamResponse,
             };
         }
-        if (attempt.status !== 'in_progress') return { success: false, error: 'Attempt is not in progress' };
+        // CRITICAL FIX: Allow both in_progress AND paused attempts to be submitted
+        // Paused exams should be submittable without needing to resume first
+        if (attempt.status !== 'in_progress' && attempt.status !== 'paused') {
+            return { success: false, error: 'Attempt is not in progress' };
+        }
         if (!options?.sessionToken) return { success: false, error: 'Missing session token' };
 
-        const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
-            p_attempt_id: normalizedAttemptId,
-            p_session_token: options.sessionToken,
-            p_user_id: user.id,
-            // Disambiguate overloaded RPC (uuid vs text signature)
-            p_force_resume: false,
-        });
+        // NOTE: Auto-force-resume is always enabled for submissions to prevent stuck states
+
+        const basePausedSeconds = Number.isFinite(attempt.total_paused_seconds as number)
+            ? Math.max(0, Math.floor(Number(attempt.total_paused_seconds)))
+            : 0;
+        const pausedAtMs = attempt.paused_at ? new Date(attempt.paused_at).getTime() : null;
+        const inFlightPausedSeconds = pausedAtMs ? Math.max(0, Math.floor((Date.now() - pausedAtMs) / 1000)) : 0;
+        const effectivePausedSeconds = basePausedSeconds + inFlightPausedSeconds;
+
+        const { data: isValidSession, error: validateError } = await validateSessionTokenRpc(
+            supabase,
+            normalizedAttemptId,
+            options.sessionToken,
+            user.id
+        );
 
         const tryForceResume = async () => {
             examLogger.securityEvent('Force resume (submitExam)', { attemptId: normalizedAttemptId });
@@ -563,47 +641,38 @@ export async function submitExam(
             });
         };
 
+        // CRITICAL FIX: Always try force_resume on session issues during submit
+        // This prevents auto-submit from getting stuck due to session mismatches
+        const handleSessionConflict = async (reason: string): Promise<{ proceed: boolean; error?: string }> => {
+            examLogger.securityEvent(`Auto force_resume on submit (${reason})`, { attemptId: normalizedAttemptId });
+
+            const { error: forceResumeError } = await tryForceResume();
+            if (forceResumeError) {
+                const isStale = forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
+                    forceResumeError.message?.includes('stale');
+                if (isStale) {
+                    // Even on stale, try to proceed with submit if attempt is still valid
+                    logger.warn('submitExam: force_resume stale but proceeding with submit', {
+                        attemptId: normalizedAttemptId,
+                    });
+                    return { proceed: true };
+                }
+                logger.error('submitExam force_resume_exam_session error', forceResumeError, {
+                    attemptId: normalizedAttemptId,
+                    reason,
+                });
+                // Even on error, still try to proceed with submit
+                return { proceed: true };
+            }
+            return { proceed: true };
+        };
+
         if (validateError) {
-            logger.error('submitExam validate_session_token error', validateError, { attemptId: normalizedAttemptId });
-
-            if (options.force_resume === true) {
-                examLogger.securityEvent('Force resume on RPC error (submitExam)', { attemptId: normalizedAttemptId });
-
-                const { error: forceResumeError } = await tryForceResume();
-                if (forceResumeError) {
-                    if (
-                        forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
-                        forceResumeError.message?.includes('stale')
-                    ) {
-                        return { success: false, error: 'FORCE_RESUME_STALE' };
-                    }
-                    logger.error('submitExam force_resume_exam_session error (after RPC error)', forceResumeError, {
-                        attemptId: normalizedAttemptId,
-                    });
-                    return { success: false, error: 'SESSION_CONFLICT' };
-                }
-            } else {
-                return { success: false, error: 'SESSION_CONFLICT' };
-            }
+            logger.warn('submitExam validate_session_token error, auto-recovering', validateError, { attemptId: normalizedAttemptId });
+            await handleSessionConflict('validate_error');
         } else if (!isValidSession) {
-            if (options.force_resume === true) {
-                const { error: forceResumeError } = await tryForceResume();
-                if (forceResumeError) {
-                    if (
-                        forceResumeError.message?.includes('FORCE_RESUME_STALE') ||
-                        forceResumeError.message?.includes('stale')
-                    ) {
-                        return { success: false, error: 'FORCE_RESUME_STALE' };
-                    }
-                    logger.error('submitExam force_resume_exam_session error', forceResumeError, {
-                        attemptId: normalizedAttemptId,
-                    });
-                    return { success: false, error: 'Failed to force resume session' };
-                }
-            } else {
-                examLogger.securityEvent('Session conflict (submitExam)', { attemptId: normalizedAttemptId });
-                return { success: false, error: 'SESSION_CONFLICT' };
-            }
+            logger.info('submitExam session invalid, auto-recovering', { attemptId: normalizedAttemptId });
+            await handleSessionConflict('invalid_session');
         }
 
         // Server-side timer validation (dynamic per paper)
@@ -626,7 +695,8 @@ export async function submitExam(
         // Guard: if timing cannot be computed, skip late-submit rejection rather than breaking valid submits.
         if (typeof MAX_EXAM_DURATION_SECONDS === 'number' && MAX_EXAM_DURATION_SECONDS > 0) {
             const startedAtMs = new Date(attempt.started_at).getTime();
-            const elapsedSeconds = Math.floor((Date.now() - startedAtMs) / 1000);
+            const rawElapsedSeconds = Math.floor((Date.now() - startedAtMs) / 1000);
+            const elapsedSeconds = Math.max(0, rawElapsedSeconds - effectivePausedSeconds);
 
             if (elapsedSeconds > MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS) {
                 examLogger.securityEvent('Late submission rejected', {
@@ -660,11 +730,13 @@ export async function submitExam(
             primaryUpdatePayload.submission_id = submissionId;
         }
 
+        // CRITICAL FIX: Allow both in_progress AND paused attempts to submit
+        // Using .in() to match either status for the atomic transition
         let updateQuery = adminClient
             .from('attempts')
             .update(primaryUpdatePayload)
             .eq('id', normalizedAttemptId)
-            .eq('status', 'in_progress');
+            .in('status', ['in_progress', 'paused']);
 
         // Best-effort: if submission_id exists in this DB, attempt idempotent update.
         if (submissionId) {
@@ -683,7 +755,7 @@ export async function submitExam(
                 .from('attempts')
                 .update({ status: 'submitted', submitted_at: submittedAt })
                 .eq('id', normalizedAttemptId)
-                .eq('status', 'in_progress')
+                .in('status', ['in_progress', 'paused'])
                 .select('id')
                 .maybeSingle();
             updatedAttempt = retry.data ?? updatedAttempt;
@@ -696,7 +768,7 @@ export async function submitExam(
                 .from('attempts')
                 .update({ status: 'submitted' })
                 .eq('id', normalizedAttemptId)
-                .eq('status', 'in_progress')
+                .in('status', ['in_progress', 'paused'])
                 .select('id')
                 .maybeSingle();
             updatedAttempt = retry.data ?? updatedAttempt;
@@ -716,6 +788,29 @@ export async function submitExam(
         }
 
         if (!updatedAttempt) {
+            const { data: latestAttempt, error: latestError } = await adminClient
+                .from('attempts')
+                .select('status')
+                .eq('id', normalizedAttemptId)
+                .maybeSingle();
+
+            if (!latestError && latestAttempt) {
+                if (latestAttempt.status === 'submitted' || latestAttempt.status === 'completed') {
+                    logger.info('submitExam: idempotent success after concurrent submit', {
+                        attemptId: normalizedAttemptId,
+                        status: latestAttempt.status,
+                    });
+                    return {
+                        success: true,
+                        data: {
+                            success: true,
+                            already_submitted: true,
+                            attemptId: normalizedAttemptId,
+                        } as unknown as SubmitExamResponse,
+                    };
+                }
+            }
+
             return { success: false, error: 'Attempt already submitted by another request' };
         }
 
@@ -763,7 +858,11 @@ export async function submitExam(
 
         const scoringResult = calculateScore(questions as Array<Question & { correct_answer: string }>, validResponses);
 
-        const timeTakenSeconds = calculateTimeTaken(attempt.started_at, submittedAt);
+        const timeTakenSeconds = calculateTimeTaken(
+            attempt.started_at,
+            submittedAt,
+            effectivePausedSeconds
+        );
 
         const { error: scoreUpdateError } = await adminClient
             .from('attempts')
@@ -786,13 +885,23 @@ export async function submitExam(
             logger.error('Failed to update attempt with scores', scoreUpdateError, { attemptId: normalizedAttemptId });
         }
 
-        // Update individual responses with is_correct and marks_obtained (same sequential behavior)
-        for (const qr of scoringResult.question_results) {
-            await supabase
+        const responseScoreUpdates = scoringResult.question_results.map((qr) => ({
+            attempt_id: normalizedAttemptId,
+            question_id: qr.question_id,
+            is_correct: qr.is_correct,
+            marks_obtained: qr.marks_obtained,
+        }));
+
+        if (responseScoreUpdates.length > 0) {
+            const { error: responseScoreError } = await adminClient
                 .from('responses')
-                .update({ is_correct: qr.is_correct, marks_obtained: qr.marks_obtained })
-                .eq('attempt_id', normalizedAttemptId)
-                .eq('question_id', qr.question_id);
+                .upsert(responseScoreUpdates, { onConflict: 'attempt_id,question_id' });
+
+            if (responseScoreError) {
+                logger.error('Failed to update response scores', responseScoreError, {
+                    attemptId: normalizedAttemptId,
+                });
+            }
         }
 
         return {

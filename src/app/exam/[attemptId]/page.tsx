@@ -147,12 +147,22 @@ export default async function ExamPage({ params }: PageProps) {
         redirect(`/result/${attemptId}`);
     }
 
-    if (attemptData.status !== 'in_progress') {
+    // CRITICAL FIX: Allow both in_progress and paused attempts to continue
+    // Paused exams should be resumable without showing "Attempt Not Available" error
+    if (attemptData.status !== 'in_progress' && attemptData.status !== 'paused') {
+        // Handle abandoned status with a clearer message
+        const isAbandoned = attemptData.status === 'abandoned';
         return (
             <main className="min-h-screen flex items-center justify-center bg-gray-50">
                 <div className="text-center">
-                    <h1 className="text-2xl font-bold text-gray-800 mb-4">Attempt Not Available</h1>
-                    <p className="text-gray-600 mb-6">This exam attempt is not in progress and cannot be resumed.</p>
+                    <h1 className="text-2xl font-bold text-gray-800 mb-4">
+                        {isAbandoned ? 'Exam Session Ended' : 'Attempt Not Available'}
+                    </h1>
+                    <p className="text-gray-600 mb-6">
+                        {isAbandoned
+                            ? 'This exam session has ended. If you believe this is an error, please contact support.'
+                            : 'This exam attempt is not in progress and cannot be resumed.'}
+                    </p>
                     <BackToDashboard />
                 </div>
             </main>
@@ -336,15 +346,15 @@ export default async function ExamPage({ params }: PageProps) {
                 <main className="min-h-screen flex items-center justify-center bg-gray-50">
                     <div className="text-center max-w-xl px-4">
                         <h1 className="text-2xl font-bold text-gray-800 mb-4">Failed to Load Questions</h1>
-                    <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
-                    <p className="text-gray-600 mb-6">
-                        Ensure the secure questions_exam view and its RLS policies are deployed.
-                    </p>
-                    <BackToDashboard />
-                </div>
-            </main>
-        );
-    }
+                        <p className="text-gray-600 mb-2">There was an error loading the exam questions.</p>
+                        <p className="text-gray-600 mb-6">
+                            Ensure the secure questions_exam view and its RLS policies are deployed.
+                        </p>
+                        <BackToDashboard />
+                    </div>
+                </main>
+            );
+        }
 
         // Force correct section ordering (VARC → DILR → QA)
         const sectionOrder: Record<SectionName, number> = { VARC: 0, DILR: 1, QA: 2 };

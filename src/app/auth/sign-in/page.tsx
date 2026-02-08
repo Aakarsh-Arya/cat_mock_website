@@ -26,6 +26,7 @@ function SignInContent() {
     const [loading, setLoading] = useState(false);
     const params = useSearchParams();
     const redirectTo = useMemo(() => params.get('redirect_to') || '/dashboard', [params]);
+    const error = useMemo(() => params.get('error'), [params]);
 
     const onSignIn = useCallback(async () => {
         setLoading(true);
@@ -61,6 +62,12 @@ function SignInContent() {
                             Access your dashboard, take mocks, and track progress
                         </p>
                     </div>
+
+                    {error === 'rate_limited' && (
+                        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                            Too many sign-in attempts. Please wait a minute and try again.
+                        </div>
+                    )}
 
                     {/* Google Sign In Button */}
                     <button

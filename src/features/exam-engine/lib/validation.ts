@@ -28,9 +28,11 @@ export const QuestionStatusSchema = z.enum([
 /** Attempt status enum */
 export const AttemptStatusSchema = z.enum([
     'in_progress',
+    'paused',
     'submitted',
     'completed',
     'abandoned',
+    'expired',
 ]);
 
 /** Difficulty level enum */
@@ -141,6 +143,8 @@ export const AttemptSchema = z.object({
     completed_at: z.string().optional().nullable(),
     submission_id: z.string().uuid().optional().nullable(),
     time_taken_seconds: z.number().int().optional().nullable(),
+    paused_at: z.string().optional().nullable(),
+    total_paused_seconds: z.number().int().optional().nullable(),
     status: AttemptStatusSchema,
     current_section: SectionNameSchema.optional().nullable(),
     current_question: z.number().int().min(1).default(1),
@@ -186,11 +190,7 @@ export const ResponseSchema = z.object({
 /** Fetch paper request */
 export const FetchPaperRequestSchema = z.object({
     paperId: z.string().uuid(),
-});
-
-/** Start attempt request */
-export const StartAttemptRequestSchema = z.object({
-    paperId: z.string().uuid(),
+    resume: z.boolean().optional(),
 });
 
 /** Save response request */

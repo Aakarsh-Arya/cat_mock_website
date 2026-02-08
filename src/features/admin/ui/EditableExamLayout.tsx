@@ -322,12 +322,12 @@ function EditableOption({ label, value, isCorrect, onChange, onMarkCorrect }: Ed
                 {label}
             </button>
 
-            <input
-                type="text"
+            <textarea
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 placeholder={`Enter option ${label}...`}
-                className="flex-1 text-left bg-transparent border border-transparent hover:border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded outline-none text-gray-800 transition-colors"
+                rows={2}
+                className="flex-1 text-left bg-transparent border border-gray-200 hover:border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1.5 outline-none text-gray-800 transition-colors resize-y min-h-[40px]"
             />
 
             {isCorrect && <span className="flex-shrink-0 text-green-500 text-sm font-medium">✓ Correct</span>}
@@ -468,15 +468,25 @@ function EditableSetPane({
         questionSet?.content_layout ?? (section === 'QA' ? 'single_focus' : 'split_passage')
     );
     const [imageUrl, setImageUrl] = useState<string | null>(questionSet?.context_image_url ?? null);
+    const [imagePosition, setImagePosition] = useState<string>(
+        questionSet?.metadata?.image_position ?? 'before'
+    );
     const [isUploading, setIsUploading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+    // Count paragraphs in content for image position options
+    const paragraphCount = useMemo(() => {
+        if (!content) return 0;
+        return content.split(/\n\n+/).filter(p => p.trim()).length;
+    }, [content]);
 
     useEffect(() => {
         setTitle(questionSet?.context_title ?? '');
         setContent(questionSet?.context_body ?? '');
         setLayout(questionSet?.content_layout ?? (section === 'QA' ? 'single_focus' : 'split_passage'));
         setImageUrl(questionSet?.context_image_url ?? null);
+        setImagePosition(questionSet?.metadata?.image_position ?? 'before');
         setIsEditing(false);
     }, [questionSet?.id, section]);
 
@@ -511,6 +521,10 @@ function EditableSetPane({
                 context_image_url: imageUrl ?? undefined,
                 context_additional_images: questionSet.context_additional_images ?? [],
                 context_type: questionSet.context_type ?? undefined,
+                metadata: {
+                    ...questionSet.metadata,
+                    image_position: imagePosition as 'before' | 'after' | `after_para_${number}`,
+                },
                 is_active: true,
             });
             setIsEditing(false);
@@ -613,6 +627,31 @@ function EditableSetPane({
                                     isUploading={isUploading}
                                 />
                             </div>
+
+                            {/* Image Position Selector - only show when image is uploaded */}
+                            {imageUrl && (
+                                <div className="space-y-2">
+                                    <label className="block text-xs font-medium text-gray-600">
+                                        Image Placement Position
+                                    </label>
+                                    <select
+                                        value={imagePosition}
+                                        onChange={(e) => setImagePosition(e.target.value)}
+                                        className="w-full text-sm border border-gray-300 rounded px-2 py-1.5 bg-white"
+                                    >
+                                        <option value="before">Before text (top)</option>
+                                        <option value="after">After text (bottom)</option>
+                                        {paragraphCount > 0 && Array.from({ length: paragraphCount }, (_, i) => (
+                                            <option key={`para-${i + 1}`} value={`after_para_${i + 1}`}>
+                                                After paragraph {i + 1}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[10px] text-gray-400">
+                                        Choose where the image appears relative to the passage text. Paragraphs are detected by double line breaks.
+                                    </p>
+                                </div>
+                            )}
 
                             <div className="flex justify-end gap-2">
                                 <button

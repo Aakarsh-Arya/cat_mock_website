@@ -2,16 +2,16 @@
 
 ## Current landing entry + structure
 - Route entry: `src/app/page.tsx`
-  - Static, Tailwind-classed sections only (hero + features + how-it-works + testimonials + FAQ + footer).
-  - No dynamic image loading; everything is hardcoded in JSX.
+  - Wraps `src/components/landing/LandingPageClient.tsx` (hero, mentor, roadmap, CAT hub, footer).
+  - Dynamic images via `useLandingAssets` with skeleton placeholders and safe fallbacks.
 - App shell: `src/app/layout.tsx`
   - Global styles via Tailwind (`src/app/globals.css`).
   - KaTeX CSS is globally included.
-- Styling system: Tailwind utility classes (no component library). A `src/app/page.module.css` exists but is not used in `src/app/page.tsx`.
+- Styling system: Tailwind utility classes (no component library). `src/app/page.module.css` exists but is not used by the landing route.
 
 ## Auth modal location (current)
-- There is **no auth modal** today.
-- Sign-in is a dedicated page: `src/app/auth/sign-in/page.tsx` (Google OAuth only).
+- Auth modal lives in `src/components/landing/LandingPageClient.tsx` (Google OAuth only).
+- Sign-in is a dedicated page: `src/app/auth/sign-in/page.tsx`.
 - Test login page: `src/app/auth/test-login/page.tsx`.
 
 ## Admin content ingestion (current)
@@ -27,7 +27,7 @@
 - Add landing assets DB layer + admin UI in **new** routes (e.g., `src/app/admin/landing-assets/*`) using existing admin RBAC in `src/app/admin/layout.tsx`.
 - Reuse the image upload pattern from `src/lib/cloudinary.ts` or add a Supabase Storage variant in parallel (no changes to existing exam editor flows).
 - Update `src/app/page.tsx` to consume a new `getLandingAssets()` data source (server-side or client hydration) while keeping current sections intact.
-- Add a new “Auth modal” component that wraps the existing Google OAuth call from `src/app/auth/sign-in/page.tsx`.
+- Reuse the existing Auth modal and OAuth redirect flow from `src/app/auth/sign-in/page.tsx`.
 
 ## What we should NOT refactor right now
 - Do not restructure the Next.js route layout (keep landing at `src/app/page.tsx`).

@@ -7,7 +7,7 @@
 'use client';
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
-import { useExamStore, useExamTimer, selectCurrentSection } from '@/features/exam-engine';
+import { useExamStore, useExamTimer, useSectionTimer, selectCurrentSection } from '@/features/exam-engine';
 import { QuestionPalette } from './QuestionPalette';
 import { ExamFooter } from './ExamFooter';
 import { MCQRenderer } from './MCQRenderer';
@@ -79,6 +79,23 @@ interface ExamHeaderProps {
     onPauseExam?: () => void | Promise<void>;
     allowPause: boolean;
     timeLeftDisplay: string;
+}
+
+function ExamTimerController({
+    onSectionExpire,
+    onExamComplete,
+}: Pick<ExamLayoutProps, 'onSectionExpire' | 'onExamComplete'>) {
+    useExamTimer({
+        onSectionExpire,
+        onExamComplete,
+    });
+    return null;
+}
+
+function ExamHeaderContainer(props: Omit<ExamHeaderProps, 'timeLeftDisplay'>) {
+    const currentSection = useExamStore(selectCurrentSection);
+    const { displayTime } = useSectionTimer(currentSection);
+    return <ExamHeader {...props} timeLeftDisplay={displayTime} />;
 }
 
 function ExamHeader({
@@ -333,6 +350,7 @@ export function ExamLayout({
 
     const isInitialized = useExamStore((s) => s.isInitialized);
     const isSubmitting = useExamStore((s) => s.isSubmitting);
+    const isAutoSubmitting = useExamStore((s) => s.isAutoSubmitting);
 
     // Persist sidebar visibility to localStorage (prevents “lost sidebar” after refresh)
     const [isSidebarVisible, setIsSidebarVisible] = useState(() => {
@@ -454,6 +472,16 @@ export function ExamLayout({
         }
     }, [onSaveResponse, onSaveResponsesBatch, responses, clearPendingSync, setLastSyncTimestamp]);
 
+    // Auto-sync pending responses shortly after changes (best-effort)
+    useEffect(() => {
+        if (!hasPendingSync) return;
+        const timeoutId = setTimeout(() => {
+            void syncPendingResponses();
+        }, 3000);
+
+        return () => clearTimeout(timeoutId);
+    }, [hasPendingSync, pendingSyncResponses, syncPendingResponses]);
+
     // Ref to coordinate auto-submit vs manual submit
     const autoSubmitInProgressRef = useRef(false);
     // Track sync-in-progress for submit coordination
@@ -529,11 +557,7 @@ export function ExamLayout({
         [syncPendingResponses, onSectionExpire, runWithTimeout]
     );
 
-    // IMPORTANT: only call useExamTimer ONCE in this layout to avoid duplicate intervals/expiry triggers.
-    const { isAutoSubmitting, timerData } = useExamTimer({
-        onSectionExpire: handleSectionExpire,
-        onExamComplete: handleAutoSubmitExam,
-    });
+    // Timer controller lives in a leaf component to avoid 1Hz re-renders of the full layout.
 
     const handleManualSubmitExam = useCallback(async () => {
         // Also check the autoSubmitInProgressRef for extra safety
@@ -819,7 +843,9 @@ export function ExamLayout({
 
     return (
         <div className="relative h-screen w-screen overflow-hidden flex flex-col min-h-0 min-w-0 font-exam text-sm leading-normal bg-exam-bg-page">
-            <ExamHeader
+            <ExamTimerController onSectionExpire={handleSectionExpire} onExamComplete={handleAutoSubmitExam} />
+
+            <ExamHeaderContainer
                 paper={paper}
                 onSectionSelect={handleSectionSelect}
                 onToggleCalculator={() => setIsCalculatorVisible((prev) => !prev)}
@@ -829,7 +855,6 @@ export function ExamLayout({
                 onSyncNow={onSaveResponse || onSaveResponsesBatch ? () => void syncPendingResponses() : undefined}
                 onPauseExam={onPauseExam}
                 allowPause={paper.allow_pause !== false}
-                timeLeftDisplay={timerData?.displayTime ?? '00:00:00'}
             />
 
             {!isSidebarVisible && (

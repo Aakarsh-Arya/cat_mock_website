@@ -275,6 +275,8 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         // CRITICAL: Skip if this section was already processed
         if (expiredSectionsProcessedRef.current.has(currentSection)) return;
 
+        // CRITICAL FIX: If timer is already marked expired from initialization, don't trigger expiry
+        // This prevents auto-submit when opening an already-expired exam
         if (currentTimer.isExpired) return;
         if (currentTimer.startedAt === 0) return;
 
@@ -284,7 +286,17 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         }
     }, [currentSection, currentTimer, handleSectionExpiry, isInitialized, isSubmitting, isAutoSubmitting]);
 
-    // Recovery: if the current timer is already marked expired after resume, force expiry handling.
+    // Recovery: if the current timer transitions to expired DURING the exam (not from init), force expiry handling.
+    // CRITICAL FIX: Added a ref to track if we saw the timer as non-expired first
+    const sawTimerRunningRef = useRef<Set<SectionName>>(new Set());
+
+    useEffect(() => {
+        // Track if we've seen this timer running (not expired)
+        if (!currentTimer.isExpired && currentTimer.startedAt > 0) {
+            sawTimerRunningRef.current.add(currentSection);
+        }
+    }, [currentSection, currentTimer.isExpired, currentTimer.startedAt]);
+
     useEffect(() => {
         if (!isInitialized || isSubmitting || isAutoSubmitting) return;
         if (isManuallyPausedRef.current) return;
@@ -292,6 +304,13 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         // CRITICAL: Skip if this section was already processed
         if (expiredSectionsProcessedRef.current.has(currentSection)) return;
         if (!currentTimer.isExpired) return;
+
+        // CRITICAL FIX: Only trigger expiry if we SAW the timer running
+        // This prevents auto-submit when opening an already-expired exam
+        if (!sawTimerRunningRef.current.has(currentSection)) {
+            console.log('[useExamTimer] Skipping expiry - timer was never seen running', { currentSection });
+            return;
+        }
 
         void handleSectionExpiry(currentSection);
     }, [currentSection, currentTimer.isExpired, handleSectionExpiry, isInitialized, isSubmitting, isAutoSubmitting]);

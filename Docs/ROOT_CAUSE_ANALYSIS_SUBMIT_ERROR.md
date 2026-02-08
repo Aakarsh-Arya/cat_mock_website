@@ -6,14 +6,33 @@ After comprehensive analysis of the exam submission flow, I've identified **6 po
 
 ---
 
-## 🔴 Critical Finding: Multiple Submit Triggers Can Race
+## Status (2026-02-07)
+
+This issue is mitigated in current code. Key fixes implemented:
+
+- Submit mutex lock in ExamClient (submitLockRef) to prevent double submits.
+- Auto-submit guards and expiry processing gates in useExamTimer.
+- Idempotent submit in /api/submit and submitExam (already_submitted responses).
+- AttemptId recovery via referer and latest in-progress attempt in /api/submit.
+- Session validation + force resume path (validate_session_token + force_resume_exam_session).
+- Aggressive localStorage cleanup on ATTEMPT_NOT_FOUND and stale attempt IDs.
+
+Remaining monitoring:
+- If an attempt is deleted server-side, the user is redirected to /dashboard after cleanup.
+- Session conflicts are still possible with multi-device use; force resume is supported.
+
+## Historical Analysis (pre-2026-02-07)
+
+Note: Line numbers below refer to the pre-fix snapshot and may not match current files.
+
+## Critical Finding: Multiple Submit Triggers Can Race
 
 ### The Problem
 
 There are **TWO independent paths** that can trigger exam submission:
 
-1. **Timer Auto-Submit** (`useExamTimer.ts` → `handleAutoSubmitExam`)
-2. **Manual Click Submit** (`ExamClient.tsx` → `handleSubmitExam`)
+1. **Timer Auto-Submit** (`useExamTimer.ts` -> `handleAutoSubmitExam`)
+2. **Manual Click Submit** (`ExamClient.tsx` -> `handleSubmitExam`)
 
 Both can fire nearly simultaneously, causing race conditions.
 
@@ -21,7 +40,7 @@ Both can fire nearly simultaneously, causing race conditions.
 
 ## Root Cause Analysis
 
-### 🔴 Root Cause #1: Timer Auto-Submit and Manual Submit Race Condition
+### Root Cause #1: Timer Auto-Submit and Manual Submit Race Condition
 
 **Location:** 
 - [useExamTimer.ts#L133-L165](src/features/exam-engine/hooks/useExamTimer.ts#L133-L165)
@@ -30,18 +49,18 @@ Both can fire nearly simultaneously, causing race conditions.
 **Problem:**
 When the timer expires AND the user clicks submit at the same time:
 
-1. `useExamTimer` calls `handleSectionExpiry('QA')` → triggers `onExamComplete` → `handleAutoSubmitExam`
-2. User clicks "Submit" → triggers `handleSubmitExam`
+1. `useExamTimer` calls `handleSectionExpiry('QA')` -> triggers `onExamComplete` -> `handleAutoSubmitExam`
+2. User clicks "Submit" -> triggers `handleSubmitExam`
 3. Both call `submitExam()` with the same `attemptId`
 
 **Race Timeline:**
 ```
-T+0ms:   Timer expires, QA section → handleSectionExpiry()
+T+0ms:   Timer expires, QA section -> handleSectionExpiry()
 T+1ms:   setAutoSubmitting(true)
 T+2ms:   User clicks submit (sees UI before state update)
 T+3ms:   handleSubmitExam() starts (checks isAutoSubmitting - may be false in closure!)
-T+50ms:  First submitExam() → status changes to 'submitted'
-T+100ms: Second submitExam() → Attempt is now 'submitted', not 'in_progress' → ERROR
+T+50ms:  First submitExam() -> status changes to 'submitted'
+T+100ms: Second submitExam() -> Attempt is now 'submitted', not 'in_progress' -> ERROR
 ```
 
 **Current Guard (Insufficient):**
@@ -54,7 +73,7 @@ This guard uses refs, but there's a **window between checking the ref and settin
 
 ---
 
-### 🔴 Root Cause #2: Double Submit via Atomic Status Transition Failure
+### Root Cause #2: Double Submit via Atomic Status Transition Failure
 
 **Location:** [actions.ts#L650-L665](src/features/exam-engine/lib/actions.ts#L650-L665)
 
@@ -66,13 +85,13 @@ let updateQuery = adminClient
     .from('attempts')
     .update({ status: 'submitted', submitted_at: submittedAt, submission_id: submissionId })
     .eq('id', normalizedAttemptId)
-    .eq('status', 'in_progress');  // ← Only matches if still 'in_progress'
+    .eq('status', 'in_progress');  // <- Only matches if still 'in_progress'
 ```
 
 If two submits race:
-1. First submit: Changes `in_progress` → `submitted` ✅
+1. First submit: Changes `in_progress` -> `submitted` OK
 2. Second submit: `.eq('status', 'in_progress')` returns **no rows** because status is now `submitted`
-3. `updatedAttempt` is `null` → Returns error: "Attempt already submitted by another request"
+3. `updatedAttempt` is `null` -> Returns error: "Attempt already submitted by another request"
 
 **But the actual error returned is:** `ATTEMPT_NOT_FOUND` or `Attempt not found`
 
@@ -80,7 +99,7 @@ This happens because of a **fallback lookup that fails** at line 500-530 in acti
 
 ---
 
-### 🔴 Root Cause #3: Session Token Refresh During Submit
+### Root Cause #3: Session Token Refresh During Submit
 
 **Location:** [ExamClient.tsx#L504-L510](src/app/exam/[attemptId]/ExamClient.tsx#L504-L510)
 
@@ -91,17 +110,17 @@ const handleSubmitExam = useCallback(async () => {
     setSubmitting(true);  // This is AFTER session check, not before!
     
     try {
-        const activeSessionToken = await forceRefreshSessionToken();  // ← Can race
+        const activeSessionToken = await forceRefreshSessionToken();  // <- Can race
 ```
 
 If `forceRefreshSessionToken()` is called by **two concurrent submits**:
 1. First call: Gets new token, writes to DB
 2. Second call: Gets different token, overwrites in DB
-3. First submit uses old token → `validate_session_token` fails → SESSION_CONFLICT
+3. First submit uses old token -> `validate_session_token` fails -> SESSION_CONFLICT
 
 ---
 
-### 🔴 Root Cause #4: Attempt Lookup Fails Before RLS Check
+### Root Cause #4: Attempt Lookup Fails Before RLS Check
 
 **Location:** [actions.ts#L487-L530](src/features/exam-engine/lib/actions.ts#L487-L530)
 
@@ -115,7 +134,7 @@ let { data: attempt, error: attemptError } = await adminClient
 
 if (attemptError || !attempt) {
     // ... fallback logic ...
-    return { success: false, error: 'Attempt not found' };  // ← This is your error!
+    return { success: false, error: 'Attempt not found' };  // <- This is your error!
 }
 ```
 
@@ -126,7 +145,7 @@ if (attemptError || !attempt) {
 
 ---
 
-### 🔴 Root Cause #5: localStorage State Mismatch
+### Root Cause #5: localStorage State Mismatch
 
 **Location:** [useExamStore.ts#L115-L130](src/features/exam-engine/model/useExamStore.ts#L115-L130)
 
@@ -135,20 +154,20 @@ if (attemptError || !attempt) {
 // PHASE 1 FIX: Check if we're resuming the same attempt with persisted state
 if (currentState.attemptId === attempt.id && currentState.hasHydrated) {
     examDebug.resume({...});
-    return;  // ← Preserves OLD state including OLD attemptId
+    return;  // <- Preserves OLD state including OLD attemptId
 }
 ```
 
 Scenario:
-1. User starts exam → attemptId = `abc-123`
+1. User starts exam -> attemptId = `abc-123`
 2. User closes browser mid-exam
 3. Admin deletes/resets the attempt in Supabase
-4. User returns → localStorage still has `attemptId = abc-123`
-5. User submits → looks for non-existent attempt → ATTEMPT_NOT_FOUND
+4. User returns -> localStorage still has `attemptId = abc-123`
+5. User submits -> looks for non-existent attempt -> ATTEMPT_NOT_FOUND
 
 ---
 
-### 🔴 Root Cause #6: Concurrent API Calls via Refs Not Protecting Correctly
+### Root Cause #6: Concurrent API Calls via Refs Not Protecting Correctly
 
 **Location:** [ExamClient.tsx#L145-L165](src/app/exam/[attemptId]/ExamClient.tsx#L145-L165)
 
@@ -157,35 +176,35 @@ const isSubmittingRef = useRef(isSubmitting);
 const isAutoSubmittingRef = useRef(isAutoSubmitting);
 
 // Keep refs fresh every render
-isSubmittingRef.current = isSubmitting;  // ← Updated on re-render, not immediately
+isSubmittingRef.current = isSubmitting;  // <- Updated on re-render, not immediately
 ```
 
 **Problem:** Refs are updated on re-render, but the state change triggers re-render asynchronously. There's a gap where the ref still has the old value.
 
 ---
 
-## 🟡 Race Condition Summary
+## Race Condition Summary
 
 ### Race #1: Timer vs Manual Submit
 ```
 useExamTimer.handleSectionExpiry() 
-    → setAutoSubmitting(true)
-    → expireSection()
-    → onExamComplete()
-        → ExamLayout.handleAutoSubmitExam()
-            → syncPendingResponses()
-            → onSubmitExam()
-                → ExamClient.handleSubmitExam()
-                    → submitExam()
+    -> setAutoSubmitting(true)
+    -> expireSection()
+    -> onExamComplete()
+        -> ExamLayout.handleAutoSubmitExam()
+            -> syncPendingResponses()
+            -> onSubmitExam()
+                -> ExamClient.handleSubmitExam()
+                    -> submitExam()
 
 CONCURRENT WITH:
 
 User clicks Submit
-    → ExamLayout.handleManualSubmitExam()
-        → syncPendingResponses()
-        → onSubmitExam()
-            → ExamClient.handleSubmitExam()
-                → submitExam()
+    -> ExamLayout.handleManualSubmitExam()
+        -> syncPendingResponses()
+        -> onSubmitExam()
+            -> ExamClient.handleSubmitExam()
+                -> submitExam()
 ```
 
 ### Race #2: Section Expire vs User Navigation
@@ -193,139 +212,32 @@ When QA section expires while user is clicking around, the section expiry handle
 
 ### Race #3: Session Token Refresh Collision
 ```
-Call A: initializeExamSession() → generates token ABC
-Call B: initializeExamSession() → generates token XYZ (overwrites ABC in DB)
-Call A: submitExam(token: ABC) → validate_session_token fails → SESSION_CONFLICT
+Call A: initializeExamSession() -> generates token ABC
+Call B: initializeExamSession() -> generates token XYZ (overwrites ABC in DB)
+Call A: submitExam(token: ABC) -> validate_session_token fails -> SESSION_CONFLICT
 ```
 
 ---
 
-## ✅ Recommended Fixes
+## Fixes Implemented (2026-02-07)
 
-### Fix #1: Add Mutex/Lock for Submit Operations
+- Submit mutex lock in ExamClient (submitLockRef).
+- Auto-submit coordination in useExamTimer (submit guards + expiry gating).
+- Idempotent submit in /api/submit and submitExam (already_submitted on retries).
+- Attempt lookup recovery (referer + latest in-progress attempt).
+- Session token validation + force-resume recovery.
+- LocalStorage cleanup on ATTEMPT_NOT_FOUND and stale attempt IDs.
 
-```typescript
-// In ExamClient.tsx, add a submission lock
-const submitLockRef = useRef<boolean>(false);
-
-const handleSubmitExam = useCallback(async () => {
-    // CRITICAL: Atomic check-and-set
-    if (submitLockRef.current) {
-        console.log('Submit already in progress, ignoring duplicate');
-        return;
-    }
-    submitLockRef.current = true;
-    
-    try {
-        // ... existing submit logic
-    } finally {
-        submitLockRef.current = false;
-    }
-}, [...]);
-```
-
-### Fix #2: Coordinate Timer and Manual Submit
-
-```typescript
-// In useExamTimer.ts, before calling onExamComplete
-const storeState = useExamStore.getState();
-if (storeState.isSubmitting) {
-    // Manual submit already in progress, skip auto-submit
-    return;
-}
-```
-
-### Fix #3: Validate attemptId Before Submit
-
-```typescript
-// In handleSubmitExam, validate attemptId matches server
-const handleSubmitExam = useCallback(async () => {
-    const aId = attemptIdRef.current ?? attempt.id;
-    
-    // Sanity check: verify attempt exists before proceeding
-    const { data: checkAttempt } = await adminClient
-        .from('attempts')
-        .select('id, status')
-        .eq('id', aId)
-        .maybeSingle();
-    
-    if (!checkAttempt) {
-        setUiError('Exam session not found. It may have been reset.');
-        router.push('/dashboard');
-        return;
-    }
-    
-    if (checkAttempt.status !== 'in_progress') {
-        // Already submitted/completed
-        router.push(`/result/${aId}`);
-        return;
-    }
-    
-    // ... proceed with submit
-}, [...]);
-```
-
-### Fix #4: Clear localStorage on Attempt Error
-
-```typescript
-// When ATTEMPT_NOT_FOUND is received, ensure full cleanup
-if (result.error === 'ATTEMPT_NOT_FOUND') {
-    // Clear ALL exam state, not just the specific key
-    const keys = Object.keys(localStorage);
-    keys.forEach(key => {
-        if (key.startsWith('cat-exam-state-')) {
-            localStorage.removeItem(key);
-        }
-    });
-    router.push('/dashboard');
-    return;
-}
-```
-
-### Fix #5: Server-Side Idempotency Check
-
-```typescript
-// In actions.ts submitExam, add better idempotency
-if (attempt.status === 'completed' || attempt.status === 'submitted') {
-    // Don't error - return success with existing data
-    return { 
-        success: true, 
-        data: { 
-            success: true, 
-            already_submitted: true,
-            // Include existing scores so UI can redirect properly
-        } 
-    };
-}
-```
-
-### Fix #6: Single-Flight Session Token
-
-```typescript
-// Already implemented but verify it's used everywhere
-const sessionTokenPromiseRef = useRef<Promise<string | null> | null>(null);
-
-const ensureSessionToken = useCallback(async (): Promise<string | null> => {
-    // De-dupe concurrent refreshes
-    if (sessionTokenPromiseRef.current) {
-        return sessionTokenPromiseRef.current;  // Return same promise, don't create new
-    }
-    // ...
-}, [...]);
-```
-
----
-
-## 🔍 Diagnostic Steps to Identify Your Specific Issue
+## Diagnostic Steps (current) to Identify Your Specific Issue
 
 ### Step 1: Check Browser Console
 Look for these log messages before the error:
-- `SUBMIT_ATTEMPT_ID_RECEIVED:` - What attemptId is being sent?
-- `SUBMIT_ATTEMPT_QUERY_RESULT:` - Is the query returning data?
-- `SUBMIT_ATTEMPT_QUERY_ERROR:` - Any database errors?
+- `SUBMIT_ATTEMPT_ID_RECEIVED:` - What attemptId is being sent
+- `SUBMIT_ATTEMPT_QUERY_RESULT:` - Is the query returning data
+- `SUBMIT_ATTEMPT_QUERY_ERROR:` - Any database errors
 
 ### Step 2: Check Supabase Logs
-In Supabase Dashboard → Logs → API:
+In Supabase Dashboard -> Logs -> API:
 - Filter for your user ID
 - Look for the sequence of calls around submission time
 - Check if multiple submits are happening
@@ -353,20 +265,20 @@ console.log('[SUBMIT] Starting', {
 
 ---
 
-## 📋 Quick Checklist
+## Quick Checklist (current)
 
-- [ ] Is `isSubmitting` or `isAutoSubmitting` true when submit is called?
-- [ ] Is the attemptId a valid UUID format?
-- [ ] Does the attempt exist in Supabase with status `in_progress`?
-- [ ] Is the session token valid (not expired)?
-- [ ] Are there multiple submits in quick succession in the logs?
-- [ ] Is localStorage holding stale attempt data?
+- [ ] Is `isSubmitting` or `isAutoSubmitting` true when submit is called
+- [ ] Is the attemptId a valid UUID format
+- [ ] Does the attempt exist in Supabase with status `in_progress`
+- [ ] Is the session token valid (not expired)
+- [ ] Are there multiple submits in quick succession in the logs
+- [ ] Is localStorage holding stale attempt data
 
 ---
 
 ## Next Steps
 
-1. **Apply Fix #1** (mutex lock) - Prevents race conditions
-2. **Add diagnostic logging** - Identify the specific race condition
-3. **Test timer expiry scenario** - Let exam time out vs manual submit
-4. **Verify environment** - Ensure service role key matches Supabase project
+1. **Re-run submit flow tests** - Manual submit, auto-submit, and force-resume paths.
+2. **Monitor SUBMIT_* logs** - Watch for repeat ATTEMPT_NOT_FOUND or SESSION_CONFLICT spikes.
+3. **Validate auth/session hooks** - Confirm validate_session_token and force_resume_exam_session are live.
+4. **Verify environment** - Ensure service role key matches the Supabase project in each environment.

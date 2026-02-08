@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { BackToDashboard } from '@/components/BackToDashboard';
 import { sbSSR } from '@/lib/supabase/server';
 
 type Attempt = {
@@ -103,6 +102,7 @@ export default async function DashboardPage({
         switch (status) {
             case 'completed': return '#4caf50';
             case 'in_progress': return '#ff9800';
+            case 'paused': return '#f57c00';
             case 'abandoned': return '#9e9e9e';
             default: return '#666';
         }
@@ -110,9 +110,6 @@ export default async function DashboardPage({
 
     return (
         <main style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-            <div style={{ marginBottom: 16 }}>
-                <BackToDashboard />
-            </div>
             {/* Unauthorized Error Banner */}
             {params.error === 'unauthorized' && (
                 <div style={{
@@ -286,7 +283,7 @@ export default async function DashboardPage({
                                         {a.started_at ? new Date(a.started_at).toLocaleDateString() : '—'}
                                     </td>
                                     <td style={{ padding: 12, textAlign: 'center' }}>
-                                        {a.status === 'in_progress' ? (
+                                        {a.status === 'in_progress' || a.status === 'paused' ? (
                                             <Link href={`/exam/${a.id}`} style={{
                                                 color: '#ff9800',
                                                 fontWeight: 'bold',

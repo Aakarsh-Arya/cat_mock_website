@@ -18,6 +18,35 @@ import {
     addVersionHeader,
 } from '../_utils/validation';
 
+type ValidateSessionResult = { data: boolean | null; error: { code?: string; message?: string } | null };
+
+function isMissingValidateFn(error?: { code?: string; message?: string } | null): boolean {
+    if (!error) return false;
+    return error.code === '42883' || Boolean(error.message?.includes('validate_session_token'));
+}
+
+async function validateSessionTokenRpc(
+    supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<ValidateSessionResult> },
+    attemptId: string,
+    sessionToken: string,
+    userId: string
+): Promise<ValidateSessionResult> {
+    const primary = await supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+    });
+
+    if (!primary.error || !isMissingValidateFn(primary.error)) return primary;
+
+    return supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+        p_force_resume: false,
+    });
+}
+
 export async function POST(req: NextRequest) {
     const res = NextResponse.next();
 
@@ -203,7 +232,7 @@ export async function POST(req: NextRequest) {
             return already;
         }
 
-        if (attempt.status !== 'in_progress') {
+        if (attempt.status !== 'in_progress' && attempt.status !== 'paused') {
             console.log('API_SUBMIT_ATTEMPT_STATUS_MISMATCH', {
                 attemptId: effectiveAttemptId,
                 userId: user.id,
@@ -225,14 +254,12 @@ export async function POST(req: NextRequest) {
             return addVersionHeader(NextResponse.json({ error: 'Missing session token' }, { status: 400 }));
         }
 
-        const { data: isValidSession, error: validateError } = await supabase
-            .rpc('validate_session_token', {
-                p_attempt_id: effectiveAttemptId,
-                p_session_token: sessionToken,
-                p_user_id: user.id,
-                // Disambiguate overloaded RPC (uuid vs text signature)
-                p_force_resume: false,
-            });
+        const { data: isValidSession, error: validateError } = await validateSessionTokenRpc(
+            supabase,
+            effectiveAttemptId,
+            sessionToken,
+            user.id
+        );
 
         if (validateError) {
             examLogger.securityEvent('Session validation RPC error', {
@@ -313,6 +340,37 @@ export async function POST(req: NextRequest) {
         const result = await submitExam(effectiveAttemptId, { sessionToken, force_resume, submissionId });
 
         if (!result.success) {
+            if (result.error === 'Access pending') {
+                const denied = addVersionHeader(NextResponse.json(
+                    { error: 'Access pending', code: 'ACCESS_PENDING' },
+                    { status: 403 }
+                ));
+                res.cookies.getAll().forEach((cookie) => denied.cookies.set(cookie));
+                return denied;
+            }
+
+            const invalidStatus =
+                result.error === 'Attempt is not in progress' ||
+                result.error === 'INVALID_ATTEMPT_STATUS' ||
+                result.error === 'Attempt already submitted by another request';
+
+            if (invalidStatus) {
+                const { data: statusAttempt } = await adminClient
+                    .from('attempts')
+                    .select('status')
+                    .eq('id', effectiveAttemptId)
+                    .maybeSingle();
+
+                if (statusAttempt?.status === 'submitted' || statusAttempt?.status === 'completed') {
+                    const successHeaders = getRateLimitHeaders(rateLimitResult, RATE_LIMITS.SUBMIT_EXAM.limit);
+                    const already = addVersionHeader(
+                        NextResponse.json({ success: true, already_submitted: true }, { headers: successHeaders })
+                    );
+                    res.cookies.getAll().forEach((cookie) => already.cookies.set(cookie));
+                    return already;
+                }
+            }
+
             // Phase 1: Include code for SESSION_CONFLICT so client can handle it
             const isConflict = result.error === 'SESSION_CONFLICT' || result.error?.includes('session');
             const failure = addVersionHeader(NextResponse.json(

@@ -2,9 +2,31 @@
  * @fileoverview Exam Engine Type Definitions
  * @description TypeScript interfaces matching the "Nuclear Fix" database schema
  * @blueprint Milestone 4 SOP-SSOT - Phase 1.1
- * @deviation Uses 'section' field in questions table, not a separate sections table
- * @deviation Uses 'name' for section names (VARC, DILR, QA), not 'title'
+ * @optimization Implements Base Entities, Readonly constraints, and Shared Interfaces
  */
+
+// =============================================================================
+// SHARED INTERFACES (DRY & UTILITY)
+// =============================================================================
+
+/** Base entity fields for almost all DB tables */
+export interface BaseEntity {
+    readonly id: string;
+    readonly created_at: string;
+    readonly updated_at: string;
+}
+
+/** Entities that track active/inactive state */
+export interface Activable {
+    readonly is_active: boolean;
+}
+
+/** Entities that track start/end/duration */
+export interface TimeTracked {
+    readonly started_at: string;
+    readonly completed_at?: string;
+    readonly time_taken_seconds?: number;
+}
 
 // =============================================================================
 // SECTION TYPES (CAT 2024 Format)
@@ -34,14 +56,14 @@ export function getSectionDisplayLabel(section: SectionName): string {
 
 /** Section configuration from paper.sections JSONB */
 export interface SectionConfig {
-    name: SectionName;
-    questions: number;  // Number of questions in section (VARC: 24, DILR: 20, QA: 22)
-    time: number;       // Time in minutes (40 for all sections)
-    marks: number;      // Total marks for section
+    readonly name: SectionName;
+    readonly questions: number;  // VARC: 24, DILR: 20, QA: 22
+    readonly time: number;       // Minutes (40)
+    readonly marks: number;
 }
 
 /** CAT 2024 default section configuration */
-export const CAT_2024_SECTIONS: SectionConfig[] = [
+export const CAT_2024_SECTIONS: readonly SectionConfig[] = [
     { name: 'VARC', questions: 24, time: 40, marks: 72 },
     { name: 'DILR', questions: 20, time: 40, marks: 60 },
     { name: 'QA', questions: 22, time: 40, marks: 66 },
@@ -51,34 +73,21 @@ export const CAT_2024_SECTIONS: SectionConfig[] = [
 // QUESTION TYPES
 // =============================================================================
 
-/** Question types in CAT exam */
 export type QuestionType = 'MCQ' | 'TITA';
 
-/** MCQ options structure */
 export interface MCQOptions {
-    A: string;
-    B: string;
-    C: string;
-    D: string;
+    readonly A: string;
+    readonly B: string;
+    readonly C: string;
+    readonly D: string;
 }
 
-/** Difficulty levels for questions */
 export type DifficultyLevel = 'easy' | 'medium' | 'hard';
 
 // =============================================================================
 // QUESTION CONTAINER ARCHITECTURE (Parent-Child Model)
 // =============================================================================
 
-/**
- * Question Set Types
- * - VARC: Reading Comprehension passages with 4-6 linked questions
- * - DILR: Data Interpretation / Logical Reasoning with charts/tables
- * - CASELET: Case-based questions with shared scenario
- * - ATOMIC: Single standalone question (Quant, standalone Logic)
- * 
- * Note: Atomic questions create a set with exactly 1 child question.
- * This normalizes rendering logic across all question types.
- */
 export type QuestionSetType = 'VARC' | 'DILR' | 'CASELET' | 'ATOMIC';
 
 export type ContextType =
@@ -89,14 +98,6 @@ export type ContextType =
     | 'graph'
     | 'other_shared_stimulus';
 
-/**
- * Content Layout Types - determines how to render the context
- * - split_passage: Left pane = scrollable text passage, Right pane = questions
- * - split_chart: Left pane = sticky chart/diagram, Right pane = questions
- * - split_table: Left pane = data table, Right pane = questions
- * - single_focus: No split, centered single question layout
- * - image_top: Image above, question below (for diagrams in Quant)
- */
 export type ContentLayoutType =
     | 'split_passage'
     | 'split_chart'
@@ -104,489 +105,400 @@ export type ContentLayoutType =
     | 'single_focus'
     | 'image_top';
 
-/**
- * Question Set Metadata - stored as JSON in the database
- */
 export interface QuestionSetMetadata {
-    difficulty?: DifficultyLevel;
-    topic?: string;
-    subtopic?: string;
-    tags?: string[];
-    source?: string;              // e.g., "CAT 2024 Slot 1"
-    estimated_time_minutes?: number;
+    readonly difficulty?: DifficultyLevel;
+    readonly topic?: string;
+    readonly subtopic?: string;
+    readonly tags?: readonly string[];
+    readonly source?: string;
+    readonly estimated_time_minutes?: number;
+    /** Where to place the context image relative to text: 'before' (default), 'after', 'after_para_1', 'after_para_2', etc. */
+    readonly image_position?: 'before' | 'after' | `after_para_${number}`;
 }
 
-/**
- * Question Set Entity (Parent Container)
- * Contains the context/passage for composite questions
- */
-export interface QuestionSet {
-    id: string;
-    paper_id: string;
-    section: SectionName;
+/** Question Set Entity (Parent Container) */
+export interface QuestionSet extends BaseEntity, Activable {
+    readonly paper_id: string;
+    readonly section: SectionName;
 
     // Set classification
-    set_type: QuestionSetType;
-    content_layout: ContentLayoutType;
-    context_type?: ContextType | null;
+    readonly set_type: QuestionSetType;
+    readonly content_layout: ContentLayoutType;
+    readonly context_type?: ContextType | null;
 
-    // Context content (The passage, chart, data table)
-    context_title?: string;        // e.g., "Passage 1", "Data Set A"
-    context_body?: string;         // Rich text / HTML / Markdown
-    context_image_url?: string;    // Primary image (chart, diagram)
-    context_additional_images?: Array<{
-        url: string;
-        caption?: string;
+    // Context content
+    readonly context_title?: string;
+    readonly context_body?: string;
+    readonly context_image_url?: string;
+    readonly context_additional_images?: ReadonlyArray<{
+        readonly url: string;
+        readonly caption?: string;
     }>;
 
     // Display configuration
-    display_order: number;
-    question_count: number;        // Denormalized count of child questions
+    readonly display_order: number;
+    readonly question_count: number;
 
     // Metadata
-    metadata: QuestionSetMetadata;
+    readonly metadata: QuestionSetMetadata;
+    readonly is_published: boolean;
 
-    // Publishing state
-    is_active: boolean;
-    is_published: boolean;
-
-    // Child questions (populated when fetched with JOIN)
-    questions?: QuestionInSet[];
-
-    created_at: string;
-    updated_at: string;
+    // Child questions (populated via JOIN)
+    readonly questions?: readonly QuestionInSet[];
 }
 
-/**
- * Question within a Set (Child entity)
- * Extends base question with set relationship
- */
+/** Question within a Set (Child entity) */
 export interface QuestionInSet {
-    id: string;
-    set_id: string;
-    paper_id: string;
-    section: SectionName;
+    readonly id: string;
+    readonly set_id: string;
+    readonly paper_id: string;
+    readonly section: SectionName;
 
-    // Position within the set
-    sequence_order: number;        // 1, 2, 3... within the set
-    question_number: number;       // Global number in the paper
+    // Position
+    readonly sequence_order: number;
+    readonly question_number: number;
 
     // Content
-    question_text: string;
-    question_type: QuestionType;
-    options: string[] | null;
+    readonly question_text: string;
+    readonly question_type: QuestionType;
+    readonly options: readonly string[] | null;
 
     // Marking
-    positive_marks: number;
-    negative_marks: number;
+    readonly positive_marks: number;
+    readonly negative_marks: number;
 
     // Categorization
-    difficulty?: DifficultyLevel;
-    topic?: string;
-    subtopic?: string;
+    readonly difficulty?: DifficultyLevel;
+    readonly topic?: string;
+    readonly subtopic?: string;
 
     // Media
-    question_image_url?: string;
+    readonly question_image_url?: string;
 
     // Management
-    is_active: boolean;
+    readonly is_active: boolean;
 }
 
-/**
- * Question in Set with correct answer (for results/admin)
- */
+/** Question in Set with correct answer (admin/results only) */
 export interface QuestionInSetWithAnswer extends QuestionInSet {
-    correct_answer: string;
-    solution_text?: string;
-    solution_image_url?: string;
-    video_solution_url?: string;
+    readonly correct_answer: string;
+    readonly solution_text?: string;
+    readonly solution_image_url?: string;
+    readonly video_solution_url?: string;
 }
 
-/**
- * Complete Question Set with all questions (for exam rendering)
- */
 export interface QuestionSetComplete extends QuestionSet {
-    questions: QuestionInSet[];
+    readonly questions: readonly QuestionInSet[];
 }
 
-/**
- * Complete Question Set with answers (for admin/results)
- */
 export interface QuestionSetWithAnswers extends QuestionSet {
-    questions: QuestionInSetWithAnswer[];
+    readonly questions: readonly QuestionInSetWithAnswer[];
 }
 
-/**
- * Helper type: Check if set is composite (has context)
- */
+// Helpers
 export function isCompositeSet(setType: QuestionSetType): boolean {
     return setType === 'VARC' || setType === 'DILR' || setType === 'CASELET';
 }
 
-/**
- * Helper type: Check if layout should be split pane
- */
 export function isSplitLayout(layout: ContentLayoutType): boolean {
     return layout.startsWith('split_');
 }
 
 // =============================================================================
-// LEGACY: Context/Passage for shared questions (deprecated, use QuestionSet)
+// LEGACY: Context/Passage (Deprecated)
 // =============================================================================
 
 /** @deprecated Use QuestionSet instead */
-export interface QuestionContext {
-    id: string;
-    paper_id: string;
-    section: SectionName;
-    title?: string;
-    content: string;
-    context_type: 'passage' | 'data_set' | 'image' | 'table';
-    image_url?: string;
-    display_order: number;
-    is_active: boolean;
-    created_at?: string;
-    updated_at?: string;
+export interface QuestionContext extends BaseEntity, Activable {
+    readonly paper_id: string;
+    readonly section: SectionName;
+    readonly title?: string;
+    readonly content: string;
+    readonly context_type: 'passage' | 'data_set' | 'image' | 'table';
+    readonly image_url?: string;
+    readonly display_order: number;
 }
 
 /** Question entity from database */
-export interface Question {
-    id: string;
-    paper_id: string;
-    section: SectionName;
-    question_number: number;
+export interface Question extends BaseEntity, Activable {
+    readonly paper_id: string;
+    readonly section: SectionName;
+    readonly question_number: number;
 
-    // Question Set relationship (Phase D normalization)
-    set_id?: string | null;      // FK to question_sets (null for legacy/orphan questions)
-    sequence_order?: number | null; // Order within the set (1, 2, 3...)
-    exam_order?: number;         // Computed display order within section
+    // Relationships
+    readonly set_id?: string | null;
+    readonly sequence_order?: number | null;
+    readonly exam_order?: number;
 
     // Content
-    question_text: string;
-    question_type: QuestionType;
-    question_format?: QuestionType;
-    taxonomy_type?: string;
-    topic_tag?: string;
-    difficulty_rationale?: string;
-    options: string[] | null;  // For MCQ: ["Option A", "Option B", "Option C", "Option D"]
-    context_id?: string;       // Reference to shared passage/context
-    context?: QuestionContext; // Populated context (joined from contexts table)
-    // NOTE: correct_answer is EXCLUDED during exam, only available in results
+    readonly question_text: string;
+    readonly question_type: QuestionType;
+    readonly question_format?: QuestionType;
+    readonly taxonomy_type?: string;
+    readonly topic_tag?: string;
+    readonly difficulty_rationale?: string;
+    readonly options: readonly string[] | null;
+    readonly context_id?: string;
+    readonly context?: QuestionContext;
 
     // Marking
-    positive_marks: number;  // Default: 3.0
-    negative_marks: number;  // Default: 1.0 for MCQ, 0 for TITA
+    readonly positive_marks: number;
+    readonly negative_marks: number;
 
-    // Solution (only available after exam)
-    solution_text?: string;
-    solution_image_url?: string;
-    video_solution_url?: string;
-
-    // Question media
-    question_image_url?: string;
+    // Solution
+    readonly solution_text?: string;
+    readonly solution_image_url?: string;
+    readonly video_solution_url?: string;
+    readonly question_image_url?: string;
 
     // Categorization
-    difficulty?: DifficultyLevel;
-    topic?: string;
-    subtopic?: string;
-
-    // Management
-    is_active: boolean;
-
-    created_at: string;
-    updated_at: string;
+    readonly difficulty?: DifficultyLevel;
+    readonly topic?: string;
+    readonly subtopic?: string;
 }
 
-/** Question with correct answer (for results/admin only) */
 export interface QuestionWithAnswer extends Question {
-    correct_answer: string;
+    readonly correct_answer: string;
 }
 
 // =============================================================================
 // STATISTICS TYPES
 // =============================================================================
 
-/** Peer statistics for a single question */
 export interface QuestionStats {
-    total: number;
-    options: Record<string, number>;
+    readonly total: number;
+    readonly options: Readonly<Record<string, number>>;
 }
 
-/** Peer statistics for an entire paper (keyed by question ID) */
 export type PaperStats = Record<string, QuestionStats>;
 
 // =============================================================================
 // PAPER TYPES
 // =============================================================================
 
-/** Paper difficulty levels */
 export type PaperDifficulty = 'easy' | 'medium' | 'hard' | 'cat-level';
 
-/** Paper entity from database */
-export interface Paper {
-    id: string;
-    slug: string;
-    title: string;
-    description?: string;
-    year: number;
+export interface Paper extends BaseEntity {
+    readonly slug: string;
+    readonly title: string;
+    readonly description?: string;
+    readonly year: number;
 
-    // Question & Marking Configuration
-    total_questions: number;  // CAT 2024: 66
-    total_marks: number;      // CAT 2024: 198
+    // Configuration
+    readonly total_questions: number;
+    readonly total_marks: number;
+    readonly duration_minutes: number;
+    readonly sections: readonly SectionConfig[];
 
-    // Timing
-    duration_minutes: number;  // CAT 2024: 120 total (but 40 per section)
+    // Marking Defaults
+    readonly default_positive_marks: number;
+    readonly default_negative_marks: number;
 
-    // Section configuration as JSONB
-    sections: SectionConfig[];
-
-    // Marking scheme defaults
-    default_positive_marks: number;  // Default: 3.0
-    default_negative_marks: number;  // Default: 1.0
-
-    // Publishing & Scheduling
-    published: boolean;
-    available_from?: string;
-    available_until?: string;
+    // Publishing
+    readonly published: boolean;
+    readonly available_from?: string;
+    readonly available_until?: string;
 
     // Metadata
-    difficulty_level?: PaperDifficulty;
-    is_free: boolean;
-    attempt_limit?: number;
-    allow_pause?: boolean;
-
-    created_at: string;
-    updated_at: string;
+    readonly difficulty_level?: PaperDifficulty;
+    readonly is_free: boolean;
+    readonly attempt_limit?: number;
+    readonly allow_pause?: boolean;
 }
 
 // =============================================================================
 // RESPONSE/ANSWER TYPES
 // =============================================================================
 
-/** Question status in the palette - matches DB constraint */
 export type QuestionStatus =
-    | 'not_visited'      // Gray - Never opened
-    | 'visited'          // Orange/Red - Opened but no answer
-    | 'answered'         // Green - Has answer saved
-    | 'marked'           // Purple - Marked for review, no answer
-    | 'answered_marked'; // Purple with checkmark - Has answer AND marked for review
+    | 'not_visited'
+    | 'visited'
+    | 'answered'
+    | 'marked'
+    | 'answered_marked';
 
-/** Self-reported reason tags for analysis review */
 export type PerformanceReason = 'concept_gap' | 'careless_error' | 'time_pressure' | 'guess';
 
 /** Response entity from database */
-export interface Response {
-    id: string;
-    attempt_id: string;
-    question_id: string;
+export interface Response extends BaseEntity {
+    readonly attempt_id: string;
+    readonly question_id: string;
 
     // Answer data
-    answer: string | null;  // User's answer (NULL = unanswered)
-    is_correct?: boolean;   // Populated after submission
-    marks_obtained?: number; // +3, -1, or 0
+    readonly answer: string | null;
+    readonly is_correct?: boolean;
+    readonly marks_obtained?: number;
 
-    // State tracking
-    status: QuestionStatus;
-    is_marked_for_review: boolean;
-    is_visited: boolean;
+    // State
+    readonly status: QuestionStatus;
+    readonly is_marked_for_review: boolean;
+    readonly is_visited: boolean;
 
-    // Time analytics
-    time_spent_seconds: number;
-    visit_count: number;
-
-    created_at: string;
-    updated_at: string;
+    // Analytics
+    readonly time_spent_seconds: number;
+    readonly visit_count: number;
 }
 
-/** Response for creating/updating (without server-generated fields) */
+/** Response input (no server fields) */
 export interface ResponseInput {
-    attempt_id: string;
-    question_id: string;
-    answer: string | null;
-    status: QuestionStatus;
-    is_marked_for_review: boolean;
-    is_visited: boolean;
-    time_spent_seconds: number;
-    visit_count: number;
+    readonly attempt_id: string;
+    readonly question_id: string;
+    readonly answer: string | null;
+    readonly status: QuestionStatus;
+    readonly is_marked_for_review: boolean;
+    readonly is_visited: boolean;
+    readonly time_spent_seconds: number;
+    readonly visit_count: number;
 }
 
 // =============================================================================
 // ATTEMPT TYPES
 // =============================================================================
 
-/** Attempt status values - matches DB constraint */
-export type AttemptStatus = 'in_progress' | 'submitted' | 'completed' | 'abandoned';
+export type AttemptStatus = 'in_progress' | 'paused' | 'submitted' | 'completed' | 'abandoned' | 'expired';
 
-/** Section-wise score breakdown */
 export interface SectionScore {
-    score: number;
-    correct: number;
-    incorrect: number;
-    unanswered: number;
+    readonly score: number;
+    readonly correct: number;
+    readonly incorrect: number;
+    readonly unanswered: number;
 }
 
-/** Section scores map */
 export type SectionScores = Record<SectionName, SectionScore>;
-
-/** Time remaining per section */
 export type TimeRemaining = Record<SectionName, number>;
 
-/** Attempt entity from database */
-export interface Attempt {
-    id: string;
-    user_id: string;
-    paper_id: string;
+export interface Attempt extends BaseEntity, TimeTracked {
+    readonly user_id: string;
+    readonly paper_id: string;
 
-    // Timing
-    started_at: string;
-    submitted_at?: string;
-    completed_at?: string;
-    time_taken_seconds?: number;
-    submission_id?: string;
+    // Timing specifics
+    readonly submitted_at?: string;
+    readonly submission_id?: string;
+    readonly paused_at?: string | null;
+    readonly total_paused_seconds?: number | null;
 
     // Status
-    status: AttemptStatus;
-    current_section?: SectionName;
-    current_question: number;
-    time_remaining?: TimeRemaining;  // {"VARC": 2400, "DILR": 2400, "QA": 2400}
+    readonly status: AttemptStatus;
+    readonly current_section?: SectionName;
+    readonly current_question: number;
+    readonly time_remaining?: TimeRemaining;
 
-    // Scores (populated after submission)
-    total_score?: number;
-    max_possible_score?: number;
+    // Scores
+    readonly total_score?: number;
+    readonly max_possible_score?: number;
 
-    // Detailed Analytics
-    correct_count: number;
-    incorrect_count: number;
-    unanswered_count: number;
-
-    accuracy?: number;       // (correct / attempted) * 100
-    attempt_rate?: number;   // (attempted / total) * 100
-
-    // Section-wise scores
-    section_scores?: SectionScores;
+    // Analytics
+    readonly correct_count: number;
+    readonly incorrect_count: number;
+    readonly unanswered_count: number;
+    readonly accuracy?: number;
+    readonly attempt_rate?: number;
+    readonly section_scores?: SectionScores;
 
     // Ranking
-    percentile?: number;
-    rank?: number;
-
-    created_at: string;
-    updated_at: string;
+    readonly percentile?: number;
+    readonly rank?: number;
 }
 
-/** Attempt creation input */
 export interface AttemptInput {
-    user_id: string;
-    paper_id: string;
-    current_section: SectionName;
-    time_remaining: TimeRemaining;
+    readonly user_id: string;
+    readonly paper_id: string;
+    readonly current_section: SectionName;
+    readonly time_remaining: TimeRemaining;
 }
 
 // =============================================================================
-// EXAM ENGINE STATE TYPES (for Zustand store)
+// EXAM ENGINE STATE TYPES (Zustand)
 // =============================================================================
 
-/** Exam data loaded from server */
 export interface ExamData {
-    paper: Paper;
-    questions: Question[];
-    attempt: Attempt;
-    responses?: Response[];
+    readonly paper: Paper;
+    readonly questions: readonly Question[];
+    readonly attempt: Attempt;
+    readonly responses?: readonly Response[];
 }
 
-/** Response state in Zustand store (indexed by question_id) */
 export interface ResponseState {
-    answer: string | null;
-    status: QuestionStatus;
-    isMarkedForReview: boolean;
-    timeSpentSeconds: number;
-    visitCount: number;
+    readonly answer: string | null;
+    readonly status: QuestionStatus;
+    readonly isMarkedForReview: boolean;
+    readonly timeSpentSeconds: number;
+    readonly visitCount: number;
 }
 
-/** Timer state for a section */
 export interface SectionTimerState {
-    sectionName: SectionName;
-    startedAt: number;         // Unix timestamp when section started
-    durationSeconds: number;   // 40 * 60 = 2400
-    remainingSeconds: number;  // Calculated: duration - elapsed
-    isExpired: boolean;
+    readonly sectionName: SectionName;
+    readonly startedAt: number;
+    readonly durationSeconds: number;
+    readonly remainingSeconds: number;
+    readonly isExpired: boolean;
 }
 
-/** Complete exam engine state */
 export interface ExamEngineState {
-    // Hydration
-    hasHydrated: boolean;
-    // Initialization (exam data loaded + merged)
-    isInitialized: boolean;
-
-    // Exam metadata
-    attemptId: string | null;
-    paperId: string | null;
-    sessionToken: string | null;  // P0 FIX: Session token for multi-device/tab prevention
+    // System State
+    readonly hasHydrated: boolean;
+    readonly isInitialized: boolean;
+    readonly attemptId: string | null;
+    readonly paperId: string | null;
+    readonly sessionToken: string | null;
 
     // Navigation
-    currentSectionIndex: number;  // 0=VARC, 1=DILR, 2=QA
-    currentQuestionIndex: number; // Index within current section
+    readonly currentSectionIndex: number;
+    readonly currentQuestionIndex: number;
+    readonly lockedSections: readonly SectionName[];
 
-    // Section locking (VARC→DILR→QA strict order)
-    lockedSections: SectionName[];  // Sections that have been completed
+    // Data
+    readonly responses: Record<string, ResponseState>;
+    readonly pendingSyncResponses: Record<string, { answer: string | null; timestamp: number }>;
+    readonly lastSyncTimestamp: number;
+    readonly sectionTimers: Record<SectionName, SectionTimerState>;
 
-    // Responses (keyed by question_id)
-    responses: Record<string, ResponseState>;
+    // Sets
+    readonly visitedQuestions: ReadonlySet<string>;
+    readonly markedQuestions: ReadonlySet<string>;
 
-    // Pending sync queue (local-first responses awaiting backend sync)
-    pendingSyncResponses: Record<string, { answer: string | null; timestamp: number }>;
-    lastSyncTimestamp: number;
-
-    // Timer state per section
-    sectionTimers: Record<SectionName, SectionTimerState>;
-
-    // Question tracking
-    visitedQuestions: Set<string>;
-    markedQuestions: Set<string>;
-
-    // Submission state
-    isSubmitting: boolean;
-    isAutoSubmitting: boolean;
+    // Submission
+    readonly isSubmitting: boolean;
+    readonly isAutoSubmitting: boolean;
 }
 
-/** Exam engine actions */
 export interface ExamEngineActions {
     // Initialization
     initializeExam: (data: ExamData) => void;
     setHasHydrated: (hydrated: boolean) => void;
-    setSessionToken: (sessionToken: string | null) => void;
+    setSessionToken: (token: string | null) => void;
 
     // Navigation
-    goToQuestion: (questionId: string, sectionIndex: number, questionIndex: number) => void;
+    goToQuestion: (qId: string, sIdx: number, qIdx: number) => void;
     goToNextQuestion: () => void;
     goToPreviousQuestion: () => void;
 
-    // Answer management
-    /** Store answer locally without changing status - used when clicking options */
-    setLocalAnswer: (questionId: string, answer: string | null) => void;
-    /** Save answer AND set status to answered - used on "Save and Next" */
-    saveAnswer: (questionId: string, answer: string | null) => void;
+    // Answers
+    setLocalAnswer: (qId: string, answer: string | null) => void;
+    saveAnswer: (qId: string, answer: string | null) => void;
     /** @deprecated Use setLocalAnswer or saveAnswer instead */
-    setAnswer: (questionId: string, answer: string | null) => void;
-    clearAnswer: (questionId: string) => void;
-    setResponseStatus: (questionId: string, status: QuestionStatus, isMarkedForReview?: boolean) => void;
-    toggleMarkForReview: (questionId: string) => void;
-    queuePendingSync: (questionId: string, answer: string | null) => void;
-    clearPendingSync: (questionIds?: string[]) => void;
-    setLastSyncTimestamp: (timestamp: number) => void;
+    setAnswer: (qId: string, answer: string | null) => void;
+    clearAnswer: (qId: string) => void;
+    setResponseStatus: (qId: string, status: QuestionStatus, isMarked?: boolean) => void;
+    toggleMarkForReview: (qId: string) => void;
 
-    // Status updates
-    markQuestionVisited: (questionId: string) => void;
-    updateTimeSpent: (questionId: string, seconds: number) => void;
+    // Sync
+    queuePendingSync: (qId: string, answer: string | null) => void;
+    clearPendingSync: (qIds?: string[]) => void;
+    setLastSyncTimestamp: (ts: number) => void;
 
-    // Section management
-    completeSection: (sectionName: SectionName) => void;
+    // Status
+    markQuestionVisited: (qId: string) => void;
+    updateTimeSpent: (qId: string, seconds: number) => void;
+
+    // Section
+    completeSection: (name: SectionName) => void;
     moveToNextSection: () => void;
 
     // Timer
-    updateSectionTimer: (sectionName: SectionName, remainingSeconds: number) => void;
-    setSectionTimerOverride: (sectionName: SectionName, remainingSeconds: number) => void;
-    expireSection: (sectionName: SectionName) => void;
+    updateSectionTimer: (name: SectionName, remaining: number) => void;
+    setSectionTimerOverride: (name: SectionName, remaining: number) => void;
+    expireSection: (name: SectionName) => void;
 
     // Submission
     setSubmitting: (isSubmitting: boolean) => void;
@@ -596,49 +508,44 @@ export interface ExamEngineActions {
     resetExam: () => void;
 }
 
-/** Combined store type */
 export type ExamStore = ExamEngineState & ExamEngineActions;
 
 // =============================================================================
-// UTILITY TYPES
+// UTILITY TYPES & HELPERS
 // =============================================================================
 
-/** Get questions for a specific section */
+/** Get questions for a section (Optimized with slice to prevent mutation) */
 export function getQuestionsForSection(
-    questions: Question[],
+    questions: readonly Question[],
     section: SectionName
 ): Question[] {
     return questions
         .filter(q => q.section === section)
+        .slice() // Create copy before sorting
         .sort((a, b) => a.question_number - b.question_number);
 }
 
-/** Calculate question status based on response state */
 export function calculateQuestionStatus(
     hasAnswer: boolean,
     isMarkedForReview: boolean,
     isVisited: boolean
 ): QuestionStatus {
-    if (hasAnswer && isMarkedForReview) return 'answered_marked';
+    if (hasAnswer) return isMarkedForReview ? 'answered_marked' : 'answered';
     if (isMarkedForReview) return 'marked';
-    if (hasAnswer) return 'answered';
-    if (isVisited) return 'visited';
-    return 'not_visited';
+    return isVisited ? 'visited' : 'not_visited';
 }
 
-/** Get section name by index */
 export function getSectionByIndex(index: number): SectionName {
-    const sections: SectionName[] = ['VARC', 'DILR', 'QA'];
+    const sections: readonly SectionName[] = ['VARC', 'DILR', 'QA'];
     return sections[index] ?? 'VARC';
 }
 
-/** CAT 2024 constants */
 export const CAT_CONSTANTS = {
     TOTAL_QUESTIONS: 66,
     TOTAL_MARKS: 198,
     TOTAL_DURATION_MINUTES: 120,
     SECTION_DURATION_MINUTES: 40,
-    SECTION_DURATION_SECONDS: 40 * 60, // 2400
+    SECTION_DURATION_SECONDS: 2400,
     POSITIVE_MARKS: 3,
     NEGATIVE_MARKS_MCQ: 1,
     NEGATIVE_MARKS_TITA: 0,
@@ -649,34 +556,28 @@ export const CAT_CONSTANTS = {
 // DYNAMIC TIMING HELPERS
 // =============================================================================
 
-/** Build a section duration map (seconds) from paper sections with CAT defaults as fallback. */
 export function getSectionDurationSecondsMap(
-    sections?: SectionConfig[] | null
+    sections?: readonly SectionConfig[] | null
 ): Record<SectionName, number> {
-    const defaults: Record<SectionName, number> = {
+    const defaults = {
         VARC: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
         DILR: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
         QA: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
     };
 
-    if (!sections || sections.length === 0) {
-        return defaults;
-    }
+    if (!sections?.length) return defaults;
 
-    const map = { ...defaults };
-    for (const section of sections) {
-        const seconds = Math.max(0, section.time) * 60;
-        map[section.name] = seconds || defaults[section.name];
-    }
-
-    return map;
+    // Apply overrides without mutating defaults
+    return sections.reduce((acc, section) => {
+        if (section.time > 0) {
+            acc[section.name] = section.time * 60;
+        }
+        return acc;
+    }, { ...defaults });
 }
 
-/** Calculate total exam duration in seconds from paper sections. */
-export function getPaperTotalDurationSeconds(sections?: SectionConfig[] | null): number {
-    if (!sections || sections.length === 0) {
-        return CAT_CONSTANTS.TOTAL_DURATION_MINUTES * 60;
-    }
+export function getPaperTotalDurationSeconds(sections?: readonly SectionConfig[] | null): number {
+    if (!sections?.length) return CAT_CONSTANTS.TOTAL_DURATION_MINUTES * 60;
 
     const totalMinutes = sections.reduce((sum, s) => sum + (s.time || 0), 0);
     return Math.max(1, totalMinutes) * 60;
@@ -686,41 +587,32 @@ export function getPaperTotalDurationSeconds(sections?: SectionConfig[] | null):
 // RBAC TYPES (Milestone 6+)
 // =============================================================================
 
-/** Application roles for RBAC */
 export type AppRole = 'user' | 'admin' | 'editor' | 'dev';
 
-/** User role entity from database */
-export interface UserRole {
-    id: string;
-    user_id: string;
-    role: AppRole;
-    granted_by?: string;
-    granted_at: string;
-    created_at: string;
-    updated_at: string;
+export interface UserRole extends BaseEntity {
+    readonly user_id: string;
+    readonly role: AppRole;
+    readonly granted_by?: string;
+    readonly granted_at: string;
 }
 
-/** JWT claims structure (injected by Auth Hook) */
 export interface JWTClaims {
-    user_role?: AppRole;
-    app_metadata?: {
-        user_role?: AppRole;
+    readonly user_role?: AppRole;
+    readonly app_metadata?: {
+        readonly user_role?: AppRole;
     };
-    sub: string;
-    email?: string;
-    exp: number;
-    iat: number;
+    readonly sub: string;
+    readonly email?: string;
+    readonly exp: number;
+    readonly iat: number;
 }
 
-/** Admin audit log entry */
-export interface AdminAuditLog {
-    id: string;
-    admin_id: string;
-    action: 'create' | 'update' | 'delete' | 'publish' | 'unpublish';
-    entity_type: 'paper' | 'question' | 'context' | 'user_role';
-    entity_id: string;
-    changes?: Record<string, { before: unknown; after: unknown }>;
-    ip_address?: string;
-    user_agent?: string;
-    created_at: string;
+export interface AdminAuditLog extends BaseEntity {
+    readonly admin_id: string;
+    readonly action: 'create' | 'update' | 'delete' | 'publish' | 'unpublish';
+    readonly entity_type: 'paper' | 'question' | 'context' | 'user_role';
+    readonly entity_id: string;
+    readonly changes?: Record<string, { before: unknown; after: unknown }>;
+    readonly ip_address?: string;
+    readonly user_agent?: string;
 }

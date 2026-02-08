@@ -29,6 +29,8 @@ import type {
 } from '@/types/exam';
 import type { ResponseForScoring } from '@/features/exam-engine/lib/scoring';
 
+export const dynamic = 'force-dynamic';
+
 interface SectionScore {
     score: number;
     correct: number;
@@ -137,26 +139,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
         answer: r.answer ?? null,
         time_spent_seconds: r.time_spent_seconds ?? 0,
     }));
-
-    const hasAnsweredResponses = responsesForScoring.some((r) => r.answer !== null && r.answer.trim() !== '');
-    const attemptCountsPresent =
-        attempt.correct_count !== null &&
-        attempt.correct_count !== undefined &&
-        attempt.incorrect_count !== null &&
-        attempt.incorrect_count !== undefined &&
-        attempt.unanswered_count !== null &&
-        attempt.unanswered_count !== undefined;
-    const attemptCountTotal = attemptCountsPresent
-        ? attempt.correct_count + attempt.incorrect_count + attempt.unanswered_count
-        : null;
-
-    const shouldDeriveScores =
-        attempt.status !== 'completed' ||
-        !attempt.section_scores ||
-        !attemptCountsPresent ||
-        (hasAnsweredResponses && attemptCountTotal !== questions.length);
-
-    const derivedScore = shouldDeriveScores
+    const derivedScore = questions.length > 0
         ? calculateScore(questions as Array<Question & { correct_answer: string }>, responsesForScoring)
         : null;
 

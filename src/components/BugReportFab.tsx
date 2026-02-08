@@ -6,7 +6,7 @@ import { uploadToCloudinary } from '@/lib/cloudinary';
 import { useFocusTrap } from '@/components/useFocusTrap';
 
 const MAX_FILE_SIZE_MB = 3;
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
 
 type BugReportFabProps = {
     userId: string;
@@ -18,7 +18,7 @@ type BugReportFabProps = {
 
 function isValidFile(file: File): { ok: boolean; message?: string } {
     if (!ACCEPTED_TYPES.includes(file.type)) {
-        return { ok: false, message: 'Only JPG, PNG, or WEBP files are allowed.' };
+        return { ok: false, message: 'Only JPG, PNG, WEBP, or AVIF files are allowed.' };
     }
     if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
         return { ok: false, message: `Max file size is ${MAX_FILE_SIZE_MB}MB.` };
@@ -144,9 +144,8 @@ export default function BugReportFab({ userId, route, open, onOpen, onClose }: B
                     aria-modal="true"
                     aria-label="Report an issue"
                     tabIndex={-1}
-                    className={`absolute right-6 top-20 w-[min(92vw,420px)] rounded-2xl border border-slate-200 bg-white p-5 shadow-xl transition ${
-                        open ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
-                    }`}
+                    className={`absolute right-6 top-20 w-[min(92vw,420px)] rounded-2xl border border-slate-200 bg-white p-5 shadow-xl transition ${open ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
+                        }`}
                     onClick={(event) => event.stopPropagation()}
                 >
                     <div className="flex items-start justify-between">

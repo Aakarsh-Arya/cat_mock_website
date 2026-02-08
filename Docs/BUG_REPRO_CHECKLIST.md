@@ -1,75 +1,72 @@
 # Bug Reproduction Checklist
 
-> **Phase 0 Safety Rails**: Use this checklist to verify fixes before and after each change.
+> Phase 0 Safety Rails: Use this checklist to verify fixes before and after each change.
+> Last updated: 2026-02-07
 
 ---
 
-## Issue 1: Mock Test Session Logic (Resume vs Restart)
+## Issue 1: Mock Session Resume vs Restart
+Status: Fixed (2026-02-07)
 
-### Description
-When a user clicks "Take Free Mock" button, if a mock is already in progress, the session restarts from the beginning instead of continuing where they left off.
+Description (pre-fix)
+When a user started a mock while another attempt was in progress, the session restarted from Q1 instead of resuming.
 
-### Reproduction Steps
-1. Start a mock test and answer a few questions (e.g., Q1-Q5)
-2. Navigate to Q10 in VARC section
-3. Close the browser tab (do NOT submit)
-4. Click "Take Free Mock" button again for the same paper
-5. **Expected**: Resume at Q10 in VARC section
-6. **Actual (Bug)**: Starts from Q1, section 0
+Current behavior
+- /mocks shows "Continue Mock" when an in-progress attempt with remaining time exists.
+- /mock/[paperId] shows "Start New Attempt" which abandons any in-progress attempt for that paper.
 
-### Verification Checklist
-- [ ] Open browser DevTools → Application → Local Storage
-- [ ] Check for `cat-exam-state-{attemptId}` key (NOT `cat-exam-state-temp`)
-- [ ] Verify `currentSectionIndex` and `currentQuestionIndex` are preserved
-- [ ] Enable `NEXT_PUBLIC_EXAM_DEBUG=true` and check console for resume logs
+Verification steps
+1. Start a mock test and answer a few questions.
+2. Close the tab without submitting.
+3. Go to /mocks and click "Continue Mock".
+4. Expected: resume at the last saved section/question.
+
+Optional validation
+- From /mock/[paperId], click "Start New Attempt".
+- Expected: previous in-progress attempt is marked abandoned and a new attempt is created.
+
+Verification checklist
+- DevTools -> Application -> Local Storage
+- Key `cat-exam-state-{attemptId}` exists (not `cat-exam-state-temp`)
+- `currentSectionIndex` and `currentQuestionIndex` are preserved
+- With `NEXT_PUBLIC_EXAM_DEBUG=true`, look for `[EXAM_DEBUG] Resume detection`
 
 ---
 
 ## Issue 2: TITA Double-Fire / Duplicate Script Execution
+Status: Fixed (Phase 3.4)
 
-### Description
-TITA (Type In The Answer) questions have a script/event that fires twice, causing duplicate behavior.
+Description (pre-fix)
+TITA keypad input fired twice due to a useEffect sync loop.
 
-### Reproduction Steps
-1. Navigate to a TITA question (non-MCQ)
-2. Open browser DevTools → Console
-3. Click a digit on the keypad (e.g., "5")
-4. **Expected**: Single digit appears, single store update
-5. **Actual (Bug)**: Console shows duplicate logs, or digit appears twice
+Verification steps
+1. Open any TITA question.
+2. DevTools -> Console.
+3. Press a keypad digit.
 
-### Potential Causes (Investigate)
-- [ ] MathText component re-mounting/double-executing useEffect
-- [ ] React StrictMode double-invoking effects
-- [ ] Keypad onClick firing multiple times
-- [ ] useEffect sync loop in TITARenderer
+Expected
+- One input change and one log line per keypress.
 
-### Verification Checklist
-- [ ] Check console for "EXAM_DEBUG: TITA keypad input" logs
-- [ ] Verify single log per keypress
-- [ ] Check React DevTools for component re-mounts
+Verification checklist
+- `[EXAM_DEBUG] TITA input` appears once per keypress
+- No duplicate renders or state updates in React DevTools
 
 ---
 
 ## Issue 3: Mark for Review & Next Behavior
+Status: Fixed (Phase 2)
 
-### Description
-"Mark for Review & Next" button behaves as if user selected an option even when they haven't. Need 5th status category: "Attempted & Marked".
+Description (pre-fix)
+"Mark for Review & Next" could incorrectly mark unanswered questions as answered_marked.
 
-### Current Status Categories
-1. ✅ Answered (green, hexagon-up)
-2. ✅ Not Answered/Visited (red, hexagon-down)
-3. ✅ Not Visited (gray, square)
-4. ✅ Marked for Review (purple, circle)
-5. ❌ **Attempted & Marked** (purple circle with checkmark - maps to `answered_marked`)
+Current status categories
+1. Answered (green, hexagon-up)
+2. Not Answered/Visited (red, hexagon-down)
+3. Not Visited (gray, square)
+4. Marked for Review (purple, circle)
+5. Attempted & Marked (answered_marked)
 
-### Reproduction Steps
-1. Navigate to Q1 (fresh, not visited before)
-2. Do NOT select any option
-3. Click "Mark for Review & Next"
-4. **Expected**: Q1 status = `marked`, answer = null
-5. **Actual (Bug)**: Q1 status may incorrectly show as `answered_marked`
-
-### Test Matrix
+Test matrix
 | Starting State | Action | Expected Status | Expected Answer |
 |----------------|--------|-----------------|-----------------|
 | not_visited | Mark & Next | marked | null |
@@ -78,38 +75,38 @@ TITA (Type In The Answer) questions have a script/event that fires twice, causin
 | marked | Unmark | visited | null |
 | answered_marked | Unmark | answered | preserved |
 
-### Verification Checklist
-- [ ] Check palette color matches expected status
-- [ ] Verify answer persistence via DevTools/Network tab
-- [ ] Enable debug logging and check status transitions
+Verification checklist
+- Palette color matches expected status
+- `[EXAM_DEBUG] Mark for Review` shows correct newStatus
+- `[EXAM_DEBUG] Response status change` aligns with transitions
 
 ---
 
 ## Issue 4: Quant Section Submission Failure
+Status: Mitigated (2026-02-07)
 
-### Description
-Students cannot submit the exam in the Quant (QA) section. After clicking "Submit", an "OK" warning appears, then "Failed to submit, try again" error.
+Description (pre-fix)
+Submissions in QA sometimes returned "Failed to submit exam" due to races or stale attempt IDs.
 
-### Reproduction Steps
-1. Complete all sections (VARC, DILR, QA)
-2. Navigate to last question in QA section
-3. Click "Submit Exam"
-4. Confirm in any warning dialog
-5. **Expected**: Redirects to results page
-6. **Actual (Bug)**: Error message "Failed to submit exam. Please try again."
+Current behavior
+- `/api/submit` is idempotent; repeated submits return success with `already_submitted`.
+- Session conflicts return `SESSION_CONFLICT` and can be force-resumed.
+- `ATTEMPT_NOT_FOUND` triggers localStorage cleanup and redirects to `/dashboard`.
 
-### Potential Causes (Investigate)
-- [ ] Session token mismatch (regenerated on resume)
-- [ ] API validation error (check Network tab for response)
-- [ ] Promise.all save failures blocking submit
-- [ ] Backend section validation rules
+Potential causes (if still reproducible)
+- Multi-device/tab session conflict
+- Rate limiting on submit
+- Attempt deleted server-side
 
-### Verification Checklist
-- [ ] Open DevTools → Network tab
-- [ ] Check `/api/exam/submit` response for error details
-- [ ] Verify sessionToken in request matches stored token
-- [ ] Check for SESSION_CONFLICT error code
-- [ ] Enable debug logging and check submission flow
+Verification steps
+1. Complete all sections (VARC, DILR, QA).
+2. Submit from the last QA question.
+3. Check the `/api/submit` response in Network tab.
+
+Verification checklist
+- `/api/submit` returns 200 on success, or 409 with `SESSION_CONFLICT` when applicable
+- If `ATTEMPT_NOT_FOUND`, exam state keys are cleared and user is redirected to `/dashboard`
+- Server logs show `SUBMIT_*` diagnostics when debugging
 
 ---
 
@@ -123,15 +120,17 @@ NEXT_PUBLIC_EXAM_DEBUG=true
 
 ### Debug Log Outputs
 With debug mode enabled, check console for:
-- `[EXAM_DEBUG] Store initialized` - attemptId, storeName, sessionToken
-- `[EXAM_DEBUG] Navigation` - sectionIndex, questionIndex
-- `[EXAM_DEBUG] Response status change` - questionId, oldStatus, newStatus
-- `[EXAM_DEBUG] TITA input` - key pressed, new value
-- `[EXAM_DEBUG] Submit attempt` - attemptId, sessionToken, submissionId
+- `[EXAM_DEBUG] Store initialized` - attemptId, storeName, sessionToken, section, question
+- `[EXAM_DEBUG] Resume detection` - attemptId, section, question, preservedState
+- `[EXAM_DEBUG] Response status change` - questionId, status, hasAnswer, isMarked
+- `[EXAM_DEBUG] Mark for Review` - questionId, newStatus, isMarking
+- `[EXAM_DEBUG] TITA input` - key, oldValue, newValue
+- `[EXAM_DEBUG] Submit attempt` - attemptId, submissionId, responses
+- `[EXAM_DEBUG] Submit result` - success, error, attemptId
 
 ### LocalStorage Keys to Monitor
-- `cat-exam-state-{attemptId}` - Correct per-attempt state
-- `cat-exam-state-temp` - ⚠️ Should NOT exist for real attempts
+- `cat-exam-state-{attemptId}` - per-attempt state
+- `cat-exam-state-temp` - should not exist for real attempts; cleaned up on startup if stale
 
 ---
 

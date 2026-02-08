@@ -11,6 +11,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { fetchAccessStatus, resolveIsAdmin } from '@/lib/access-control';
+import { incrementMetric } from '@/lib/telemetry';
 
 /**
  * Apply security headers to response
@@ -81,7 +83,9 @@ export async function middleware(req: NextRequest) {
     // Determine if route needs protection
     const isProtected = pathname.startsWith('/exam/') ||
         pathname.startsWith('/result/') ||
-        pathname.startsWith('/dashboard');
+        pathname.startsWith('/dashboard') ||
+        pathname.startsWith('/mocks') ||
+        pathname.startsWith('/mock/');
     const isAdminRoute = pathname.startsWith('/admin');
 
     // Only create Supabase client if we need to check auth
@@ -122,40 +126,34 @@ export async function middleware(req: NextRequest) {
             return NextResponse.redirect(redirect);
         }
 
+        const env = process.env.NODE_ENV;
+        const skipAdminCheck =
+            process.env.SKIP_ADMIN_CHECK === 'true' && (env === 'development' || env === 'test');
+
+        const isAdmin = skipAdminCheck ? true : await resolveIsAdmin(supabase, user);
+
         // Admin routes require admin role
-        if (isAdminRoute) {
-            // DEV MODE: Skip RBAC check only in explicitly non-production environments
-            const env = process.env.NODE_ENV;
-            const skipAdminCheck =
-                process.env.SKIP_ADMIN_CHECK === 'true' && (env === 'development' || env === 'test');
+        if (isAdminRoute && !skipAdminCheck && !isAdmin) {
+            const redirect = new URL('/dashboard', req.url);
+            redirect.searchParams.set('error', 'unauthorized');
+            return NextResponse.redirect(redirect);
+        }
 
-            if (!skipAdminCheck) {
-                let isAdmin = false;
-
-                // Check admin role from app_metadata first (fastest)
-                const role = user.app_metadata?.user_role;
-                if (role === 'admin' || role === 'dev') {
-                    isAdmin = true;
-                }
-
-                // If not found in app_metadata, check via RPC
-                if (!isAdmin) {
-                    const { data: isAdminRpc, error: rpcError } = await supabase.rpc('is_admin');
-                    isAdmin = !rpcError && Boolean(isAdminRpc);
-                }
-
-                if (!isAdmin) {
-                    // Not an admin - redirect to dashboard with error message
-                    const redirect = new URL('/dashboard', req.url);
-                    redirect.searchParams.set('error', 'unauthorized');
-                    return NextResponse.redirect(redirect);
-                }
+        // Access gating for protected routes (non-admins only)
+        if (isProtected && !isAdmin) {
+            const accessStatus = await fetchAccessStatus(supabase, user.id);
+            if (accessStatus !== 'active') {
+                const redirect = new URL('/coming-soon', req.url);
+                const returnTo = pathname + (req.nextUrl.search || '');
+                redirect.searchParams.set('redirect_to', returnTo);
+                return NextResponse.redirect(redirect);
             }
         }
 
         return res;
     } catch (err) {
         console.error('Middleware error:', err);
+        incrementMetric('middleware_error');
         // On error, allow request to proceed - let page handle the error
         return res;
     }
@@ -166,7 +164,10 @@ export const config = {
         '/dashboard/:path*',
         '/exam/:path*',
         '/result/:path*',
+        '/mocks/:path*',
+        '/mock/:path*',
         '/admin/:path*',
+        '/coming-soon',
         '/auth/test-login',
         // API routes included only for security headers - auth skipped
         '/api/:path*',

@@ -453,4 +453,16 @@ describe('calculateTimeTaken', () => {
         const end = '2026-01-01T10:30:45.000Z'; // 30 minutes 45 seconds
         expect(calculateTimeTaken(start, end)).toBe(1845);
     });
+
+    it('subtracts paused time', () => {
+        const start = '2026-01-01T10:00:00.000Z';
+        const end = '2026-01-01T12:00:00.000Z'; // 2 hours later
+        expect(calculateTimeTaken(start, end, 900)).toBe(6300); // minus 15 minutes
+    });
+
+    it('guards against negative results', () => {
+        const start = '2026-01-01T10:00:00.000Z';
+        const end = '2026-01-01T10:05:00.000Z'; // 5 minutes later
+        expect(calculateTimeTaken(start, end, 600)).toBe(0);
+    });
 });

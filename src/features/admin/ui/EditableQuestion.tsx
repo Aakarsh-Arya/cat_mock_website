@@ -88,13 +88,13 @@ function EditableOption({
                 {label}
             </button>
 
-            {/* Editable Option Text */}
-            <input
-                type="text"
+            {/* Editable Option Text - Using textarea for full content visibility */}
+            <textarea
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
                 placeholder={`Enter option ${label}...`}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                rows={2}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y min-h-[40px]"
             />
 
             {/* Correct Indicator */}
@@ -208,7 +208,7 @@ function ImageDropZone({ imageUrl, onImageUpload, onImageRemove, isUploading }: 
                     {isUploading ? 'Uploading...' : 'Drag & drop an image here, or click to browse'}
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
-                    PNG, JPG up to 5MB
+                    PNG, JPG, WEBP, AVIF up to 5MB
                 </p>
             </label>
         </div>

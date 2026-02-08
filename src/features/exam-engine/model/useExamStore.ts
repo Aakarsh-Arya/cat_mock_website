@@ -11,7 +11,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { logger } from '@/lib/logger';
-import { examDebug, cleanupOrphanedExamState } from '@/lib/examDebug';
+import { examDebug, cleanupOrphanedExamState, clearAllExamState } from '@/lib/examDebug';
 import type {
     ExamStore,
     ExamData,
@@ -116,7 +116,7 @@ export const createExamStore = (attemptId?: string) => {
     const storeName = attemptId ? `cat-exam-state-${attemptId}` : 'cat-exam-state-temp';
 
     // PHASE 0: Clean up orphaned temp state on store creation
-    if (typeof window !== 'undefined' && attemptId) {
+    if (typeof window !== 'undefined') {
         cleanupOrphanedExamState();
     }
 
@@ -139,15 +139,7 @@ export const createExamStore = (attemptId?: string) => {
                     // This prevents zombie states where localStorage holds an old attemptId that no longer exists.
                     if (currentState.attemptId && currentState.attemptId !== attempt.id) {
                         try {
-                            if (typeof window !== 'undefined') {
-                                // AGGRESSIVE CLEANUP: Remove ALL cat-exam-state-* keys
-                                const keys = Object.keys(localStorage);
-                                keys.forEach((key) => {
-                                    if (key.startsWith('cat-exam-state-')) {
-                                        localStorage.removeItem(key);
-                                    }
-                                });
-                            }
+                            clearAllExamState();
                         } catch {
                             // best-effort cleanup
                         }
@@ -247,12 +239,18 @@ export const createExamStore = (attemptId?: string) => {
                                 const localResponse = mergedResponses[r.question_id];
                                 if (!localResponse) return;
 
-                                // Server has an answered status - always trust server for answered questions
-                                const serverIsAnswered = r.status === 'answered' || r.status === 'answered_marked';
-                                const localIsAnswered = localResponse.status === 'answered' || localResponse.status === 'answered_marked';
+                                const serverHasAnswer = typeof r.answer === 'string' && r.answer.trim() !== '';
+                                const localHasAnswer =
+                                    typeof localResponse.answer === 'string' && localResponse.answer.trim() !== '';
+                                const serverIsAnswered =
+                                    serverHasAnswer || r.status === 'answered' || r.status === 'answered_marked';
+                                const localIsAnswered =
+                                    localHasAnswer ||
+                                    localResponse.status === 'answered' ||
+                                    localResponse.status === 'answered_marked';
 
-                                if (serverIsAnswered) {
-                                    // Server has answer - use server data (more authoritative)
+                                if (serverIsAnswered && !localIsAnswered) {
+                                    // Server has answer and local doesn't - use server data
                                     mergedResponses[r.question_id] = {
                                         answer: r.answer ?? null,
                                         status: r.status,
@@ -393,10 +391,20 @@ export const createExamStore = (attemptId?: string) => {
                     const currentTimer = sectionTimers[currentSection];
                     if (currentTimer) {
                         const duration = sectionDurations[currentSection];
-                        const clampedRemaining = Math.max(0, Math.min(duration, currentTimer.remainingSeconds));
-                        currentTimer.remainingSeconds = clampedRemaining;
-                        currentTimer.startedAt =
-                            clampedRemaining >= duration ? now : now - (duration - clampedRemaining) * 1000;
+                        // CRITICAL FIX: If remaining is 0 or negative from server, this is a completed/expired exam
+                        // Mark it as expired immediately rather than triggering auto-submit
+                        const serverRemaining = currentTimer.remainingSeconds;
+                        if (serverRemaining <= 0) {
+                            // Timer already expired - mark it as expired but don't trigger auto-submit cascade
+                            currentTimer.remainingSeconds = 0;
+                            currentTimer.isExpired = true;
+                            currentTimer.startedAt = now - duration * 1000;
+                        } else {
+                            const clampedRemaining = Math.max(1, Math.min(duration, serverRemaining));
+                            currentTimer.remainingSeconds = clampedRemaining;
+                            currentTimer.startedAt =
+                                clampedRemaining >= duration ? now : now - (duration - clampedRemaining) * 1000;
+                        }
                     }
 
                     // P0 FIX: Prefer any existing token (e.g., server-initialized) to avoid overwriting it.

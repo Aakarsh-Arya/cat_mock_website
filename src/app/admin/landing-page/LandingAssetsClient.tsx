@@ -7,10 +7,19 @@ import { sb } from '@/lib/supabase/client';
 type ToastKind = 'success' | 'error' | 'info';
 
 const MAX_FILE_SIZE_MB = 2;
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
 
 const ASSET_CATALOG: Array<{ key: string; label: string; hint?: string }> = [
-    { key: 'hero_mock_ui', label: 'Hero mock UI' },
+    {
+        key: 'hero_mock_ui',
+        label: 'Hero carousel: Mock UI',
+        hint: 'Crop/blur the CAT 2025 title area or upload a lower crop.',
+    },
+    {
+        key: 'hero_mirror_view',
+        label: 'Hero carousel: Mirror View',
+        hint: 'Mirror analytics screenshot.',
+    },
     { key: 'mentor_photo', label: 'Mentor spotlight photo' },
     { key: 'feature_exam_ui', label: 'Feature: Exam UI' },
     { key: 'feature_analytics', label: 'Feature: Analytics' },
@@ -30,7 +39,7 @@ function formatBytes(bytes: number): string {
 
 function isValidFile(file: File): { ok: boolean; message?: string } {
     if (!ACCEPTED_TYPES.includes(file.type)) {
-        return { ok: false, message: 'Only JPG, PNG, or WEBP files are allowed.' };
+        return { ok: false, message: 'Only JPG, PNG, WEBP, or AVIF files are allowed.' };
     }
     if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
         return { ok: false, message: `Max file size is ${MAX_FILE_SIZE_MB}MB.` };
@@ -98,12 +107,12 @@ export default function LandingAssetsClient() {
             return;
         }
         setSelectedFiles((prev) => ({ ...prev, [key]: file }));
-            setPreviewUrls((prev) => {
-                if (prev[key]) {
-                    URL.revokeObjectURL(prev[key]);
-                }
-                return { ...prev, [key]: buildPreviewUrl(file) };
-            });
+        setPreviewUrls((prev) => {
+            if (prev[key]) {
+                URL.revokeObjectURL(prev[key]);
+            }
+            return { ...prev, [key]: buildPreviewUrl(file) };
+        });
     }, [showToast]);
 
     const handleDrop = useCallback((key: string, event: React.DragEvent<HTMLDivElement>) => {
@@ -170,13 +179,12 @@ export default function LandingAssetsClient() {
         <div className="space-y-6">
             {toast && (
                 <div
-                    className={`rounded-lg px-4 py-3 text-sm font-medium shadow-sm ${
-                        toast.kind === 'success'
+                    className={`rounded-lg px-4 py-3 text-sm font-medium shadow-sm ${toast.kind === 'success'
                             ? 'bg-green-50 text-green-700 border border-green-200'
                             : toast.kind === 'error'
                                 ? 'bg-red-50 text-red-700 border border-red-200'
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
-                    }`}
+                        }`}
                 >
                     {toast.message}
                 </div>
@@ -201,6 +209,9 @@ export default function LandingAssetsClient() {
                                 <div>
                                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{asset.key}</p>
                                     <h3 className="text-lg font-semibold text-gray-900">{asset.label}</h3>
+                                    {asset.hint && (
+                                        <p className="mt-1 text-xs text-gray-500">{asset.hint}</p>
+                                    )}
                                 </div>
 
                                 <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-2">
@@ -264,11 +275,10 @@ export default function LandingAssetsClient() {
                                     type="button"
                                     disabled={!file || isSaving}
                                     onClick={() => handleSave(asset.key)}
-                                    className={`w-full rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                                        file && !isSaving
+                                    className={`w-full rounded-lg px-4 py-2 text-sm font-semibold transition ${file && !isSaving
                                             ? 'bg-blue-600 text-white hover:bg-blue-700'
                                             : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                    }`}
+                                        }`}
                                 >
                                     {isSaving ? 'Saving...' : 'Save'}
                                 </button>

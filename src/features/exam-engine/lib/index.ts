@@ -37,7 +37,6 @@ export {
 
     // Request schemas
     FetchPaperRequestSchema,
-    StartAttemptRequestSchema,
     SaveResponseRequestSchema,
     UpdateTimerRequestSchema,
     SubmitExamRequestSchema,

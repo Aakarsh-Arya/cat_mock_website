@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Space_Grotesk, Plus_Jakarta_Sans } from 'next/font/google';
 import { sb } from '@/lib/supabase/client';
 import { useLandingAssets } from '@/lib/useLandingAssets';
@@ -21,103 +21,121 @@ const bodyFont = Plus_Jakarta_Sans({
 
 const NAV_LINKS = [
     { id: 'mentor', label: 'Mentor' },
-    { id: 'roadmap', label: 'Roadmap' },
     { id: 'features', label: 'Features' },
+    { id: 'roadmap', label: 'Roadmap' },
     { id: 'cat-hub', label: 'CAT Hub' },
 ];
 
-const FEATURE_TABS = [
+const HERO_SLIDES = [
     {
         id: 'mock',
-        label: 'Mock Mode',
-        description: 'Locked section flow with exam-grade timers and calm focus prompts.',
-        accent: 'bg-emerald-500/10 text-emerald-700',
+        label: 'Mock',
+        title: 'Exam-like UI that trains composure.',
+        subtitle: 'Section locks + timer + answer palette.',
+        assetKey: 'hero_mock_ui',
+        fallbackLabel: 'Mock UI preview',
+        maskTop: true,
     },
     {
-        id: 'review',
-        label: 'Mirror View',
-        description: 'Replay your attempt to see when you moved, paused, and changed answers.',
-        accent: 'bg-orange-500/10 text-orange-700',
+        id: 'mirror',
+        label: 'Mirror',
+        title: 'Mirror View: see time + accuracy patterns instantly.',
+        subtitle: 'Attempts, revisits, speed traps, topic-wise breakdown.',
+        assetKey: 'hero_mirror_view',
+        fallbackLabel: 'Mirror analytics preview',
     },
     {
-        id: 'analytics',
-        label: 'Analytics',
-        description: 'Spot speed traps with time-per-question and accuracy overlays.',
-        accent: 'bg-sky-500/10 text-sky-700',
+        id: 'coach',
+        label: 'AI Coach',
+        title: 'AI Coach: not just what you did - why you did it.',
+        subtitle: 'Strategy flaws, strength zones, and next-step fixes.',
+        insights: [
+            'Your speed attempt caused 19% accuracy.',
+            'Revisits = your edge (accuracy jumps when you revisit).',
+            'DILR guessing is killing score - solve 1 set fully.',
+        ],
+    },
+];
+
+const HERO_CHIPS = [
+    '4 official CAT papers live',
+    'Section-locked 40-40-40 flow',
+    'AI Coach (beta) + Mirror View',
+];
+
+const LIVE_STRIP_ITEMS = [
+    {
+        label: 'Live now',
+        copy: '4 official CAT previous-year papers (full mocks)',
+    },
+    {
+        label: 'Coming in March',
+        copy: 'All official CAT papers from 2020 onwards - all slots (18 papers)',
+    },
+    {
+        label: 'Coming in April',
+        copy: 'NextCAT mock series launch',
+    },
+];
+
+const FEATURE_CARDS = [
+    {
+        id: 'ai-coach',
+        title: 'AI Coach (beta)',
+        description: 'Hyper-personal strategy insights from your attempt behavior.',
+        bullets: ['attempt order', 'time sinks', 'guessing patterns'],
+        tag: 'Coming soon',
+    },
+    {
+        id: 'nextcat',
+        title: 'NextCAT (launch April)',
+        description: 'Curated mock series built for CAT 2026 targets.',
+        bullets: ['difficulty calibration', 'trap patterns', 'mentor-led review notes'],
+        tag: 'Coming soon',
+    },
+    {
+        id: 'mirror-view',
+        title: 'Mirror View Analytics',
+        description: 'Replay your attempt like a coach: speed, revisits, and topic breakdown.',
+        bullets: ['time/question', 'revisit count', 'topic/subtopic', 'difficulty tags'],
+    },
+    {
+        id: 'exam-ui',
+        title: 'Exam-like Interface',
+        description: 'Train the exact CAT flow: 40-40-40 with section locks.',
+        bullets: ['answer palette', 'on-screen calculator', 'TITA practice'],
     },
 ];
 
 const ROADMAP_ITEMS = [
     {
-        step: 'Q1',
-        title: 'Launch early access for CAT 2025',
-        copy: 'Invite-only access with curated mocks and guided onboarding.',
+        period: 'Now (Beta)',
+        copy: '4 PYQ mocks + mirror metrics',
     },
     {
-        step: 'Q2',
-        title: 'Add adaptive difficulty signals',
-        copy: 'Question difficulty tagging and smart review queues.',
+        period: 'March',
+        copy: '2020-2025 papers (all slots) + better review UX',
     },
     {
-        step: 'Q3',
-        title: 'Mentor-led sprint cohorts',
-        copy: 'Weekly mentor reviews, cohort leaderboards, and feedback loops.',
+        period: 'April',
+        copy: 'NextCAT series launch + AI Coach rollout for beta users',
     },
 ];
 
-const HUB_SECTIONS = [
+const CAT_HUB_ITEMS = [
     {
-        id: 'hub-myths',
-        label: 'Myths',
-        items: [
-            { title: 'Myth: Speed beats accuracy', body: 'CAT rewards balance. Fix accuracy first, then lift speed.' },
-            { title: 'Myth: One mock per day', body: 'Quality review beats quantity. Aim for 2-3 per week.' },
-        ],
+        title: 'Trying to solve everything',
+        body: 'Placeholder guidance text to be added here.',
     },
     {
-        id: 'hub-cheat-sheet',
-        label: 'Cheat Sheet',
-        items: [
-            { title: 'VARC rhythm', body: 'RC focus blocks + 2-3 VA sets; keep passage notes light.' },
-            { title: 'DILR checkpoints', body: 'Select 2 sets fast, solve 1 fully, then attempt a second.' },
-            { title: 'QA anchors', body: 'Start with sure-shot questions to build momentum.' },
-        ],
+        title: 'Not revisiting strategically',
+        body: 'Placeholder guidance text to be added here.',
     },
     {
-        id: 'hub-roadmap',
-        label: 'Roadmap',
-        items: [
-            { title: 'Weeks 1-4', body: 'Build basics and solve section-wise sets.' },
-            { title: 'Weeks 5-8', body: 'Add full mocks + review notes each attempt.' },
-            { title: 'Weeks 9-12', body: 'Tighten timing and revisit weak topics.' },
-        ],
+        title: 'Guessing in DILR',
+        body: 'Placeholder guidance text to be added here.',
     },
 ];
-
-const FEATURE_ROWS = [
-    {
-        title: 'Exam-first mock engine',
-        body: 'Section locks, timers, and answer palettes mirror the real test day flow.',
-        key: 'feature_exam_ui',
-        chip: 'Mock UI',
-    },
-    {
-        title: 'Precision analytics',
-        body: 'Time spent, accuracy, and revisit patterns in one single view.',
-        key: 'feature_analytics',
-        chip: 'Analytics',
-    },
-    {
-        title: 'Rapid topic reinforcement',
-        body: 'Jump into targeted sets based on where you lost time or accuracy.',
-        key: 'rag_demo_1',
-        chip: 'Sprint Mode',
-    },
-];
-
-// TODO(landing): move mentor quote into landing assets/config once admin copy editor lands.
-const MENTOR_QUOTE = 'Accuracy compounds. Build your base, then push speed.';
-const MENTOR_BUBBLE_KEY = 'landing_mentor_bubble_shown';
 
 function useCanHover(): boolean {
     const [canHover, setCanHover] = useState(false);
@@ -266,7 +284,7 @@ function MobileDrawer({ open, onClose, onAuth }: DrawerProps) {
                     }}
                     className="mt-auto inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]"
                 >
-                    Claim Early Access
+                    Start a free mock
                 </button>
             </div>
         </div>
@@ -306,12 +324,12 @@ function AuthModal({ open, onClose, onSignIn, loading }: AuthModalProps) {
             >
                 <div className="flex items-start justify-between">
                     <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Claim Early Access</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Free during beta</p>
                         <h3 className={`${headingFont.className} mt-2 text-xl font-semibold text-slate-900`}>
-                            Claim Early Access
+                            Start a free mock
                         </h3>
                         <p className="mt-2 text-sm text-slate-500">
-                            First 100 users get ₹999 worth of mentor-grade mock review notes.
+                            Early access open for CAT 2026 (beta).
                         </p>
                     </div>
                     <button
@@ -364,19 +382,13 @@ export default function LandingPageClient() {
     const { assets, isLoading } = useLandingAssets();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isAuthOpen, setIsAuthOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState(FEATURE_TABS[0].id);
+    const [activeSlide, setActiveSlide] = useState(0);
+    const [carouselPaused, setCarouselPaused] = useState(false);
     const [authLoading, setAuthLoading] = useState(false);
-    const [mentorBubbleVisible, setMentorBubbleVisible] = useState(false);
-    const [mentorBubbleEligible, setMentorBubbleEligible] = useState(true);
     const [showBackToTop, setShowBackToTop] = useState(false);
     const canHover = useCanHover();
     const heroRef = useRef<HTMLElement | null>(null);
-    const hubSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-    const activeFeature = useMemo(
-        () => FEATURE_TABS.find((tab) => tab.id === activeTab) ?? FEATURE_TABS[0],
-        [activeTab]
-    );
+    const carouselRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (isMenuOpen || isAuthOpen) {
@@ -397,32 +409,56 @@ export default function LandingPageClient() {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
+    const scrollToSlide = useCallback(
+        (index: number, behavior: ScrollBehavior = 'smooth') => {
+            const node = carouselRef.current;
+            if (!node) return;
+            const width = node.clientWidth;
+            if (!width) return;
+            node.scrollTo({ left: width * index, behavior });
+        },
+        []
+    );
+
+    const handleSelectSlide = useCallback(
+        (index: number) => {
+            setActiveSlide(index);
+            scrollToSlide(index);
+        },
+        [scrollToSlide]
+    );
+
+    const handleCarouselScroll = useCallback(() => {
+        const node = carouselRef.current;
+        if (!node) return;
+        const width = node.clientWidth;
+        if (!width) return;
+        const nextIndex = Math.round(node.scrollLeft / width);
+        if (nextIndex !== activeSlide) {
+            setActiveSlide(nextIndex);
+        }
+    }, [activeSlide]);
+
+    useEffect(() => {
+        if (!canHover || carouselPaused) return;
+        const timer = window.setInterval(() => {
+            setActiveSlide((prev) => {
+                const next = (prev + 1) % HERO_SLIDES.length;
+                scrollToSlide(next);
+                return next;
+            });
+        }, 4800);
+        return () => window.clearInterval(timer);
+    }, [canHover, carouselPaused, scrollToSlide]);
+
     useEffect(() => {
         if (typeof window === 'undefined') return;
-        const alreadyShown = window.localStorage.getItem(MENTOR_BUBBLE_KEY) === 'true';
-        setMentorBubbleEligible(!alreadyShown);
-        if (!canHover || alreadyShown) return;
-        const timer = window.setTimeout(() => {
-            setMentorBubbleVisible(true);
-            setMentorBubbleEligible(false);
-            window.localStorage.setItem(MENTOR_BUBBLE_KEY, 'true');
-        }, 3000);
-        return () => window.clearTimeout(timer);
-    }, [canHover]);
-
-    const revealMentorBubble = useCallback(() => {
-        setMentorBubbleVisible(true);
-        if (typeof window !== 'undefined') {
-            window.localStorage.setItem(MENTOR_BUBBLE_KEY, 'true');
-        }
-        setMentorBubbleEligible(false);
-    }, []);
-
-    const scrollToHubSection = useCallback((id: string) => {
-        const target = hubSectionRefs.current[id];
-        if (!target) return;
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, []);
+        const handleResize = () => {
+            scrollToSlide(activeSlide, 'auto');
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, [activeSlide, scrollToSlide]);
 
     const scrollToTop = useCallback(() => {
         if (typeof window === 'undefined') return;
@@ -464,7 +500,7 @@ export default function LandingPageClient() {
                                 <div className={`${headingFont.className} text-sm font-semibold text-slate-900`}>
                                     CAT Mock Arena
                                 </div>
-                                <div className="text-xs text-slate-500">Prep like its exam day</div>
+                                <div className="text-xs text-slate-500">Prep like it's exam day</div>
                             </div>
                         </div>
 
@@ -487,7 +523,7 @@ export default function LandingPageClient() {
                                 className="group relative inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] sm:px-5 sm:text-sm"
                             >
                                 <span className="absolute inset-0 -z-10 rounded-full bg-emerald-300/30 opacity-0 blur-xl transition group-hover:opacity-100 motion-safe:group-hover:animate-[landing-glow_2.8s_ease-in-out_infinite]" />
-                                Claim Early Access
+                                Start a free mock
                             </button>
                             <button
                                 type="button"
@@ -510,225 +546,263 @@ export default function LandingPageClient() {
                         ref={heroRef}
                         className="mx-auto w-full max-w-6xl px-4 pb-16 pt-16 sm:px-6 lg:pt-24"
                     >
-                        <div className="grid items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
+                        <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
                             <div className="space-y-6">
-                                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                                    Early access open for CAT 2025
+                                <div className="space-y-2">
+                                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        Free during beta &bull; CAT 2026
+                                    </span>
+                                    <p className="text-xs text-slate-500">Early access open for CAT 2026 (beta).</p>
                                 </div>
                                 <h1
                                     className={`${headingFont.className} text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl motion-safe:animate-[landing-fade-up_0.7s_ease-out]`}
                                 >
-                                    The Gen Z pro prep stack for CAT mocks.
+                                    Practice like it's your D-Day. Get hyper-customized analytics.
                                 </h1>
                                 <p
-                                    className="text-lg text-slate-600 motion-safe:animate-[landing-fade-up_0.7s_ease-out]"
+                                    className="text-base text-slate-600 sm:text-lg motion-safe:animate-[landing-fade-up_0.7s_ease-out]"
                                     style={{ animationDelay: '80ms' }}
                                 >
-                                    Timed mocks, mirror view analytics, and mentor-led insights in one calm workspace.
+                                    AI coaching guided by top percentilers - built from your attempt behavior (time, order, revisits, accuracy).
                                 </p>
-                                <div className="flex flex-wrap items-center gap-4">
+                                <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600">
+                                    {HERO_CHIPS.map((chip) => (
+                                        <span
+                                            key={chip}
+                                            className="rounded-full border border-slate-200 bg-white px-3 py-1"
+                                        >
+                                            {chip}
+                                        </span>
+                                    ))}
+                                </div>
+                                <div className="space-y-2">
                                     <button
                                         type="button"
                                         onClick={() => setIsAuthOpen(true)}
                                         className="group relative inline-flex items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]"
                                     >
                                         <span className="absolute inset-0 -z-10 rounded-full bg-emerald-300/30 opacity-0 blur-xl transition group-hover:opacity-100 motion-safe:group-hover:animate-[landing-glow_2.8s_ease-in-out_infinite]" />
-                                        Claim Early Access
+                                        Start a free mock
                                     </button>
-                                    <a
-                                        href="#roadmap"
-                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98]"
-                                    >
-                                        View roadmap
-                                    </a>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-4 text-sm text-slate-500">
-                                    <span>Section-locked flow</span>
-                                    <span>Adaptive review cues</span>
-                                    <span>Focused analytics</span>
-                                </div>
-                                <p className="text-xs text-slate-400">
-                                    Value nudge: early access invites go out weekly. No spam, only prep.
-                                </p>
-                            </div>
-
-                            <div className="relative">
-                                <div className="absolute -inset-4 rounded-[32px] border border-emerald-100 bg-white/40" />
-                                <AssetImage
-                                    assetKey="hero_mock_ui"
-                                    assets={assets}
-                                    isLoading={isLoading}
-                                    fallbackLabel="Hero mock preview"
-                                    containerClassName="relative z-10 h-[320px] w-full rounded-[28px] border border-slate-200 bg-white shadow-lg"
-                                    imageClassName="relative z-10 h-[320px] w-full rounded-[28px] border border-slate-200 object-cover shadow-lg"
-                                />
-                                <div className="absolute -bottom-6 left-6 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs font-semibold text-slate-600 shadow-lg">
-                                    Calm UI, high-stakes insights
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section id="mentor" className="border-y border-slate-200 bg-white">
-                        <div className="mx-auto grid w-full max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.9fr_1.1fr]">
-                            <div className="space-y-4">
-                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Mentor spotlight</p>
-                                <h2 className={`${headingFont.className} text-3xl font-semibold text-slate-900`}>
-                                    Learn directly from Saurabh Khandelwal
-                                </h2>
-                                <p className="text-slate-600">
-                                    Weekly mentor notes, exam strategies, and calm performance resets for peak accuracy.
-                                </p>
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    {[
-                                        { label: 'CAT 99+ percentile coaching', value: 'Mentor-led cohorts' },
-                                        { label: 'Live sprint reviews', value: 'Actionable feedback' },
-                                    ].map((item) => (
-                                        <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                            <p className="text-xs font-semibold text-slate-500">{item.label}</p>
-                                            <p className="mt-2 text-sm font-semibold text-slate-900">{item.value}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="group relative">
-                                <AssetImage
-                                    assetKey="mentor_photo"
-                                    assets={assets}
-                                    isLoading={isLoading}
-                                    fallbackLabel="Mentor spotlight"
-                                    containerClassName="h-[360px] w-full rounded-[32px] border border-slate-200 bg-slate-50"
-                                    imageClassName="h-[360px] w-full rounded-[32px] border border-slate-200 object-cover grayscale transition duration-500 group-hover:grayscale-0"
-                                />
-                                <div
-                                    className={`absolute left-6 top-6 max-w-xs rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-lg transition-all duration-300 ${mentorBubbleVisible ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-2'
-                                        }`}
-                                    aria-hidden={!mentorBubbleVisible}
-                                >
-                                    "{MENTOR_QUOTE}"
-                                    <span className="absolute -bottom-2 left-8 h-4 w-4 rotate-45 rounded-sm bg-white shadow" />
-                                </div>
-                                {!canHover && !mentorBubbleVisible && mentorBubbleEligible && (
-                                    <button
-                                        type="button"
-                                        onClick={revealMentorBubble}
-                                        className="absolute bottom-6 left-6 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow transition hover:bg-slate-50"
-                                    >
-                                        Tap for insight
-                                    </button>
-                                )}
-                                <div className="absolute bottom-6 right-6 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow">
-                                    Mentor spotlight
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section id="roadmap" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
-                        <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
-                            <div className="space-y-3">
-                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Roadmap</p>
-                                <h2 className={`${headingFont.className} text-3xl font-semibold text-slate-900`}>
-                                    Built for a year of focused CAT prep
-                                </h2>
-                                <p className="text-slate-600">
-                                    Each drop adds new signal and depth without disrupting your flow.
-                                </p>
-                            </div>
-                            <ol className="relative space-y-8 border-l border-slate-200 pl-6">
-                                {ROADMAP_ITEMS.map((item) => (
-                                    <li key={item.step} className="relative">
-                                        <span className="absolute -left-[30px] top-1 flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-semibold text-slate-600">
-                                            {item.step}
-                                        </span>
-                                        <h3 className="text-lg font-semibold text-slate-900">{item.title}</h3>
-                                        <p className="mt-2 text-sm text-slate-600">{item.copy}</p>
-                                    </li>
-                                ))}
-                            </ol>
-                        </div>
-                    </section>
-
-                    <section id="features" className="border-y border-slate-200 bg-white">
-                        <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
-                            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-                                <div>
-                                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Feature showcase</p>
-                                    <h2 className={`${headingFont.className} mt-3 text-3xl font-semibold text-slate-900`}>
-                                        Your mock workflow, in one clean dashboard
-                                    </h2>
-                                    <p className="mt-3 text-slate-600">
-                                        Switch between mock attempts, review, and analytics without losing context.
+                                    <p className="text-xs font-semibold text-slate-500">Continue with Google</p>
+                                    <p className="text-[11px] text-slate-400">
+                                        Mocks are best experienced on desktop (like CAT).
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap gap-2">
-                                    {FEATURE_TABS.map((tab) => (
-                                        <button
-                                            key={tab.id}
-                                            type="button"
-                                            onClick={() => setActiveTab(tab.id)}
-                                            className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${activeTab === tab.id
-                                                    ? 'border-slate-900 bg-slate-900 text-white'
-                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                                                }`}
-                                        >
-                                            {tab.label}
-                                        </button>
-                                    ))}
-                                </div>
                             </div>
 
-                            <div className="mt-8 rounded-3xl border border-slate-200 bg-slate-50 p-6">
-                                <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-                                    <div>
-                                        <div className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${activeFeature.accent}`}>
-                                            {activeFeature.label}
-                                        </div>
-                                        <p className="mt-3 text-sm text-slate-600">{activeFeature.description}</p>
+                            <div className="space-y-4">
+                                <div className="rounded-[32px] border border-slate-200 bg-white/70 p-4 shadow-lg">
+                                    <div
+                                        ref={carouselRef}
+                                        className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth lg:overflow-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                                        onScroll={handleCarouselScroll}
+                                        onMouseEnter={() => setCarouselPaused(true)}
+                                        onMouseLeave={() => setCarouselPaused(false)}
+                                    >
+                                        {HERO_SLIDES.map((slide) => (
+                                            <div key={slide.id} className="min-w-full snap-center px-1">
+                                                <div className="space-y-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+                                                    <div className="relative h-[240px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                                                        {slide.assetKey ? (
+                                                            <AssetImage
+                                                                assetKey={slide.assetKey}
+                                                                assets={assets}
+                                                                isLoading={isLoading}
+                                                                fallbackLabel={slide.fallbackLabel ?? 'Carousel preview'}
+                                                                containerClassName="h-full w-full"
+                                                                imageClassName="h-full w-full object-cover"
+                                                            />
+                                                        ) : (
+                                                            <div className="flex h-full flex-col justify-between p-4">
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                                                        Coach Report
+                                                                    </span>
+                                                                    <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                                                                        Beta
+                                                                    </span>
+                                                                </div>
+                                                                <div className="mt-4 grid gap-3">
+                                                                    {slide.insights?.map((insight) => (
+                                                                        <div
+                                                                            key={insight}
+                                                                            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                                                                        >
+                                                                            {insight}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {slide.maskTop && (
+                                                            <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-white/80 backdrop-blur-sm" />
+                                                        )}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-slate-900">{slide.title}</p>
+                                                        <p className="mt-1 text-xs text-slate-500">{slide.subtitle}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                                        {['VARC', 'DILR', 'QA'].map((label, index) => (
-                                            <span
-                                                key={label}
-                                                className={`rounded-full px-3 py-1 text-xs font-semibold ${index === 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                                                    }`}
+                                </div>
+                                <div className="flex flex-col items-center gap-2">
+                                    <div className="flex items-center gap-2">
+                                        {HERO_SLIDES.map((slide, index) => (
+                                            <button
+                                                key={slide.id}
+                                                type="button"
+                                                onClick={() => handleSelectSlide(index)}
+                                                className="rounded-full p-1"
+                                                aria-label={`Go to ${slide.label} slide`}
                                             >
-                                                {label}
+                                                <span
+                                                    className={`block h-2.5 w-2.5 rounded-full transition ${index === activeSlide
+                                                            ? 'bg-slate-900'
+                                                            : 'bg-slate-300'
+                                                        }`}
+                                                />
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="grid w-full grid-cols-3 text-center text-[11px] font-semibold text-slate-500">
+                                        {HERO_SLIDES.map((slide, index) => (
+                                            <span
+                                                key={slide.id}
+                                                className={index === activeSlide ? 'text-slate-900' : ''}
+                                            >
+                                                {slide.label}
                                             </span>
                                         ))}
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </section>
 
-                            <div className="mt-12 space-y-12">
-                                {FEATURE_ROWS.map((feature, index) => (
+                    <section className="border-y border-slate-200 bg-white">
+                        <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+                            <div className="grid gap-4 md:grid-cols-3">
+                                {LIVE_STRIP_ITEMS.map((item) => (
                                     <div
-                                        key={feature.title}
-                                        className={`flex flex-col gap-8 ${index % 2 === 0 ? 'lg:flex-row' : 'lg:flex-row-reverse'
-                                            }`}
+                                        key={item.label}
+                                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
                                     >
-                                        <div className="flex-1 space-y-4">
-                                            <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                                                {feature.chip}
-                                            </div>
-                                            <h3 className={`${headingFont.className} text-2xl font-semibold text-slate-900`}>
-                                                {feature.title}
-                                            </h3>
-                                            <p className="text-slate-600">{feature.body}</p>
-                                        </div>
-                                        <div className="flex-1">
-                                            <AssetImage
-                                                assetKey={feature.key}
-                                                assets={assets}
-                                                isLoading={isLoading}
-                                                fallbackLabel={feature.title}
-                                                containerClassName="h-[260px] w-full rounded-3xl border border-slate-200 bg-white"
-                                                imageClassName="h-[260px] w-full rounded-3xl border border-slate-200 object-cover"
-                                            />
-                                        </div>
+                                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                            {item.label}
+                                        </p>
+                                        <p className="mt-2 text-sm font-semibold text-slate-900">{item.copy}</p>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="mentor" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                        <div className="grid items-center gap-8 lg:grid-cols-[1.05fr_0.95fr]">
+                            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                    Curated & verified by
+                                </p>
+                                <h2 className={`${headingFont.className} mt-3 text-3xl font-semibold text-slate-900`}>
+                                    Saurabh Khandelwal
+                                </h2>
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                    {['CAT 99.84', 'MBA, IIM Udaipur'].map((chip) => (
+                                        <span
+                                            key={chip}
+                                            className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600"
+                                        >
+                                            {chip}
+                                        </span>
+                                    ))}
+                                </div>
+                                <p className="mt-4 text-sm text-slate-600">
+                                    Mocks and review standards aligned to what top mentors look for: selection, pacing, and execution.
+                                </p>
+                            </div>
+                            <div className="relative">
+                                <AssetImage
+                                    assetKey="mentor_photo"
+                                    assets={assets}
+                                    isLoading={isLoading}
+                                    fallbackLabel="Mentor spotlight"
+                                    containerClassName="h-[280px] w-full rounded-[28px] border border-slate-200 bg-slate-50"
+                                    imageClassName="h-[280px] w-full rounded-[28px] border border-slate-200 object-cover"
+                                />
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="features" className="border-y border-slate-200 bg-white">
+                        <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                            <div className="space-y-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Features</p>
+                                <h2 className={`${headingFont.className} text-3xl font-semibold text-slate-900`}>
+                                    Built for focused CAT 2026 practice
+                                </h2>
+                                <p className="text-slate-600">
+                                    AI coaching, mentor-curated mocks, and mirror analytics designed for real test-day flow.
+                                </p>
+                            </div>
+
+                            <div className="mt-10 grid gap-6 md:grid-cols-2">
+                                {FEATURE_CARDS.map((feature) => (
+                                    <div
+                                        key={feature.id}
+                                        className="relative rounded-3xl border border-slate-200 bg-slate-50 p-6"
+                                    >
+                                        {feature.tag && (
+                                            <span className="absolute right-4 top-4 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700">
+                                                {feature.tag}
+                                            </span>
+                                        )}
+                                        <h3 className={`${headingFont.className} text-xl font-semibold text-slate-900`}>
+                                            {feature.title}
+                                        </h3>
+                                        <p className="mt-2 text-sm text-slate-600">{feature.description}</p>
+                                        <ul className="mt-4 space-y-2 text-xs text-slate-600">
+                                            {feature.bullets.map((bullet) => (
+                                                <li key={bullet} className="flex items-center gap-2">
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                                    <span>{bullet}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="roadmap" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                        <div className="space-y-8">
+                            <div className="space-y-3">
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Roadmap</p>
+                                <h2 className={`${headingFont.className} text-3xl font-semibold text-slate-900`}>
+                                    Month-by-month rollout for CAT 2026 prep
+                                </h2>
+                                <p className="text-slate-600">
+                                    What is live now and what lands next for beta users.
+                                </p>
+                            </div>
+                            <div className="relative">
+                                <div className="absolute left-0 right-0 top-6 hidden h-px bg-slate-200 lg:block" />
+                                <div className="grid gap-6 lg:grid-cols-3">
+                                    {ROADMAP_ITEMS.map((item) => (
+                                        <div
+                                            key={item.period}
+                                            className="relative rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+                                        >
+                                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                                                {item.period}
+                                            </span>
+                                            <p className="mt-4 text-sm font-semibold text-slate-900">{item.copy}</p>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </section>
@@ -736,52 +810,26 @@ export default function LandingPageClient() {
                     <section id="cat-hub" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
                         <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
                             <div>
-                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">CAT info hub</p>
+                                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">CAT Hub</p>
                                 <h2 className={`${headingFont.className} mt-3 text-3xl font-semibold text-slate-900`}>
-                                    MBA exam notes, CAT focus
+                                    CAT Hub: 3 mistakes that kill percentiles
                                 </h2>
                                 <p className="mt-3 text-slate-600">
-                                    Quick reads that keep the CAT essentials close without feeling like a textbook.
+                                    Placeholder copy for the hub intro. Replace with real content when ready.
                                 </p>
-                                <div className="mt-6 flex flex-wrap gap-2">
-                                    {HUB_SECTIONS.map((section) => (
-                                        <button
-                                            key={section.id}
-                                            type="button"
-                                            onClick={() => scrollToHubSection(section.id)}
-                                            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
-                                        >
-                                            {section.label}
-                                        </button>
-                                    ))}
-                                </div>
                             </div>
-                            <div className="space-y-6">
-                                {HUB_SECTIONS.map((section) => (
-                                    <div
-                                        key={section.id}
-                                        id={section.id}
-                                        ref={(node) => {
-                                            hubSectionRefs.current[section.id] = node;
-                                        }}
-                                        className="scroll-mt-24 space-y-3"
+                            <div className="space-y-3">
+                                {CAT_HUB_ITEMS.map((item) => (
+                                    <details
+                                        key={item.title}
+                                        className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-slate-300"
                                     >
-                                        <div className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-400">
-                                            {section.label}
-                                        </div>
-                                        {section.items.map((item) => (
-                                            <details
-                                                key={item.title}
-                                                className="group rounded-2xl border border-slate-200 bg-white p-4 transition hover:border-slate-300"
-                                            >
-                                                <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-900">
-                                                    {item.title}
-                                                    <span className="text-slate-400 transition group-open:rotate-45">+</span>
-                                                </summary>
-                                                <p className="mt-3 text-sm text-slate-600">{item.body}</p>
-                                            </details>
-                                        ))}
-                                    </div>
+                                        <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-slate-900">
+                                            {item.title}
+                                            <span className="text-slate-400 transition group-open:rotate-45">+</span>
+                                        </summary>
+                                        <p className="mt-3 text-sm text-slate-600">{item.body}</p>
+                                    </details>
                                 ))}
                             </div>
                         </div>
@@ -802,7 +850,7 @@ export default function LandingPageClient() {
                                 onClick={() => setIsAuthOpen(true)}
                                 className="mt-6 inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]"
                             >
-                                Claim Early Access
+                                Start a free mock
                             </button>
                         </div>
                         <div className="flex flex-col gap-3 text-sm text-slate-600">

@@ -25,7 +25,7 @@ import {
     initializeExamSession,
 } from '@/features/exam-engine/api/client';
 import { logger, examLogger } from '@/lib/logger';
-import { examDebug, cleanupOrphanedExamState } from '@/lib/examDebug';
+import { examDebug, cleanupOrphanedExamState, clearAllExamState } from '@/lib/examDebug';
 import { DevToolsPanel } from '@/features/exam-engine/ui/DevToolsPanel';
 import { isDevSyncPaused } from '@/lib/devTools';
 import { sb } from '@/lib/supabase/client';
@@ -49,6 +49,7 @@ interface ExamClientProps {
 
 const AUTO_SAVE_INTERVAL_MS = 60000;
 const PROGRESS_DEBOUNCE_MS = 1000;
+const MAX_BEACON_BYTES = 60 * 1024;
 const EXAM_LAYOUT_MODE = (process.env.NEXT_PUBLIC_EXAM_LAYOUT_MODE ?? 'current') as 'current' | 'three-column';
 
 type SectionTimersSnapshot = Partial<Record<SectionName, Pick<SectionTimerState, 'remainingSeconds'>>>;
@@ -255,7 +256,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
     // Initialize exam on mount - but only once per session
     useEffect(() => {
-        cleanupOrphanedExamState();
+        cleanupOrphanedExamState(attempt.id);
 
         if (!initAttemptedRef.current) {
             initAttemptedRef.current = true;
@@ -399,20 +400,61 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
             if (responses.length === 0) return;
 
-            const payload = JSON.stringify({
+            const basePayload = {
                 attemptId: aId,
-                responses,
                 sessionToken: token,
-                force_resume: true, // Force resume on reconnect
-            });
+                force_resume: true,
+            };
 
-            // Use sendBeacon for reliable delivery during unload
-            const sent = navigator.sendBeacon('/api/save-batch', new Blob([payload], { type: 'application/json' }));
-            if (sent) {
-                logger.info('sendBeacon batch save successful', { attemptId: aId, count: responses.length });
-            } else {
-                logger.warn('sendBeacon batch save failed, attempting async flush', { attemptId: aId });
-                void flushNow(); // Fallback to async
+            const fullPayload = JSON.stringify({ ...basePayload, responses });
+            const fullBlob = new Blob([fullPayload], { type: 'application/json' });
+
+            if (fullBlob.size <= MAX_BEACON_BYTES) {
+                const sent = navigator.sendBeacon('/api/save-batch', fullBlob);
+                if (sent) {
+                    logger.info('sendBeacon batch save successful', { attemptId: aId, count: responses.length });
+                } else {
+                    logger.warn('sendBeacon batch save failed, attempting async flush', { attemptId: aId });
+                    void flushNow();
+                }
+                return;
+            }
+
+            const chunks: typeof responses[] = [];
+            let currentChunk: typeof responses = [];
+
+            for (const item of responses) {
+                currentChunk.push(item);
+                const chunkPayload = JSON.stringify({ ...basePayload, responses: currentChunk });
+                const chunkSize = new Blob([chunkPayload], { type: 'application/json' }).size;
+
+                if (chunkSize > MAX_BEACON_BYTES) {
+                    currentChunk.pop();
+                    if (currentChunk.length === 0) {
+                        logger.warn('sendBeacon payload too large, falling back to flush', { attemptId: aId });
+                        void flushNow();
+                        return;
+                    }
+                    chunks.push(currentChunk);
+                    currentChunk = [item];
+                }
+            }
+
+            if (currentChunk.length) {
+                chunks.push(currentChunk);
+            }
+
+            for (const chunk of chunks) {
+                const chunkPayload = JSON.stringify({ ...basePayload, responses: chunk });
+                const sent = navigator.sendBeacon(
+                    '/api/save-batch',
+                    new Blob([chunkPayload], { type: 'application/json' })
+                );
+                if (!sent) {
+                    logger.warn('sendBeacon chunk failed, attempting async flush', { attemptId: aId });
+                    void flushNow();
+                    return;
+                }
             }
         };
 
@@ -428,10 +470,17 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
             const aId = attemptIdRef.current ?? attempt.id;
-            if (!aId || !isInitialized || isSubmittingRef.current || isAutoSubmittingRef.current) return;
+            if (!aId || !isInitialized) return;
 
-            // Try to save via sendBeacon before showing prompt
+            // CRITICAL FIX: Always try to save responses via beacon, even during submission
+            // This ensures data is not lost if user reloads during auto-submit
             sendBeaconBatchSave();
+
+            // Only show the "are you sure" prompt if NOT currently submitting
+            if (isSubmittingRef.current || isAutoSubmittingRef.current) {
+                // During submission, don't prompt but still save
+                return;
+            }
 
             event.preventDefault();
             event.returnValue = '';
@@ -549,17 +598,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
     // Helper: Aggressive cleanup of ALL exam localStorage keys
     const clearAllExamStates = useCallback(() => {
-        try {
-            const keys = Object.keys(localStorage);
-            keys.forEach((key) => {
-                if (key.startsWith('cat-exam-state-')) {
-                    localStorage.removeItem(key);
-                }
-            });
-        } catch {
-            // ignore
-        }
-        cleanupOrphanedExamState();
+        clearAllExamState();
     }, []);
 
     // Handle exam submit
@@ -668,11 +707,13 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 clearAllExamStates();
             };
 
-            // First attempt submit (no force_resume)
+            // CRITICAL FIX: Always use force_resume to prevent session conflicts
+            // The server now automatically handles session recovery
             const result = await submitExam({
                 attemptId: aId,
                 sessionToken: activeSessionToken,
                 submissionId: submissionIdRef.current,
+                force_resume: true, // Always force_resume to prevent stuck submissions
             });
 
             examDebug.submitResult({
@@ -683,13 +724,14 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
             if (result.success) {
                 clearLocalExamState();
-                router.push(`/result/${aId}`);
+                router.replace(`/result/${aId}`);
                 return;
             }
 
             const invalidStatus =
                 result.error === 'Attempt is not in progress' ||
-                result.error === 'INVALID_ATTEMPT_STATUS';
+                result.error === 'INVALID_ATTEMPT_STATUS' ||
+                result.error?.toLowerCase().includes('already submitted');
             if (invalidStatus) {
                 try {
                     const res = await fetch('/api/attempt-status', {
@@ -702,7 +744,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
                     if (statusCheck === 'submitted' || statusCheck === 'completed') {
                         clearLocalExamState();
-                        router.push(`/result/${aId}`);
+                        router.replace(`/result/${aId}`);
                         return;
                     }
                 } catch (checkError) {
@@ -748,7 +790,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
                 if (retry.success) {
                     clearLocalExamState();
-                    router.push(`/result/${aId}`);
+                    router.replace(`/result/${aId}`);
                     return;
                 }
 
@@ -770,7 +812,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
                         if (retry2.success) {
                             clearLocalExamState();
-                            router.push(`/result/${aId}`);
+                            router.replace(`/result/${aId}`);
                             return;
                         }
 
@@ -796,7 +838,8 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             const finalError = result.error;
 
             const errorMessage =
-                finalError === 'INVALID_ATTEMPT_STATUS'
+                finalError === 'INVALID_ATTEMPT_STATUS' ||
+                    finalError?.toLowerCase().includes('already submitted')
                     ? 'Exam has already been submitted or is in an invalid state.'
                     : finalError === 'Attempt not found' || finalError?.toLowerCase().includes('attempt not found')
                         ? 'This exam attempt no longer exists. Please restart the exam.'
@@ -854,20 +897,10 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                     });
 
                     if (retry.success) {
-                        try {
-                            localStorage.removeItem(`cat-exam-state-${aId}`);
-                        } catch {
-                            // ignore
-                        }
-                        cleanupOrphanedExamState();
-                        router.push(`/result/${aId}`);
+                        clearAllExamStates();
+                        router.replace(`/result/${aId}`);
                     } else if (retry.error === 'ATTEMPT_NOT_FOUND' || retry.error?.toLowerCase().includes('attempt not found')) {
-                        try {
-                            localStorage.removeItem(`cat-exam-state-${aId}`);
-                        } catch {
-                            // ignore
-                        }
-                        cleanupOrphanedExamState();
+                        clearAllExamStates();
                         setUiError('This exam attempt was removed. Please restart from the dashboard.');
                         router.push('/dashboard');
                     } else if (retry.error !== 'SESSION_CONFLICT') {
@@ -945,11 +978,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             });
 
             if (result.success) {
-                try {
-                    localStorage.removeItem(`cat-exam-state-${aId}`);
-                } catch {
-                    // ignore
-                }
+                clearAllExamStates();
                 router.push('/dashboard');
             } else {
                 examLogger.examPaused(aId, false, result.error);

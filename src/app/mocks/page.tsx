@@ -34,12 +34,26 @@ export default async function MocksPage() {
     if (user) {
         const { data: inProgressAttempts } = await supabase
             .from('attempts')
-            .select('id, paper_id, created_at')
+            .select('id, paper_id, created_at, status, time_remaining')
             .eq('user_id', user.id)
-            .eq('status', 'in_progress')
+            .in('status', ['in_progress', 'paused'])
             .order('created_at', { ascending: false });
 
+        const hasRemainingTime = (timeRemaining: unknown) => {
+            if (!timeRemaining || typeof timeRemaining !== 'object') return false;
+            return Object.values(timeRemaining as Record<string, unknown>).some((value) => {
+                const num =
+                    typeof value === 'number'
+                        ? value
+                        : typeof value === 'string'
+                            ? Number(value)
+                            : NaN;
+                return Number.isFinite(num) && num > 0;
+            });
+        };
+
         (inProgressAttempts ?? []).forEach((attempt) => {
+            if (!hasRemainingTime(attempt.time_remaining)) return;
             if (!inProgressAttemptsByPaper.has(attempt.paper_id)) {
                 inProgressAttemptsByPaper.set(attempt.paper_id, { id: attempt.id });
             }

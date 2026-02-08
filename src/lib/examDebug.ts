@@ -245,16 +245,41 @@ export const examDebug = {
  * Clean up orphaned temp state from localStorage
  * Call this on app startup to prevent ghost bugs
  */
-export function cleanupOrphanedExamState(): void {
+export function cleanupOrphanedExamState(currentAttemptId?: string | null): void {
     if (typeof window === 'undefined') return;
 
     const tempKey = 'cat-exam-state-temp';
     const tempState = localStorage.getItem(tempKey);
+    if (!tempState) return;
 
-    if (tempState) {
-        examDebug.warn('Found orphaned temp state, removing', { key: tempKey });
-        localStorage.removeItem(tempKey);
+    let storedAttemptId: string | null = null;
+    try {
+        const parsed = JSON.parse(tempState) as { state?: { attemptId?: string | null }; attemptId?: string | null };
+        storedAttemptId = parsed?.state?.attemptId ?? parsed?.attemptId ?? null;
+    } catch {
+        storedAttemptId = null;
     }
+
+    let activeAttemptId: string | null = currentAttemptId ?? null;
+    if (!activeAttemptId) {
+        const parts = window.location.pathname.split('/');
+        activeAttemptId = parts[1] === 'exam' ? (parts[2] ?? null) : null;
+    }
+
+    if (activeAttemptId) {
+        // Keep temp state if it matches the active attempt or is missing (avoid data loss on refresh).
+        if (!storedAttemptId || storedAttemptId === activeAttemptId) return;
+        examDebug.warn('Found temp state for different attempt, removing', {
+            key: tempKey,
+            storedAttemptId,
+            activeAttemptId,
+        });
+        localStorage.removeItem(tempKey);
+        return;
+    }
+
+    examDebug.warn('Found orphaned temp state, removing', { key: tempKey });
+    localStorage.removeItem(tempKey);
 }
 
 /**

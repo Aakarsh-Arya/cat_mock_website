@@ -16,6 +16,35 @@ import {
     addVersionHeader,
 } from '../_utils/validation';
 
+type ValidateSessionResult = { data: boolean | null; error: { code?: string; message?: string } | null };
+
+function isMissingValidateFn(error?: { code?: string; message?: string } | null): boolean {
+    if (!error) return false;
+    return error.code === '42883' || Boolean(error.message?.includes('validate_session_token'));
+}
+
+async function validateSessionTokenRpc(
+    supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<ValidateSessionResult> },
+    attemptId: string,
+    sessionToken: string,
+    userId: string
+): Promise<ValidateSessionResult> {
+    const primary = await supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+    });
+
+    if (!primary.error || !isMissingValidateFn(primary.error)) return primary;
+
+    return supabase.rpc('validate_session_token', {
+        p_attempt_id: attemptId,
+        p_session_token: sessionToken,
+        p_user_id: userId,
+        p_force_resume: false,
+    });
+}
+
 export async function POST(req: NextRequest) {
     // Create a single response object up-front so any auth cookie mutations
     // made by supabase SSR actually get returned to the client.
@@ -180,13 +209,12 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Missing session token' }, { status: 400 });
         }
 
-        const { data: isValidSession, error: validateError } = await supabase.rpc('validate_session_token', {
-            p_attempt_id: effectiveAttemptId,
-            p_session_token: sessionToken,
-            p_user_id: session.user.id,
-            // Disambiguate overloaded RPC (uuid vs text signature)
-            p_force_resume: false,
-        });
+        const { data: isValidSession, error: validateError } = await validateSessionTokenRpc(
+            supabase,
+            effectiveAttemptId,
+            sessionToken,
+            session.user.id
+        );
 
         if (validateError) {
             examLogger.securityEvent('Save session validation RPC error', {

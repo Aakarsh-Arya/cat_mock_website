@@ -4,6 +4,10 @@ import { sbSSR } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import Link from 'next/link';
 import { getSectionDurationSecondsMap, type SectionName, type SectionConfig } from '@/types/exam';
+import { getServiceRoleClient } from '@/lib/supabase/service-role';
+import { ensureActiveAccess } from '@/lib/access-control';
+import { checkRateLimit, RATE_LIMITS, userRateLimitKey } from '@/lib/rate-limit';
+import { incrementMetric } from '@/lib/telemetry';
 
 export const metadata: Metadata = {
     title: "Mock Details",
@@ -25,14 +29,20 @@ interface Paper {
     attempt_limit: number | null;
 }
 
-export default async function MockDetailPage({ params }: { params: Promise<Record<string, unknown>> }) {
+export default async function MockDetailPage({
+    params,
+    searchParams,
+}: {
+    params: Promise<Record<string, unknown>>;
+    searchParams?: { error?: string };
+}) {
     const { paperId } = (await params) as { paperId: string };
 
     const supabase = await sbSSR();
 
     // Get paper details - try by UUID first, then by slug
     let paper: Paper | null = null;
-    let error: unknown = null;
+    let paperError: unknown = null;
 
     // Check if paperId looks like a UUID
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
@@ -44,18 +54,18 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             .eq('id', paperId)
             .maybeSingle();
         paper = result.data as Paper | null;
-        error = result.error;
+        paperError = result.error;
     }
 
     // If not found by UUID or not a UUID, try by slug
-    if (!paper && !error) {
+    if (!paper && !paperError) {
         const result = await supabase
             .from('papers')
             .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
             .eq('slug', paperId)
             .maybeSingle();
         paper = result.data as Paper | null;
-        error = result.error;
+        paperError = result.error;
     }
 
     // Get user's previous attempts on this paper
@@ -85,6 +95,17 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
 
         if (!currentUser) {
             redirect(`/auth/sign-in?redirect_to=${encodeURIComponent(`/mock/${paperId}`)}`);
+        }
+
+        const access = await ensureActiveAccess(s, currentUser.id, currentUser);
+        if (!access.allowed) {
+            redirect(`/coming-soon?redirect_to=${encodeURIComponent(`/mock/${paperId}`)}`);
+        }
+
+        const rateKey = userRateLimitKey('start_mock', currentUser.id);
+        const rateResult = checkRateLimit(rateKey, RATE_LIMITS.START_MOCK);
+        if (!rateResult.allowed) {
+            redirect(`/mock/${paperId}?error=rate_limited`);
         }
 
         // Check if paperId looks like a UUID
@@ -119,57 +140,36 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
         const sections = (p.sections as SectionConfig[]) || [];
         const sectionDurations = getSectionDurationSecondsMap(sections);
 
-        // FIX: Check for existing active attempt (in_progress/paused) - reuse instead of creating new
-        const { data: existingAttempt } = await s
-            .from('attempts')
-            .select('id, time_remaining, current_section, started_at, status')
-            .eq('paper_id', p.id)
-            .eq('user_id', currentUser.id)
-            .in('status', ['in_progress', 'paused'])
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        if (existingAttempt) {
-            const normalizeSectionName = (value?: string | null): SectionName => {
-                const normalized = (value ?? '').toUpperCase().trim();
-                if (normalized === 'LRDI') return 'DILR';
-                if (normalized === 'QUANT' || normalized === 'QUANTS') return 'QA';
-                if (normalized === 'VARC' || normalized === 'DILR' || normalized === 'QA') {
-                    return normalized as SectionName;
-                }
-                return 'VARC';
-            };
-
-            const timeRemaining = existingAttempt.time_remaining as Partial<Record<SectionName, number>> | null | undefined;
-            const hasAnyRemaining = !!timeRemaining && Object.values(timeRemaining).some((v) => typeof v === 'number' && v > 0);
-            const currentSection = normalizeSectionName(existingAttempt.current_section as string | null | undefined);
-            const currentRemaining = typeof timeRemaining?.[currentSection] === 'number' ? timeRemaining?.[currentSection] : null;
-
-            const totalDurationSeconds = Object.values(sectionDurations).reduce((sum, v) => sum + v, 0);
-            const startedAtMs = existingAttempt.started_at ? new Date(existingAttempt.started_at).getTime() : null;
-            const elapsedSeconds = startedAtMs ? Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)) : null;
-            // Only use time-based staleness when no remaining time is recorded.
-            // This allows long resumes (e.g., next day) if time_remaining is still > 0.
-            const isExpiredByTime = !hasAnyRemaining &&
-                typeof elapsedSeconds === 'number' &&
-                elapsedSeconds > totalDurationSeconds + 120;
-            const isExpiredByRemaining = currentRemaining !== null ? currentRemaining <= 0 : !hasAnyRemaining;
-
-            if (!isExpiredByTime && !isExpiredByRemaining) {
-                // Resume existing attempt instead of creating a new one
-                redirect(`/exam/${existingAttempt.id}`);
-            }
-
-            // Stale in-progress attempt - mark abandoned and create a new one
-            await s
+        // Start Mock always creates a new attempt.
+        // If an existing in-progress/paused attempt exists, abandon it (resume only via Continue button).
+        try {
+            const adminClient = getServiceRoleClient();
+            const { data: existingAttempt } = await adminClient
                 .from('attempts')
-                .update({
-                    status: 'abandoned',
-                    completed_at: new Date().toISOString(),
-                })
-                .eq('id', existingAttempt.id)
-                .in('status', ['in_progress', 'paused']);
+                .select('id, status')
+                .eq('paper_id', p.id)
+                .eq('user_id', currentUser.id)
+                .in('status', ['in_progress', 'paused'])
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (existingAttempt) {
+                await adminClient
+                    .from('attempts')
+                    .update({
+                        status: 'abandoned',
+                        completed_at: new Date().toISOString(),
+                    })
+                    .eq('id', existingAttempt.id)
+                    .eq('user_id', currentUser.id)
+                    .in('status', ['in_progress', 'paused']);
+            }
+        } catch (error) {
+            logger.warn('Failed to abandon existing attempt for new mock', error, {
+                paperId: p.id,
+                userId: currentUser.id,
+            });
         }
 
         const attemptLimitServer = p.attempt_limit ?? null;
@@ -211,10 +211,12 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
             throw new Error('Failed to create attempt');
         }
 
+        incrementMetric('attempt_created');
+
         redirect(`/exam/${attempt.id}`);
     }
 
-    if (error) {
+    if (paperError) {
         return (
             <main style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
                 <h1>Error Loading Paper</h1>
@@ -235,9 +237,16 @@ export default async function MockDetailPage({ params }: { params: Promise<Recor
     }
 
     const sections = paper.sections || [];
+    const queryError = searchParams?.error ?? null;
 
     return (
         <main style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
+            {queryError === 'rate_limited' && (
+                <div style={{ marginBottom: 16, color: 'crimson' }}>
+                    Too many start attempts. Please wait a minute and try again.
+                </div>
+            )}
+
             {/* Paper Header */}
             <div style={{ marginBottom: 32 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
