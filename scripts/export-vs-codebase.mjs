@@ -165,7 +165,7 @@ function runPatternBasedSecretsScan() {
                         }
                     }
                 }
-            } catch (_error) {
+            } catch {
                 // Skip files that can't be read
             }
         }
@@ -458,7 +458,6 @@ function verifyOutput() {
         'cat-2024-mock',
         'sample-paper-template',
     ];
-    let _questionPaperFound = false;
     for (const pattern of questionPaperPatterns) {
         if (content.includes(pattern) && !content.includes('REDACTIONS')) {
             // Check if it's just in the redactions table

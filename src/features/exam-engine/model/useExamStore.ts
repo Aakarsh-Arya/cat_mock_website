@@ -29,6 +29,16 @@ import {
     calculateQuestionStatus,
 } from '@/types/exam';
 
+type MutableSectionTimerState = {
+    sectionName: SectionName;
+    startedAt: number;
+    durationSeconds: number;
+    remainingSeconds: number;
+    isExpired: boolean;
+};
+
+type MutableSectionTimers = Record<SectionName, MutableSectionTimerState>;
+
 // =============================================================================
 // SAFE STORAGE (SSR GUARD)
 // =============================================================================
@@ -52,7 +62,7 @@ const noopStorage: Storage = {
 // INITIAL STATE
 // =============================================================================
 
-const createInitialTimerState = (sectionName: SectionName, durationSeconds: number): SectionTimerState => ({
+const createInitialTimerState = (sectionName: SectionName, durationSeconds: number): MutableSectionTimerState => ({
     sectionName,
     startedAt: 0,
     durationSeconds,
@@ -170,7 +180,7 @@ export const createExamStore = (attemptId?: string) => {
                         const resumeSection = normalizeSectionName(attempt.current_section as string | null | undefined);
 
                         const sections: SectionName[] = ['VARC', 'DILR', 'QA'];
-                        const nextSectionTimers = { ...currentState.sectionTimers } as Record<SectionName, SectionTimerState>;
+                        const nextSectionTimers = { ...currentState.sectionTimers } as MutableSectionTimers;
 
                         for (const section of sections) {
                             const duration = sectionDurations[section];
@@ -338,7 +348,7 @@ export const createExamStore = (attemptId?: string) => {
                     const baseStartTime = hasTimeRemaining ? attemptStartedAt : (isLikelyNewAttempt ? now : attemptStartedAt);
 
                     const sectionDurations = getSectionDurationSecondsMap(paper.sections);
-                    const sectionTimers: Record<SectionName, SectionTimerState> = {
+                    const sectionTimers: MutableSectionTimers = {
                         VARC: {
                             sectionName: 'VARC',
                             startedAt: baseStartTime,
@@ -969,17 +979,33 @@ export const createExamStore = (attemptId?: string) => {
                 }),
                 onRehydrateStorage: () => (state) => {
                     if (state) {
-                        state.visitedQuestions = new Set(Array.isArray(state.visitedQuestions) ? state.visitedQuestions : []);
-                        state.markedQuestions = new Set(Array.isArray(state.markedQuestions) ? state.markedQuestions : []);
-                        state.hasHydrated = true;
-                        state.isInitialized = false;
+                        const writableState = state as unknown as {
+                            visitedQuestions: Set<string>;
+                            markedQuestions: Set<string>;
+                            hasHydrated: boolean;
+                            isInitialized: boolean;
+                            attemptId: string | null;
+                            resetExam: () => void;
+                        };
+                        writableState.visitedQuestions = new Set(
+                            Array.isArray(state.visitedQuestions) ? state.visitedQuestions : []
+                        );
+                        writableState.markedQuestions = new Set(
+                            Array.isArray(state.markedQuestions) ? state.markedQuestions : []
+                        );
+                        writableState.hasHydrated = true;
+                        writableState.isInitialized = false;
 
                         // Guard against stale persisted state for a different attempt.
                         if (typeof window !== 'undefined') {
                             const parts = window.location.pathname.split('/');
                             const currentAttemptId = parts[1] === 'exam' ? (parts[2] ?? null) : null;
-                            if (currentAttemptId && state.attemptId && state.attemptId !== currentAttemptId) {
-                                state.resetExam();
+                            if (
+                                currentAttemptId &&
+                                writableState.attemptId &&
+                                writableState.attemptId !== currentAttemptId
+                            ) {
+                                writableState.resetExam();
                             }
                         }
                     }

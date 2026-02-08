@@ -33,7 +33,7 @@ function isMissingValidateFn(error?: { code?: string; message?: string } | null)
 }
 
 async function validateSessionTokenRpc(
-    supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<ValidateSessionResult> },
+    supabase: { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<ValidateSessionResult> },
     attemptId: string,
     sessionToken: string,
     userId: string

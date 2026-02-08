@@ -60,8 +60,8 @@ export default function NewQuestionPage() {
                 supabase.from('question_contexts').select('id, title, section, paper_id').order('title'),
             ]);
 
-            if (papersResult.data) setPapers(papersResult.data);
-            if (contextsResult.data) setContexts(contextsResult.data);
+            if (papersResult.data) setPapers(papersResult.data as Paper[]);
+            if (contextsResult.data) setContexts(contextsResult.data as Context[]);
         };
 
         fetchData();

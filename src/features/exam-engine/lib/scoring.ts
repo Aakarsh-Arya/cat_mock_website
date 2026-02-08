@@ -42,6 +42,15 @@ export interface ScoringResult {
     question_results: QuestionScoringResult[];
 }
 
+type MutableSectionScore = {
+    score: number;
+    correct: number;
+    incorrect: number;
+    unanswered: number;
+};
+
+type MutableSectionScores = Record<SectionName, MutableSectionScore>;
+
 // =============================================================================
 // NORMALIZATION UTILITIES
 // =============================================================================
@@ -160,9 +169,9 @@ export function calculateQuestionMarks(
 /**
  * Initialize empty section scores
  */
-function initializeSectionScores(): SectionScores {
+function initializeSectionScores(): MutableSectionScores {
     const sections: SectionName[] = ['VARC', 'DILR', 'QA'];
-    const sectionScores: Partial<SectionScores> = {};
+    const sectionScores: Partial<MutableSectionScores> = {};
 
     for (const section of sections) {
         sectionScores[section] = {
@@ -173,7 +182,7 @@ function initializeSectionScores(): SectionScores {
         };
     }
 
-    return sectionScores as SectionScores;
+    return sectionScores as MutableSectionScores;
 }
 
 /**
@@ -264,7 +273,7 @@ export function calculateScore(
         unanswered_count: unansweredCount,
         accuracy,
         attempt_rate: attemptRate,
-        section_scores: sectionScores,
+        section_scores: sectionScores as SectionScores,
         question_results: questionResults,
     };
 }

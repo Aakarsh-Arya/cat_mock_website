@@ -25,7 +25,21 @@ export async function GET(req: NextRequest) {
     const anon = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) as string | undefined;
 
     const redirectTo = req.nextUrl.searchParams.get('redirect_to') || '/dashboard';
-    const finalUrl = new URL(redirectTo, process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
+    const requestOrigin = req.nextUrl.origin;
+    const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    // Avoid cross-domain redirect (and cookie loss) if env is stale for this host.
+    let baseUrl = requestOrigin;
+    if (configuredSiteUrl) {
+        try {
+            const configuredOrigin = new URL(configuredSiteUrl).origin;
+            if (configuredOrigin === requestOrigin) {
+                baseUrl = configuredSiteUrl;
+            }
+        } catch {
+            // Ignore invalid NEXT_PUBLIC_SITE_URL values.
+        }
+    }
+    const finalUrl = new URL(redirectTo, baseUrl);
     const response = NextResponse.redirect(finalUrl);
 
     const supabase = createServerClient(url || 'http://localhost:54321', anon || 'anon', {

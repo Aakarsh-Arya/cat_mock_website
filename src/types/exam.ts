@@ -559,7 +559,7 @@ export const CAT_CONSTANTS = {
 export function getSectionDurationSecondsMap(
     sections?: readonly SectionConfig[] | null
 ): Record<SectionName, number> {
-    const defaults = {
+    const defaults: Record<SectionName, number> = {
         VARC: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
         DILR: CAT_CONSTANTS.SECTION_DURATION_SECONDS,
         QA: CAT_CONSTANTS.SECTION_DURATION_SECONDS,

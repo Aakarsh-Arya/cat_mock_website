@@ -167,7 +167,6 @@ function parseQuestionBlock(block, currentSetId) {
     const lines = block.split('\n');
 
     let questionTextLines = [];
-    let _optionsLines = [];
     let solutionLines = [];
     let inQuestionText = false;
     let inOptions = false;
@@ -326,10 +325,6 @@ function parseMarkdownContent(content, _paperMeta) {
     content = cleanText(content);
 
     // Split by section headers
-    const _sectionPattern = /^#\s*\*{0,2}Section:\s*(\w+)\*{0,2}/gim;
-    const _setPattern = /^#{1,2}\s*\*{0,2}SET\*{0,2}/gim;
-    const _questionPattern = /^#{2,3}\s*\*{0,2}QUESTION\*{0,2}/gim;
-
     let currentSection = null;
     let currentSetId = null;
     let setDisplayOrder = 0;

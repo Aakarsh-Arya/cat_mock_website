@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { getLandingAssets, replaceLandingAsset, type LandingAsset } from '@/lib/landing-assets';
 import { sb } from '@/lib/supabase/client';
 
@@ -133,11 +134,12 @@ export default function LandingAssetsClient() {
             setAssets((prev) => ({ ...prev, [key]: updated }));
             setSelectedFiles((prev) => ({ ...prev, [key]: null }));
             setPreviewUrls((prev) => {
-                if (prev[key]) {
-                    URL.revokeObjectURL(prev[key]);
+                const next = { ...prev };
+                if (next[key]) {
+                    URL.revokeObjectURL(next[key]);
                 }
-                const { [key]: _, ...rest } = prev;
-                return rest;
+                delete next[key];
+                return next;
             });
 
             const supabase = sb();
@@ -147,7 +149,12 @@ export default function LandingAssetsClient() {
                 const entityId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
                     ? crypto.randomUUID()
                     : adminId;
-                const { error: auditError } = await supabase.from('admin_audit_log').insert({
+                const auditClient = supabase as unknown as {
+                    from: (table: string) => {
+                        insert: (values: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>;
+                    };
+                };
+                const { error: auditError } = await auditClient.from('admin_audit_log').insert({
                     admin_id: adminId,
                     action: 'update',
                     entity_type: 'landing_asset',
@@ -216,11 +223,16 @@ export default function LandingAssetsClient() {
 
                                 <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-2">
                                     {preview ? (
-                                        <img
-                                            src={preview}
-                                            alt={current?.alt_text || asset.label}
-                                            className="h-44 w-full rounded-md object-cover"
-                                        />
+                                        <div className="relative h-44 w-full">
+                                            <Image
+                                                src={preview}
+                                                alt={current?.alt_text || asset.label}
+                                                fill
+                                                unoptimized
+                                                sizes="(min-width: 1280px) 33vw, (min-width: 768px) 50vw, 100vw"
+                                                className="rounded-md object-cover"
+                                            />
+                                        </div>
                                     ) : (
                                         <div className="flex h-44 items-center justify-center text-xs text-gray-400">
                                             No image uploaded yet

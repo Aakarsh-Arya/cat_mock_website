@@ -359,7 +359,8 @@ export function ExamEditorClient({
                 if (!result.success || !result.data) {
                     console.error('Failed to create question:', result.error);
                     setQuestionState((prev) => {
-                        const { [tempId]: _removed, ...remaining } = prev.questionsById;
+                        const remaining = { ...prev.questionsById };
+                        delete remaining[tempId];
                         const nextOrder = { ...prev.questionOrderBySection };
                         Object.keys(nextOrder).forEach((sectionKey) => {
                             const section = sectionKey as SectionName;
@@ -374,7 +375,8 @@ export function ExamEditorClient({
                 // Add to local state
                 setQuestionState((prev) => {
                     const created = result.data!;
-                    const { [tempId]: _removed, ...remaining } = prev.questionsById;
+                    const remaining = { ...prev.questionsById };
+                    delete remaining[tempId];
                     const nextById = { ...remaining, [created.id]: created };
                     const nextOrder = { ...prev.questionOrderBySection };
                     nextOrder[created.section] = sortQuestionIdsForSection(nextById, created.section);
@@ -448,7 +450,8 @@ export function ExamEditorClient({
                 if (!result.success || !result.data) {
                     console.error('Failed to create context:', result.error);
                     setContextsById((prev) => {
-                        const { [tempId]: _removed, ...remaining } = prev;
+                        const remaining = { ...prev };
+                        delete remaining[tempId];
                         return remaining;
                     });
                     showNotification('error', result.error || 'Failed to create context', () => handleSaveContext(contextData));
@@ -456,7 +459,8 @@ export function ExamEditorClient({
                 }
 
                 setContextsById((prev) => {
-                    const { [tempId]: _removed, ...remaining } = prev;
+                    const remaining = { ...prev };
+                    delete remaining[tempId];
                     return { ...remaining, [result.data!.id]: result.data! };
                 });
                 showNotification('success', 'Context created successfully!');
@@ -528,7 +532,8 @@ export function ExamEditorClient({
                 return;
             }
             setContextsById((prev) => {
-                const { [contextId]: _removed, ...remaining } = prev;
+                const remaining = { ...prev };
+                delete remaining[contextId];
                 return remaining;
             });
             showNotification('success', 'Context deleted successfully!');

@@ -20,7 +20,7 @@ import {
     type FetchPaperResponse,
     type SubmitExamResponse,
 } from './validation';
-import type { Paper, Question, Attempt, SectionName, TimeRemaining, QuestionContext } from '@/types/exam';
+import type { Question, Attempt, SectionName, TimeRemaining, QuestionContext } from '@/types/exam';
 import { getSectionDurationSecondsMap, getPaperTotalDurationSeconds } from '@/types/exam';
 
 export interface ActionResult<T> {
@@ -37,7 +37,7 @@ function isMissingValidateFn(error?: { code?: string; message?: string } | null)
 }
 
 async function validateSessionTokenRpc(
-    supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<ValidateSessionResult> },
+    supabase: { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<ValidateSessionResult> },
     attemptId: string,
     sessionToken: string,
     userId: string
@@ -267,7 +267,22 @@ export async function fetchPaperForExam(
             }
         }
 
-        return { success: true, data: { paper: paper as Paper, questions, attempt } };
+        const normalizedPaper = {
+            ...paper,
+            sections: Array.isArray(paper.sections) ? [...paper.sections] : [],
+        };
+        const normalizedQuestions = questions.map((q) => ({
+            ...q,
+            options: Array.isArray(q.options) ? [...q.options] : q.options,
+        }));
+        return {
+            success: true,
+            data: {
+                paper: normalizedPaper as FetchPaperResponse['paper'],
+                questions: normalizedQuestions as FetchPaperResponse['questions'],
+                attempt,
+            },
+        };
     } catch (error) {
         logger.error('fetchPaperForExam error', error, { paperId });
         return { success: false, error: 'An unexpected error occurred' };
@@ -567,7 +582,9 @@ export async function submitExam(
                 .select('id, user_id, status, paper_id, started_at')
                 .eq('id', normalizedAttemptId)
                 .maybeSingle();
-            attempt = retry.data ?? attempt;
+            attempt = retry.data
+                ? { ...retry.data, paused_at: null, total_paused_seconds: 0 }
+                : attempt;
             attemptError = retry.error ?? null;
         }
 

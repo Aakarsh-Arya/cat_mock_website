@@ -153,7 +153,7 @@ export function QuestionSetEditor({
                 sequence_order: q.sequence_order ?? idx + 1,
                 question_text: q.question_text,
                 question_type: q.question_type,
-                options: q.options ?? ['', '', '', ''],
+                options: Array.isArray(q.options) ? [...q.options] : ['', '', '', ''],
                 correct_answer: (q as QuestionInSetWithAnswer).correct_answer ?? 'A',
                 positive_marks: q.positive_marks,
                 negative_marks: q.negative_marks,

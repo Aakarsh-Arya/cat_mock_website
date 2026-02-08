@@ -1,7 +1,12 @@
 // Supabase browser client helper using @supabase/ssr
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { GenericSchema } from '@supabase/supabase-js/dist/module/lib/types';
 import { createBrowserClient } from '@supabase/ssr';
 
-let cachedClient: ReturnType<typeof createBrowserClient> | null = null;
+export type AppDatabase = { public: GenericSchema };
+export type BrowserSupabaseClient = SupabaseClient<AppDatabase, 'public', 'public', GenericSchema, { PostgrestVersion: '12' }>;
+
+let cachedClient: BrowserSupabaseClient | null = null;
 let warnedMissingEnv = false;
 
 function safeFetch(input: RequestInfo | URL, init?: RequestInit) {
@@ -17,7 +22,7 @@ function safeFetch(input: RequestInfo | URL, init?: RequestInit) {
     });
 }
 
-export function sb() {
+export function sb(): BrowserSupabaseClient {
     if (cachedClient) {
         return cachedClient;
     }
@@ -42,7 +47,7 @@ export function sb() {
             persistSession: configured,
             detectSessionInUrl: configured,
         },
-    });
+    }) as unknown as BrowserSupabaseClient;
 
     return cachedClient;
 }

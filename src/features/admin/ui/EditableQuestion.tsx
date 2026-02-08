@@ -234,7 +234,9 @@ export function EditableQuestion({
     const [questionFormat, setQuestionFormat] = useState<QuestionType>(
         (question?.question_format ?? question?.question_type ?? 'MCQ')
     );
-    const [options, setOptions] = useState<string[]>(question?.options ?? ['', '', '', '']);
+    const [options, setOptions] = useState<string[]>(() =>
+        Array.isArray(question?.options) ? [...question.options] : ['', '', '', '']
+    );
     const [correctAnswer, setCorrectAnswer] = useState(question?.correct_answer ?? 'A');
     const [positiveMarks, setPositiveMarks] = useState(question?.positive_marks ?? 3);
     const [negativeMarks, setNegativeMarks] = useState(question?.negative_marks ?? 1);
@@ -258,7 +260,7 @@ export function EditableQuestion({
     useEffect(() => {
         setQuestionText(question?.question_text ?? '');
         setQuestionFormat((question?.question_format ?? question?.question_type ?? 'MCQ'));
-        setOptions(question?.options ?? ['', '', '', '']);
+        setOptions(Array.isArray(question?.options) ? [...question.options] : ['', '', '', '']);
         setCorrectAnswer(question?.correct_answer ?? 'A');
         setPositiveMarks(question?.positive_marks ?? 3);
         setNegativeMarks(question?.negative_marks ?? 1);

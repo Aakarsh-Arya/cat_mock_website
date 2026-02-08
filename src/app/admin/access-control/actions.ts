@@ -82,11 +82,12 @@ async function verifyAdmin(): Promise<{ userId: string }> {
     return { userId: user.id };
 }
 
-export async function updateSignupMode(formData: FormData): Promise<{ success: boolean; error?: string }> {
+export async function updateSignupMode(formData: FormData): Promise<void> {
     try {
         const mode = String(formData.get('signup_mode') || '').toUpperCase();
         if (mode !== 'OPEN' && mode !== 'GATED') {
-            return { success: false, error: 'Invalid signup mode' };
+            console.warn('Invalid signup mode', mode);
+            return;
         }
 
         const { userId } = await verifyAdmin();
@@ -104,15 +105,14 @@ export async function updateSignupMode(formData: FormData): Promise<{ success: b
             );
 
         if (error) {
-            return { success: false, error: error.message || 'Failed to update signup mode' };
+            console.error('Failed to update signup mode', error.message);
+            return;
         }
 
         revalidatePath('/admin/access-control');
         revalidatePath('/admin');
-        return { success: true };
     } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        return { success: false, error: message };
+        console.error('Failed to update signup mode', err);
     }
 }
 
@@ -120,7 +120,7 @@ async function updateAccessRequest(
     requestId: string,
     userId: string | null,
     status: 'approved' | 'rejected'
-): Promise<{ success: boolean; error?: string }> {
+): Promise<void> {
     try {
         const { userId: adminId } = await verifyAdmin();
         const adminClient = getAdminClient();
@@ -135,7 +135,8 @@ async function updateAccessRequest(
             .eq('id', requestId);
 
         if (requestError) {
-            return { success: false, error: requestError.message || 'Failed to update request' };
+            console.error('Failed to update access request', requestError.message);
+            return;
         }
 
         if (userId) {
@@ -153,29 +154,34 @@ async function updateAccessRequest(
                 );
 
             if (accessError) {
-                return { success: false, error: accessError.message || 'Failed to update user access' };
+                console.error('Failed to update user access', accessError.message);
+                return;
             }
         }
 
         revalidatePath('/admin/access-control');
         revalidatePath('/admin');
-        return { success: true };
     } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        return { success: false, error: message };
+        console.error('Failed to update access request', err);
     }
 }
 
-export async function approveAccessRequest(formData: FormData): Promise<{ success: boolean; error?: string }> {
+export async function approveAccessRequest(formData: FormData): Promise<void> {
     const requestId = String(formData.get('request_id') || '');
     const userId = formData.get('user_id') ? String(formData.get('user_id')) : null;
-    if (!requestId) return { success: false, error: 'Missing request id' };
-    return updateAccessRequest(requestId, userId, 'approved');
+    if (!requestId) {
+        console.warn('Missing request id for approval');
+        return;
+    }
+    await updateAccessRequest(requestId, userId, 'approved');
 }
 
-export async function rejectAccessRequest(formData: FormData): Promise<{ success: boolean; error?: string }> {
+export async function rejectAccessRequest(formData: FormData): Promise<void> {
     const requestId = String(formData.get('request_id') || '');
     const userId = formData.get('user_id') ? String(formData.get('user_id')) : null;
-    if (!requestId) return { success: false, error: 'Missing request id' };
-    return updateAccessRequest(requestId, userId, 'rejected');
+    if (!requestId) {
+        console.warn('Missing request id for rejection');
+        return;
+    }
+    await updateAccessRequest(requestId, userId, 'rejected');
 }

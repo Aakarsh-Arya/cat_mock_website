@@ -34,6 +34,7 @@ interface ExamLayoutProps {
     onSaveResponsesBatch?: (items: BatchSaveItem[]) => BatchSaveResult | Promise<BatchSaveResult>;
     onSubmitExam?: () => void | Promise<void>;
     onSectionExpire?: (sectionName: SectionName) => void | Promise<void>;
+    onExamComplete?: () => void | Promise<void>;
     onPauseExam?: () => void | Promise<void>;
     layoutMode?: 'current' | 'three-column';
     submissionProgress?: SubmissionProgress | null;

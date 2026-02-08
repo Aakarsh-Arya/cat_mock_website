@@ -75,7 +75,9 @@ async function postJson<T>(url: string, body: unknown): Promise<ActionResult<T>>
         }
 
         // For submit response, extract everything except 'success' and 'error' as data
-        const { success: _success, error: _error, ...data } = payload;
+        const data = { ...payload } as Record<string, unknown>;
+        delete data.success;
+        delete data.error;
         return { success: true, data: data as T };
     } catch {
         return { success: false, error: 'Network error' };

@@ -1,6 +1,8 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { BrowserSupabaseClient } from '@/lib/supabase/client';
 import { sb } from '@/lib/supabase/client';
 import { uploadToCloudinary } from '@/lib/cloudinary';
+
+type AppSupabaseClient = BrowserSupabaseClient;
 
 export type LandingAsset = {
     key: string;
@@ -11,7 +13,7 @@ export type LandingAsset = {
     updated_by: string | null;
 };
 
-export async function getLandingAssets(client?: SupabaseClient): Promise<Record<string, LandingAsset>> {
+export async function getLandingAssets(client?: AppSupabaseClient): Promise<Record<string, LandingAsset>> {
     const supabase = client ?? sb();
     const { data, error } = await supabase
         .from('landing_assets')
@@ -22,8 +24,9 @@ export async function getLandingAssets(client?: SupabaseClient): Promise<Record<
     }
 
     const map: Record<string, LandingAsset> = {};
-    (data ?? []).forEach((row) => {
-        map[row.key] = row as LandingAsset;
+    const rows = (data ?? []) as LandingAsset[];
+    rows.forEach((row) => {
+        map[row.key] = row;
     });
     return map;
 }
@@ -32,7 +35,7 @@ export async function replaceLandingAsset(
     key: string,
     file: File,
     altText: string,
-    client?: SupabaseClient
+    client?: AppSupabaseClient
 ): Promise<LandingAsset> {
     const supabase = client ?? sb();
 
