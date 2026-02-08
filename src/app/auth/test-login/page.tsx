@@ -32,7 +32,8 @@ export default function TestLoginPage() {
     const onSignIn = useCallback(async () => {
         setLoading(true);
         try {
-            const origin = typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL || '';
+            const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL || '';
+            const origin = configuredSiteUrl || (typeof window !== 'undefined' ? window.location.origin : '');
             const callbackUrl = `${origin}/auth/callback?redirect_to=/auth/test-login`;
             await sb().auth.signInWithOAuth({ provider: 'google', options: { redirectTo: callbackUrl } });
         } finally {

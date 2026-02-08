@@ -471,9 +471,10 @@ export default function LandingPageClient() {
             if (typeof window !== 'undefined') {
                 window.localStorage.setItem('first_login_banner_eligible', 'true');
             }
-            const origin = typeof window !== 'undefined'
+            const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL || '';
+            const origin = configuredSiteUrl || (typeof window !== 'undefined'
                 ? window.location.origin
-                : process.env.NEXT_PUBLIC_SITE_URL || '';
+                : '');
             const callbackUrl = `${origin}/auth/callback?redirect_to=${encodeURIComponent('/dashboard')}`;
             await sb().auth.signInWithOAuth({
                 provider: 'google',

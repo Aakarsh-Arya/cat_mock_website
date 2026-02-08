@@ -27,14 +27,11 @@ export async function GET(req: NextRequest) {
     const redirectTo = req.nextUrl.searchParams.get('redirect_to') || '/dashboard';
     const requestOrigin = req.nextUrl.origin;
     const configuredSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-    // Avoid cross-domain redirect (and cookie loss) if env is stale for this host.
+    // Prefer configured site URL to enforce primary domain.
     let baseUrl = requestOrigin;
     if (configuredSiteUrl) {
         try {
-            const configuredOrigin = new URL(configuredSiteUrl).origin;
-            if (configuredOrigin === requestOrigin) {
-                baseUrl = configuredSiteUrl;
-            }
+            baseUrl = new URL(configuredSiteUrl).origin;
         } catch {
             // Ignore invalid NEXT_PUBLIC_SITE_URL values.
         }
