@@ -44,14 +44,13 @@ export async function GET(req: NextRequest) {
 
     const supabase = createServerClient(url || 'http://localhost:54321', anon || 'anon', {
         cookies: {
-            get(name: string) {
-                return req.cookies.get(name)?.value;
+            getAll() {
+                return req.cookies.getAll();
             },
-            set(name: string, value: string, options: CookieOptions) {
-                response.cookies.set({ name, value, ...options });
-            },
-            remove(name: string, options: CookieOptions) {
-                response.cookies.set({ name, value: '', ...options });
+            setAll(cookiesToSet: Array<{ name: string; value: string; options: CookieOptions }>) {
+                cookiesToSet.forEach(({ name, value, options }) => {
+                    response.cookies.set({ name, value, ...options });
+                });
             },
         },
     });
