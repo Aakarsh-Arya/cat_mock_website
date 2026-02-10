@@ -99,3 +99,45 @@ CREATE POLICY "Users can update their own responses" ON public.responses
 --   INSERT/UPDATE responses should fail.
 -- As active user:
 --   INSERT INTO attempts (...) should succeed (within attempt limit).
+
+Now I see the issue. The code is using window.location.origin which is correct on the client side. The problem is that Supabase needs the redirect URL whitelisted, and after Google auth completes, Supabase redirects back - but if the URL isn't in the whitelist OR the cookies aren't being set properly, it fails.
+
+Let me check the Supabase client configuration:
+
+Read client.ts, lines 1 to 50
+
+The code looks correct. The issue is external configuration in Supabase and Google Cloud Console.
+
+Here's the exact problem and fix:
+
+When a user signs in via nexams.online, Google OAuth redirects to Supabase, then Supabase redirects back to nexams.online/auth/callback. But if nexams.online isn't properly configured in:
+
+Supabase Auth URL Configuration
+Google Cloud Console OAuth Credentials
+...then the auth fails silently and the user bounces back to landing.
+
+Fix Step 1: Supabase Dashboard
+Go to Supabase → Authentication → URL Configuration:
+
+Site URL: https://nexams.online
+Redirect URLs (add ALL of these):
+Fix Step 2: Google Cloud Console
+Go to Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs (the one with ID 649504644405-120c3fib9ddt41us9vs0a6fv2h84bi7e):
+
+In Authorized redirect URIs, add:
+
+This is Supabase's callback URL that Google redirects to. Without this, Google blocks the auth.
+
+Fix Step 3: Netlify Environment Variable
+In Netlify → Site settings → Build & deploy → Environment variables:
+
+Then trigger a redeploy.
+
+Fix Step 4: Test
+Open incognito browser
+Go to https://nexams.online
+Click "Sign in with Google"
+You should land on /dashboard
+The #1 most likely cause is the Google Cloud Console redirect URI is missing. That 649504644405-... client ID must have Supabase's callback URL whitelisted.
+
+Cla

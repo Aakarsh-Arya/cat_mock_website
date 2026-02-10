@@ -74,9 +74,6 @@ interface ExamHeaderProps {
     onSectionSelect: (section: SectionName) => void;
     onToggleCalculator: () => void;
     isCalculatorVisible: boolean;
-    hasPendingSync: boolean;
-    isSyncing: boolean;
-    onSyncNow?: () => void;
     onPauseExam?: () => void | Promise<void>;
     allowPause: boolean;
     timeLeftDisplay: string;
@@ -106,9 +103,6 @@ function ExamHeader({
     onSectionSelect,
     onToggleCalculator,
     isCalculatorVisible,
-    hasPendingSync,
-    isSyncing,
-    onSyncNow,
     onPauseExam,
     allowPause,
     timeLeftDisplay,
@@ -130,7 +124,7 @@ function ExamHeader({
     return (
         <header className="h-16 flex items-center justify-between px-5 bg-gradient-to-r from-exam-header-from to-exam-header-to border-b-2 border-exam-header-border">
             {/* Left: Section Tabs (CAT sections are LOCKED; keep tabs for UI, disable navigation) */}
-            <div className="flex items-center gap-1" role="tablist" aria-label="Exam sections">
+            <div className="flex items-center gap-1 pl-36" role="tablist" aria-label="Exam sections">
                 {SECTIONS.map((section, index) => {
                     const isActive = index === currentSectionIndex;
                     const displayName = section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section;
@@ -185,17 +179,6 @@ function ExamHeader({
                 <div className="text-base font-bold text-timer font-mono">Time Left : {timeLeftDisplay}</div>
 
                 <div className="flex items-center gap-2">
-                    {onSyncNow && hasPendingSync && (
-                        <button
-                            type="button"
-                            onClick={onSyncNow}
-                            disabled={isSyncing}
-                            className="px-2.5 py-1 rounded bg-white/10 text-white text-xs font-semibold hover:bg-white/20 disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                            {isSyncing ? 'Syncing...' : 'Sync'}
-                        </button>
-                    )}
-                    {!hasPendingSync && isSyncing && <span className="text-xs text-white/80">Syncing...</span>}
                     {allowPause && onPauseExam && (
                         <button
                             type="button"
@@ -851,9 +834,6 @@ export function ExamLayout({
                 onSectionSelect={handleSectionSelect}
                 onToggleCalculator={() => setIsCalculatorVisible((prev) => !prev)}
                 isCalculatorVisible={isCalculatorVisible}
-                hasPendingSync={hasPendingSync}
-                isSyncing={isSyncing}
-                onSyncNow={onSaveResponse || onSaveResponsesBatch ? () => void syncPendingResponses() : undefined}
                 onPauseExam={onPauseExam}
                 allowPause={paper.allow_pause !== false}
             />

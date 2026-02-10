@@ -236,7 +236,6 @@ export default async function MockDetailPage({
         );
     }
 
-    const sections = paper.sections || [];
     const queryError = searchParams?.error ?? null;
 
     return (
@@ -299,31 +298,6 @@ export default async function MockDetailPage({
                     <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Year</p>
                     <p style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 'bold' }}>{paper.year}</p>
                 </div>
-            </div>
-
-            {/* Section Breakdown */}
-            <h2 style={{ marginBottom: 16 }}>Section Details</h2>
-            <div style={{ marginBottom: 32 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                        <tr style={{ background: '#f0f0f0' }}>
-                            <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #ddd' }}>Section</th>
-                            <th style={{ padding: 12, textAlign: 'center', borderBottom: '2px solid #ddd' }}>Questions</th>
-                            <th style={{ padding: 12, textAlign: 'center', borderBottom: '2px solid #ddd' }}>Time (min)</th>
-                            <th style={{ padding: 12, textAlign: 'center', borderBottom: '2px solid #ddd' }}>Marks</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {sections.map((section: SectionConfig, idx: number) => (
-                            <tr key={`${section.name}-${idx}`} style={{ borderBottom: '1px solid #eee' }}>
-                                <td style={{ padding: 12 }}>{section.name}</td>
-                                <td style={{ padding: 12, textAlign: 'center' }}>{section.questions}</td>
-                                <td style={{ padding: 12, textAlign: 'center' }}>{section.time}</td>
-                                <td style={{ padding: 12, textAlign: 'center' }}>{section.marks}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
             </div>
 
             {/* Marking Scheme */}

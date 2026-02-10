@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 import AuthenticatedOverlays from "@/components/AuthenticatedOverlays";
+import TopProgressBar from "@/components/TopProgressBar";
 
 export const metadata: Metadata = {
-  title: "CAT Mock Test Platform",
-  description: "Practice CAT exams with adaptive testing and instant results",
+  title: "NEXAMS",
+  description: "Practice CAT exams with adaptive testing and instant results on NEXAMS",
 };
 
 export default function RootLayout({
@@ -13,9 +15,12 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-    return (
+  return (
     <html lang="en">
       <body className="font-sans antialiased">
+        <Suspense fallback={null}>
+          <TopProgressBar />
+        </Suspense>
         {children}
         <AuthenticatedOverlays />
       </body>

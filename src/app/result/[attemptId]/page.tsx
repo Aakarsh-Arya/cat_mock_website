@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @fileoverview Exam Result Page
  * @description Displays detailed exam results with sectional analysis
  * @blueprint Milestone 5 - Milestone_Change_Log.md - Change 002
@@ -12,10 +12,14 @@ import { ResultHeader } from '@/features/exam-engine/ui/ResultHeader';
 import { SectionalPerformance } from '@/features/exam-engine/ui/SectionalPerformance';
 import { QuestionAnalysis } from '@/features/exam-engine/ui/QuestionAnalysis';
 import { BackToDashboard } from '@/components/BackToDashboard';
+import { AIInsightsAdCard } from '@/components/AIInsightsAdCard';
 import { ResultReviewClient } from './ResultReviewClient';
 import { ResultTabsClient } from './ResultTabsClient';
+import { AIAnalysisButton } from './AIAnalysisButton';
+import { AIInsightsJumpButton } from './AIInsightsJumpButton';
 import { buildLegacyQuestionSetsWithAnswers } from '@/utils/question-sets';
 import { calculateScore } from '@/features/exam-engine/lib/scoring';
+import { loadNexaiDemoMarkdown } from '@/lib/loadNexaiDemoMarkdown';
 import type {
     Question,
     QuestionSetComplete,
@@ -26,6 +30,7 @@ import type {
     QuestionWithAnswer,
     SectionName,
     QuestionType,
+    AIAnalysisStatus,
 } from '@/types/exam';
 import type { ResponseForScoring } from '@/features/exam-engine/lib/scoring';
 
@@ -399,6 +404,9 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
 
     const sectionScores = (derivedScore?.section_scores || attempt.section_scores || {}) as Record<string, SectionScore>;
+    const nexaiDemoMarkdown = await loadNexaiDemoMarkdown();
+    const hasNexAIInsight = typeof attempt.ai_analysis_result_text === 'string' && attempt.ai_analysis_result_text.trim().length > 0;
+    const nexaiMarkdown = hasNexAIInsight ? attempt.ai_analysis_result_text?.trim() : nexaiDemoMarkdown;
 
     return (
         <main className="min-h-screen bg-gray-50">
@@ -408,13 +416,16 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                 <div className="max-w-5xl mx-auto">
                     <h1 className="text-3xl font-bold mb-2">{paperTitle}</h1>
                     <p className="text-blue-100">
-                        Submitted: {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : '—'}
+                        Submitted: {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : 'â€”'}
                     </p>
                     {attemptSequenceLabel && (
                         <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white">
                             {attemptSequenceLabel}
                         </div>
                     )}
+                    <div className="mt-4">
+                        <AIInsightsJumpButton />
+                    </div>
                 </div>
             </div>
 
@@ -480,7 +491,23 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                                     showHeader={false}
                                 />
                             )}
+
                         </>
+                    )}
+                    nexai={(
+                        <div className="space-y-5">
+                            <AIInsightsAdCard
+                                id="ai-insights"
+                                heading={hasNexAIInsight ? 'NexAI Insights for Your Attempt' : 'NexAI Insight Demo'}
+                                markdown={nexaiMarkdown}
+                                demo={!hasNexAIInsight}
+                            />
+                            <AIAnalysisButton
+                                attemptId={attempt.id}
+                                initialStatus={(attempt.ai_analysis_status as AIAnalysisStatus) ?? 'none'}
+                                initialPrompt={attempt.ai_analysis_user_prompt ?? ''}
+                            />
+                        </div>
                     )}
                     review={questionSets.length > 0 ? (
                         <ResultReviewClient
@@ -521,3 +548,4 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
         </main>
     );
 }
+

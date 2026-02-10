@@ -357,6 +357,9 @@ export interface ResponseInput {
 
 export type AttemptStatus = 'in_progress' | 'paused' | 'submitted' | 'completed' | 'abandoned' | 'expired';
 
+/** AI analysis lifecycle states (matches ai_analysis_status_type enum in DB) */
+export type AIAnalysisStatus = 'none' | 'requested' | 'exported' | 'processed' | 'failed';
+
 export interface SectionScore {
     readonly score: number;
     readonly correct: number;
@@ -398,6 +401,18 @@ export interface Attempt extends BaseEntity, TimeTracked {
     // Ranking
     readonly percentile?: number;
     readonly rank?: number;
+
+    // AI Analysis lifecycle (Migration 031)
+    readonly ai_analysis_status?: AIAnalysisStatus;
+    readonly ai_analysis_requested_at?: string;
+    readonly ai_analysis_exported_at?: string;
+    readonly ai_analysis_processed_at?: string;
+    readonly ai_analysis_error?: string | null;
+    readonly ai_analysis_user_prompt?: string | null;
+    readonly ai_analysis_result_text?: string | null;
+
+    // Paper version snapshot (set at attempt creation, Migration 031)
+    readonly paper_ingest_run_id?: string | null;
 }
 
 export interface AttemptInput {

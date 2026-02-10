@@ -16,6 +16,11 @@ type Paper = {
     available_until?: string | null;
 };
 
+type PaperAttemptState = {
+    kind: 'continue' | 'analysis';
+    attemptId: string;
+};
+
 export default async function MocksPage() {
     const supabase = await sbSSR();
     const {
@@ -30,13 +35,12 @@ export default async function MocksPage() {
         .order('year', { ascending: false })
         .order('created_at', { ascending: false });
 
-    const inProgressAttemptsByPaper = new Map<string, { id: string }>();
+    const attemptStateByPaper = new Map<string, PaperAttemptState>();
     if (user) {
-        const { data: inProgressAttempts } = await supabase
+        const { data: attempts } = await supabase
             .from('attempts')
             .select('id, paper_id, created_at, status, time_remaining')
             .eq('user_id', user.id)
-            .in('status', ['in_progress', 'paused'])
             .order('created_at', { ascending: false });
 
         const hasRemainingTime = (timeRemaining: unknown) => {
@@ -52,10 +56,31 @@ export default async function MocksPage() {
             });
         };
 
-        (inProgressAttempts ?? []).forEach((attempt) => {
-            if (!hasRemainingTime(attempt.time_remaining)) return;
-            if (!inProgressAttemptsByPaper.has(attempt.paper_id)) {
-                inProgressAttemptsByPaper.set(attempt.paper_id, { id: attempt.id });
+        (attempts ?? []).forEach((attempt) => {
+            const existing = attemptStateByPaper.get(attempt.paper_id);
+            if (existing?.kind === 'continue') {
+                return;
+            }
+
+            if (
+                (attempt.status === 'in_progress' || attempt.status === 'paused')
+                && hasRemainingTime(attempt.time_remaining)
+            ) {
+                attemptStateByPaper.set(attempt.paper_id, {
+                    kind: 'continue',
+                    attemptId: attempt.id,
+                });
+                return;
+            }
+
+            if (
+                !existing
+                && (attempt.status === 'completed' || attempt.status === 'submitted')
+            ) {
+                attemptStateByPaper.set(attempt.paper_id, {
+                    kind: 'analysis',
+                    attemptId: attempt.id,
+                });
             }
         });
     }
@@ -64,7 +89,7 @@ export default async function MocksPage() {
     const papers: Paper[] = (data ?? []).filter((p: Paper) => {
         const fromOk = !p.available_from || Date.parse(p.available_from) <= now;
         const untilOk = !p.available_until || Date.parse(p.available_until) >= now;
-        return (fromOk && untilOk) || inProgressAttemptsByPaper.has(p.id);
+        return (fromOk && untilOk) || attemptStateByPaper.has(p.id);
     });
 
     // Group papers by year
@@ -87,7 +112,7 @@ export default async function MocksPage() {
 
     return (
         <main style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-            <h1 style={{ marginBottom: 8 }}>CAT Mock Tests</h1>
+            <h1 style={{ marginBottom: 8 }}>NEXAMS Mock Tests</h1>
             <p style={{ color: '#666', marginBottom: 32 }}>
                 Practice with full-length CAT mock tests designed to simulate the actual exam experience.
             </p>
@@ -109,9 +134,17 @@ export default async function MocksPage() {
                             </h2>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
                                 {yearPapers.map((p) => {
-                                    const inProgressAttempt = inProgressAttemptsByPaper.get(p.id);
-                                    const href = inProgressAttempt ? `/exam/${inProgressAttempt.id}` : `/mock/${p.slug || p.id}`;
-                                    const ctaLabel = inProgressAttempt ? 'Continue Mock' : 'Start Mock';
+                                    const attemptState = attemptStateByPaper.get(p.id);
+                                    const href = attemptState?.kind === 'continue'
+                                        ? `/exam/${attemptState.attemptId}`
+                                        : attemptState?.kind === 'analysis'
+                                            ? `/result/${attemptState.attemptId}`
+                                            : `/mock/${p.slug || p.id}`;
+                                    const ctaLabel = attemptState?.kind === 'continue'
+                                        ? 'Continue Mock'
+                                        : attemptState?.kind === 'analysis'
+                                            ? 'View Analysis'
+                                            : 'Start Mock';
                                     return (
                                         <div key={p.id} style={{
                                             border: '1px solid #ddd',

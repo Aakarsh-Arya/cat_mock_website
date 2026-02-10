@@ -7,29 +7,43 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-type TabId = 'review' | 'analytics';
+type TabId = 'review' | 'analytics' | 'nexai';
 
 interface ResultTabsClientProps {
     analytics: ReactNode;
     review?: ReactNode;
+    nexai?: ReactNode;
 }
 
 const TAB_CONFIG: Record<TabId, { label: string; hash: string }> = {
     review: { label: 'Mirror View / Solutions', hash: '#exam-review' },
     analytics: { label: 'Analytics View', hash: '#analytics-view' },
+    nexai: { label: 'NexAI Insights', hash: '#nexai-insights-view' },
 };
 
-export function ResultTabsClient({ analytics, review }: ResultTabsClientProps) {
+export function ResultTabsClient({ analytics, review, nexai }: ResultTabsClientProps) {
     const hasReview = Boolean(review);
+    const hasNexAI = Boolean(nexai);
     const initialTab: TabId = hasReview ? 'review' : 'analytics';
     const [activeTab, setActiveTab] = useState<TabId>(initialTab);
-    const scrollPositions = useRef<Record<TabId, number>>({ review: 0, analytics: 0 });
+    const [isReady, setIsReady] = useState(false);
+    const scrollPositions = useRef<Record<TabId, number>>({ review: 0, analytics: 0, nexai: 0 });
 
-    const orderedTabs = useMemo<TabId[]>(() => (hasReview ? ['review', 'analytics'] : ['analytics']), [hasReview]);
+    const orderedTabs = useMemo<TabId[]>(() => {
+        const tabs: TabId[] = [];
+        if (hasReview) tabs.push('review');
+        tabs.push('analytics');
+        if (hasNexAI) tabs.push('nexai');
+        return tabs;
+    }, [hasNexAI, hasReview]);
 
     const syncFromHash = useCallback(() => {
         if (typeof window === 'undefined') return;
         const hash = window.location.hash;
+        if (hash === TAB_CONFIG.nexai.hash && hasNexAI) {
+            setActiveTab('nexai');
+            return;
+        }
         if (hash === TAB_CONFIG.analytics.hash) {
             setActiveTab('analytics');
             return;
@@ -37,16 +51,40 @@ export function ResultTabsClient({ analytics, review }: ResultTabsClientProps) {
         if (hash === TAB_CONFIG.review.hash && hasReview) {
             setActiveTab('review');
         }
-    }, [hasReview]);
-
-    useEffect(() => {
-        syncFromHash();
-        window.addEventListener('hashchange', syncFromHash);
-        return () => window.removeEventListener('hashchange', syncFromHash);
-    }, [syncFromHash]);
+    }, [hasNexAI, hasReview]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
+
+        const storageKey = `result-active-tab:${window.location.pathname}`;
+        const hash = window.location.hash;
+
+        if (hash === TAB_CONFIG.nexai.hash && hasNexAI) {
+            setActiveTab('nexai');
+        } else if (hash === TAB_CONFIG.analytics.hash) {
+            setActiveTab('analytics');
+        } else if (hash === TAB_CONFIG.review.hash && hasReview) {
+            setActiveTab('review');
+        } else {
+            const stored = window.sessionStorage.getItem(storageKey) as TabId | null;
+            if (stored && (stored !== 'review' || hasReview) && (stored !== 'nexai' || hasNexAI)) {
+                setActiveTab(stored);
+            } else {
+                setActiveTab(initialTab);
+            }
+        }
+
+        setIsReady(true);
+
+        window.addEventListener('hashchange', syncFromHash);
+        return () => window.removeEventListener('hashchange', syncFromHash);
+    }, [hasNexAI, hasReview, initialTab, syncFromHash]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (!isReady) return;
+        const storageKey = `result-active-tab:${window.location.pathname}`;
+        window.sessionStorage.setItem(storageKey, activeTab);
         const targetHash = TAB_CONFIG[activeTab].hash;
         if (window.location.hash !== targetHash) {
             window.history.replaceState(null, '', targetHash);
@@ -55,7 +93,7 @@ export function ResultTabsClient({ analytics, review }: ResultTabsClientProps) {
             const stored = scrollPositions.current[activeTab] ?? 0;
             window.scrollTo({ top: stored });
         });
-    }, [activeTab]);
+    }, [activeTab, isReady]);
 
     const handleTabChange = (tab: TabId) => {
         if (tab === activeTab) return;
@@ -91,11 +129,13 @@ export function ResultTabsClient({ analytics, review }: ResultTabsClientProps) {
                 aria-hidden={activeTab !== 'review'}
                 className={activeTab === 'review' ? 'block' : 'hidden'}
             >
-                {review ?? (
-                    <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-gray-500">
-                        Review mode is not available for this attempt.
-                    </div>
-                )}
+                {activeTab === 'review' ? (
+                    review ?? (
+                        <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-gray-500">
+                            Review mode is not available for this attempt.
+                        </div>
+                    )
+                ) : null}
             </section>
 
             <section
@@ -104,6 +144,18 @@ export function ResultTabsClient({ analytics, review }: ResultTabsClientProps) {
                 className={activeTab === 'analytics' ? 'block' : 'hidden'}
             >
                 {analytics}
+            </section>
+
+            <section
+                id="nexai-insights-view"
+                aria-hidden={activeTab !== 'nexai'}
+                className={activeTab === 'nexai' ? 'block' : 'hidden'}
+            >
+                {nexai ?? (
+                    <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-gray-500">
+                        NexAI insights are not available for this attempt yet.
+                    </div>
+                )}
             </section>
         </div>
     );

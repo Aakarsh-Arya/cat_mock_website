@@ -125,6 +125,16 @@ async function updateAccessRequest(
         const { userId: adminId } = await verifyAdmin();
         const adminClient = getAdminClient();
 
+        const { data: requestRow, error: requestFetchError } = await adminClient
+            .from('access_requests')
+            .select('user_id, email')
+            .eq('id', requestId)
+            .maybeSingle();
+
+        if (requestFetchError) {
+            console.error('Failed to load access request details', requestFetchError.message);
+        }
+
         const { error: requestError } = await adminClient
             .from('access_requests')
             .update({
@@ -139,13 +149,44 @@ async function updateAccessRequest(
             return;
         }
 
-        if (userId) {
+        let resolvedUserId = userId ?? requestRow?.user_id ?? null;
+        const requestEmail = requestRow?.email ?? null;
+
+        if (!resolvedUserId && requestEmail) {
+            // listUsers doesn't support email filter directly; iterate page 1
+            const { data: listData, error: userError } =
+                await adminClient.auth.admin.listUsers({ page: 1, perPage: 1000 });
+
+            if (userError) {
+                console.error('Failed to resolve user by email', userError.message);
+            } else {
+                const matched = listData?.users?.find(
+                    (u) => u.email?.toLowerCase() === requestEmail.toLowerCase()
+                );
+                if (matched?.id) {
+                    resolvedUserId = matched.id;
+                }
+            }
+        }
+
+        if (resolvedUserId && requestRow?.user_id !== resolvedUserId) {
+            const { error: attachError } = await adminClient
+                .from('access_requests')
+                .update({ user_id: resolvedUserId })
+                .eq('id', requestId);
+
+            if (attachError) {
+                console.error('Failed to attach user to access request', attachError.message);
+            }
+        }
+
+        if (resolvedUserId) {
             const nextStatus = status === 'approved' ? 'active' : 'rejected';
             const { error: accessError } = await adminClient
                 .from('user_access')
                 .upsert(
                     {
-                        user_id: userId,
+                        user_id: resolvedUserId,
                         status: nextStatus,
                         decided_by: adminId,
                         decided_at: new Date().toISOString(),
@@ -157,6 +198,8 @@ async function updateAccessRequest(
                 console.error('Failed to update user access', accessError.message);
                 return;
             }
+        } else {
+            console.warn('Access request has no linked user_id; user_access not updated.');
         }
 
         revalidatePath('/admin/access-control');

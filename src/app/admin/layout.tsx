@@ -79,7 +79,7 @@ export default async function AdminLayout({
                                 </svg>
                             </Link>
                             <Link href="/admin" className="font-bold text-xl">
-                                CAT Mocks Admin
+                                NEXAMS Admin
                             </Link>
                             <nav className="flex gap-6">
                                 <Link
@@ -117,6 +117,12 @@ export default async function AdminLayout({
                                     className="text-gray-200 hover:text-white transition-colors"
                                 >
                                     Access Control
+                                </Link>
+                                <Link
+                                    href="/admin/ai-analysis"
+                                    className="text-gray-200 hover:text-white transition-colors"
+                                >
+                                    NexAI Insights
                                 </Link>
                             </nav>
                         </div>

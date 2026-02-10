@@ -6,6 +6,7 @@ import { sb } from '@/lib/supabase/client';
 import { useLandingAssets } from '@/lib/useLandingAssets';
 import type { LandingAsset } from '@/lib/landing-assets';
 import { useFocusTrap } from '@/components/useFocusTrap';
+import { AIInsightsAdCard } from '@/components/AIInsightsAdCard';
 
 const headingFont = Space_Grotesk({
     subsets: ['latin'],
@@ -20,6 +21,7 @@ const bodyFont = Plus_Jakarta_Sans({
 });
 
 const NAV_LINKS = [
+    { id: 'ai-insights-marketing', label: 'NexAI Insights' },
     { id: 'mentor', label: 'Mentor' },
     { id: 'features', label: 'Features' },
     { id: 'roadmap', label: 'Roadmap' },
@@ -74,7 +76,7 @@ const LIVE_STRIP_ITEMS = [
     },
     {
         label: 'Coming in April',
-        copy: 'NextCAT mock series launch',
+        copy: 'NexCAT mock series launch',
     },
 ];
 
@@ -88,7 +90,7 @@ const FEATURE_CARDS = [
     },
     {
         id: 'nextcat',
-        title: 'NextCAT (launch April)',
+        title: 'NexCAT (launch April)',
         description: 'Curated mock series built for CAT 2026 targets.',
         bullets: ['difficulty calibration', 'trap patterns', 'mentor-led review notes'],
         tag: 'Coming soon',
@@ -118,22 +120,30 @@ const ROADMAP_ITEMS = [
     },
     {
         period: 'April',
-        copy: 'NextCAT series launch + AI Coach rollout for beta users',
+        copy: 'NexCAT series launch + AI Coach rollout for beta users',
     },
 ];
 
 const CAT_HUB_ITEMS = [
     {
-        title: 'Trying to solve everything',
-        body: 'Placeholder guidance text to be added here.',
+        title: '1. The "Syllabus Completion" Trap',
+        body: 'Dropdown Content: Treating CAT as a knowledge test is fatal. Theory is 20%; application is 80%. CAT does not test if you know a formula, but if you can spot a hidden Algebra concept inside a Geometry problem.\nAI Insight: Use Mirror View to see if you are over-investing time in "easy" theory questions while failing tricky applications.',
     },
     {
-        title: 'Not revisiting strategically',
-        body: 'Placeholder guidance text to be added here.',
+        title: '2. Emotional "Sunk Cost" in DILR',
+        body: 'Dropdown Content: The Ego Trap: Spending 8+ minutes on a set and refusing to leave because you have already "invested" time. Breakthroughs usually happen in the first 5 minutes; if not, walk away.\nPro Move: Detach emotionally. Skipping the wrong set is as valuable as solving the right one.',
     },
     {
-        title: 'Guessing in DILR',
-        body: 'Placeholder guidance text to be added here.',
+        title: '3. Rote-Rule Dependency in VARC',
+        body: 'Dropdown Content: Mechanical reading kills your rhythm. Relying solely on elimination techniques makes you slow. High percentilers build a reading ear through volume, allowing them to feel when an option is "off-tone".\nStrategy: Stop hunting for keywords; start following the author\'s argument.',
+    },
+    {
+        title: '4. Ignoring the "Fatigue Tax"',
+        body: 'Dropdown Content: Quant is the final section. Your brain\'s RAM is exhausted by then. Solving questions in chronological order (1, 2, 3...) is a recipe for failure.\nThe Fix: Use the Round Robin method. If the AI Coach detects you are missing easy Arithmetic late in the mock, your energy management is flawed.',
+    },
+    {
+        title: '5. The "Fixed Attempt" Fallacy',
+        body: 'Dropdown Content: Entering the hall with a target number (e.g., "I must do 15") leads to panic and blind guessing when a paper is tough. In difficult years, accuracy beats volume every time.\nThe Reality: 8-9 correct answers in a brutal section can still land a 99 percentile. Learn to read the paper\'s difficulty, not just chase a number.',
     },
 ];
 
@@ -259,7 +269,7 @@ function MobileDrawer({ open, onClose, onAuth }: DrawerProps) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                        className="min-h-[44px] rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
                     >
                         Close
                     </button>
@@ -282,7 +292,7 @@ function MobileDrawer({ open, onClose, onAuth }: DrawerProps) {
                         onClose();
                         onAuth();
                     }}
-                    className="mt-auto inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]"
+                    className="mt-auto inline-flex min-h-[44px] items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]"
                 >
                     Start a free mock
                 </button>
@@ -335,7 +345,7 @@ function AuthModal({ open, onClose, onSignIn, loading }: AuthModalProps) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
+                        className="min-h-[44px] rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
                     >
                         Close
                     </button>
@@ -344,7 +354,7 @@ function AuthModal({ open, onClose, onSignIn, loading }: AuthModalProps) {
                     type="button"
                     onClick={onSignIn}
                     disabled={loading}
-                    className="mt-6 inline-flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="mt-6 inline-flex min-h-[44px] w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                     {loading ? (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
@@ -378,7 +388,11 @@ function AuthModal({ open, onClose, onSignIn, loading }: AuthModalProps) {
     );
 }
 
-export default function LandingPageClient() {
+interface LandingPageClientProps {
+    nexaiDemoMarkdown: string;
+}
+
+export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClientProps) {
     const { assets, isLoading } = useLandingAssets();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -486,20 +500,20 @@ export default function LandingPageClient() {
     }, []);
 
     return (
-        <div className={`${bodyFont.className} min-h-screen bg-slate-50 text-slate-900`}>
+        <div className={`${bodyFont.className} min-h-screen overflow-x-hidden bg-slate-50 text-slate-900`}>
             <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-white to-emerald-50">
                 <div className="pointer-events-none absolute -top-32 -right-24 h-72 w-72 rounded-full bg-emerald-200/40 blur-3xl" />
                 <div className="pointer-events-none absolute -bottom-40 left-16 h-96 w-96 rounded-full bg-amber-200/40 blur-3xl" />
 
                 <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur">
-                    <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+                    <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6 sm:py-5">
                         <div className="flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">
                                 CAT
                             </div>
                             <div>
                                 <div className={`${headingFont.className} text-sm font-semibold text-slate-900`}>
-                                    CAT Mock Arena
+                                    NEXAMS
                                 </div>
                                 <div className="text-xs text-slate-500">Prep like it's exam day</div>
                             </div>
@@ -521,7 +535,7 @@ export default function LandingPageClient() {
                             <button
                                 type="button"
                                 onClick={() => setIsAuthOpen(true)}
-                                className="group relative inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] sm:px-5 sm:text-sm"
+                                className="group relative inline-flex min-h-[44px] items-center justify-center rounded-full bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] sm:px-5 sm:text-sm"
                             >
                                 <span className="absolute inset-0 -z-10 rounded-full bg-emerald-300/30 opacity-0 blur-xl transition group-hover:opacity-100 motion-safe:group-hover:animate-[landing-glow_2.8s_ease-in-out_infinite]" />
                                 Start a free mock
@@ -529,7 +543,7 @@ export default function LandingPageClient() {
                             <button
                                 type="button"
                                 onClick={() => setIsMenuOpen(true)}
-                                className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 lg:hidden"
+                                className="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 lg:hidden"
                                 aria-label="Open menu"
                             >
                                 <span>Menu</span>
@@ -545,7 +559,7 @@ export default function LandingPageClient() {
                     <section
                         id="hero"
                         ref={heroRef}
-                        className="mx-auto w-full max-w-6xl px-4 pb-16 pt-16 sm:px-6 lg:pt-24"
+                        className="mx-auto w-full max-w-6xl px-4 pb-16 pt-10 sm:px-6 sm:pt-14 lg:pt-24"
                     >
                         <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
                             <div className="space-y-6">
@@ -556,12 +570,12 @@ export default function LandingPageClient() {
                                     <p className="text-xs text-slate-500">Early access open for CAT 2026 (beta).</p>
                                 </div>
                                 <h1
-                                    className={`${headingFont.className} text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl motion-safe:animate-[landing-fade-up_0.7s_ease-out]`}
+                                    className={`${headingFont.className} text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl motion-safe:animate-[landing-fade-up_0.7s_ease-out]`}
                                 >
                                     Practice like it's your D-Day. Get hyper-customized analytics.
                                 </h1>
                                 <p
-                                    className="text-base text-slate-600 sm:text-lg motion-safe:animate-[landing-fade-up_0.7s_ease-out]"
+                                    className="text-sm text-slate-600 sm:text-base lg:text-lg motion-safe:animate-[landing-fade-up_0.7s_ease-out]"
                                     style={{ animationDelay: '80ms' }}
                                 >
                                     AI coaching guided by top percentilers - built from your attempt behavior (time, order, revisits, accuracy).
@@ -580,7 +594,7 @@ export default function LandingPageClient() {
                                     <button
                                         type="button"
                                         onClick={() => setIsAuthOpen(true)}
-                                        className="group relative inline-flex items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]"
+                                        className="group relative inline-flex min-h-[44px] w-full items-center justify-center rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] sm:w-auto"
                                     >
                                         <span className="absolute inset-0 -z-10 rounded-full bg-emerald-300/30 opacity-0 blur-xl transition group-hover:opacity-100 motion-safe:group-hover:animate-[landing-glow_2.8s_ease-in-out_infinite]" />
                                         Start a free mock
@@ -604,7 +618,7 @@ export default function LandingPageClient() {
                                         {HERO_SLIDES.map((slide) => (
                                             <div key={slide.id} className="min-w-full snap-center px-1">
                                                 <div className="space-y-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-                                                    <div className="relative h-[240px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                                                    <div className="relative h-[210px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 sm:h-[240px]">
                                                         {slide.assetKey ? (
                                                             <AssetImage
                                                                 assetKey={slide.assetKey}
@@ -661,8 +675,8 @@ export default function LandingPageClient() {
                                             >
                                                 <span
                                                     className={`block h-2.5 w-2.5 rounded-full transition ${index === activeSlide
-                                                            ? 'bg-slate-900'
-                                                            : 'bg-slate-300'
+                                                        ? 'bg-slate-900'
+                                                        : 'bg-slate-300'
                                                         }`}
                                                 />
                                             </button>
@@ -685,7 +699,7 @@ export default function LandingPageClient() {
 
                     <section className="border-y border-slate-200 bg-white">
                         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-                            <div className="grid gap-4 md:grid-cols-3">
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {LIVE_STRIP_ITEMS.map((item) => (
                                     <div
                                         key={item.label}
@@ -698,6 +712,21 @@ export default function LandingPageClient() {
                                     </div>
                                 ))}
                             </div>
+                        </div>
+                    </section>
+
+                    <section id="ai-insights-marketing" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                        <div className="space-y-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Demo NexAI insights</p>
+                            <details className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-slate-900">
+                                    <span>Open NexAI insights demo</span>
+                                    <span className="text-slate-400 transition group-open:rotate-45">+</span>
+                                </summary>
+                                <div className="mt-4">
+                                    <AIInsightsAdCard heading="NexAI Insights" markdown={nexaiDemoMarkdown} />
+                                </div>
+                            </details>
                         </div>
                     </section>
 
@@ -730,8 +759,8 @@ export default function LandingPageClient() {
                                     assets={assets}
                                     isLoading={isLoading}
                                     fallbackLabel="Mentor spotlight"
-                                    containerClassName="h-[280px] w-full rounded-[28px] border border-slate-200 bg-slate-50"
-                                    imageClassName="h-[280px] w-full rounded-[28px] border border-slate-200 object-cover"
+                                    containerClassName="h-[220px] w-full rounded-[28px] border border-slate-200 bg-slate-50 sm:h-[280px]"
+                                    imageClassName="h-[220px] w-full rounded-[28px] border border-slate-200 object-cover sm:h-[280px]"
                                 />
                             </div>
                         </div>
@@ -753,7 +782,7 @@ export default function LandingPageClient() {
                                 {FEATURE_CARDS.map((feature) => (
                                     <div
                                         key={feature.id}
-                                        className="relative rounded-3xl border border-slate-200 bg-slate-50 p-6"
+                                        className="relative rounded-3xl border border-slate-200 bg-slate-50 p-5 sm:p-6"
                                     >
                                         {feature.tag && (
                                             <span className="absolute right-4 top-4 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700">
@@ -791,7 +820,7 @@ export default function LandingPageClient() {
                             </div>
                             <div className="relative">
                                 <div className="absolute left-0 right-0 top-6 hidden h-px bg-slate-200 lg:block" />
-                                <div className="grid gap-6 lg:grid-cols-3">
+                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                     {ROADMAP_ITEMS.map((item) => (
                                         <div
                                             key={item.period}
@@ -813,10 +842,10 @@ export default function LandingPageClient() {
                             <div>
                                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">CAT Hub</p>
                                 <h2 className={`${headingFont.className} mt-3 text-3xl font-semibold text-slate-900`}>
-                                    CAT Hub: 3 mistakes that kill percentiles
+                                    CAT Hub: 5 Mistakes That Kill Percentiles
                                 </h2>
                                 <p className="mt-3 text-slate-600">
-                                    Placeholder copy for the hub intro. Replace with real content when ready.
+                                    Five patterns that quietly destroy accuracy and decision speed across VARC, DILR, and QA.
                                 </p>
                             </div>
                             <div className="space-y-3">
@@ -829,7 +858,7 @@ export default function LandingPageClient() {
                                             {item.title}
                                             <span className="text-slate-400 transition group-open:rotate-45">+</span>
                                         </summary>
-                                        <p className="mt-3 text-sm text-slate-600">{item.body}</p>
+                                        <p className="mt-3 text-sm text-slate-600 whitespace-pre-line">{item.body}</p>
                                     </details>
                                 ))}
                             </div>
@@ -841,7 +870,7 @@ export default function LandingPageClient() {
                     <div className="mx-auto grid w-full max-w-6xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1.2fr_0.8fr]">
                         <div>
                             <div className={`${headingFont.className} text-lg font-semibold text-slate-900`}>
-                                CAT Mock Arena
+                                NEXAMS
                             </div>
                             <p className="mt-3 max-w-md text-sm text-slate-600">
                                 A clean, focused CAT mock experience with real exam constraints and mentor-grade insights.
@@ -849,7 +878,7 @@ export default function LandingPageClient() {
                             <button
                                 type="button"
                                 onClick={() => setIsAuthOpen(true)}
-                                className="mt-6 inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98]"
+                                className="mt-6 inline-flex min-h-[44px] w-full items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] sm:w-auto"
                             >
                                 Start a free mock
                             </button>
@@ -874,7 +903,7 @@ export default function LandingPageClient() {
                 <button
                     type="button"
                     onClick={scrollToTop}
-                    className="fixed bottom-6 left-6 z-40 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-md transition hover:-translate-y-0.5 hover:bg-slate-50"
+                    className="fixed bottom-6 left-6 z-40 inline-flex min-h-[44px] items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 shadow-md transition hover:-translate-y-0.5 hover:bg-slate-50"
                 >
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 15l6-6 6 6" />

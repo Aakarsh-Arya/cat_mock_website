@@ -1,0 +1,757 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://nexams.app/schemas/ai_analysis_export.schema.v1.json",
+    "title": "Nexams AI Analysis Export (Composite Context JSON) v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "schema_meta",
+        "generated_at",
+        "meta",
+        "paper",
+        "attempt",
+        "sections"
+    ],
+    "properties": {
+        "schema_meta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "name",
+                "version",
+                "paper_schema_version"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "const": "nexams.ai_analysis_export"
+                },
+                "version": {
+                    "type": "string",
+                    "const": "1.0.0"
+                },
+                "paper_schema_version": {
+                    "type": "string"
+                }
+            }
+        },
+        "generated_at": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "meta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "attempt_id",
+                "user_id",
+                "paper_id"
+            ],
+            "properties": {
+                "attempt_id": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "paper_id": {
+                    "type": "string"
+                },
+                "paper_key": {
+                    "type": "string"
+                },
+                "exam_name": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string",
+                    "enum": [
+                        "admin_export"
+                    ]
+                },
+                "created_from_ingest_run_id": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "notes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "ai_customization_prompt": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "performance_reason": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "paper": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Full static paper snapshot (canonical JSON) + any DB-enriched fields if needed"
+        },
+        "attempt": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "status",
+                "started_at",
+                "submitted_at",
+                "scores",
+                "counts",
+                "timing",
+                "telemetry",
+                "performance_metrics"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "submitted_at": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "format": "date-time"
+                },
+                "scores": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "total_score",
+                        "percentile",
+                        "rank",
+                        "section_scores"
+                    ],
+                    "properties": {
+                        "total_score": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "max_possible_score": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "percentile": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "rank": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "section_scores": {
+                            "type": "object"
+                        }
+                    }
+                },
+                "counts": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "correct",
+                        "incorrect",
+                        "unanswered"
+                    ],
+                    "properties": {
+                        "correct": {
+                            "type": "integer"
+                        },
+                        "incorrect": {
+                            "type": "integer"
+                        },
+                        "unanswered": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "timing": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "time_taken_seconds"
+                    ],
+                    "properties": {
+                        "time_taken_seconds": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ]
+                        },
+                        "total_paused_seconds": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ]
+                        },
+                        "pause_count": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ]
+                        },
+                        "last_activity_at": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "format": "date-time"
+                        }
+                    }
+                },
+                "telemetry": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "telemetry_log"
+                    ],
+                    "properties": {
+                        "telemetry_log": {
+                            "type": [
+                                "array",
+                                "object",
+                                "null"
+                            ]
+                        }
+                    }
+                },
+                "performance_metrics": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "self_reported_reason",
+                        "total_questions",
+                        "attempted_questions",
+                        "unattempted_questions",
+                        "correct_questions",
+                        "incorrect_questions",
+                        "accuracy_percent",
+                        "attempt_rate_percent",
+                        "net_score",
+                        "max_possible_score",
+                        "score_percentage",
+                        "time_taken_seconds",
+                        "average_time_per_question_seconds",
+                        "average_time_per_attempted_question_seconds",
+                        "average_ideal_time_per_question_seconds",
+                        "ideal_vs_actual_time_ratio",
+                        "rapid_guess_count",
+                        "rapid_guess_rate_percent",
+                        "review_marked_count",
+                        "revisit_count",
+                        "switched_answer_count",
+                        "positive_marks_earned",
+                        "negative_marks_lost",
+                        "marks_per_minute",
+                        "section_metrics"
+                    ],
+                    "properties": {
+                        "self_reported_reason": {
+                            "type": [
+                                "string",
+                                "null"
+                            ]
+                        },
+                        "total_questions": {
+                            "type": "integer"
+                        },
+                        "attempted_questions": {
+                            "type": "integer"
+                        },
+                        "unattempted_questions": {
+                            "type": "integer"
+                        },
+                        "correct_questions": {
+                            "type": "integer"
+                        },
+                        "incorrect_questions": {
+                            "type": "integer"
+                        },
+                        "accuracy_percent": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "attempt_rate_percent": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "net_score": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "max_possible_score": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "score_percentage": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "time_taken_seconds": {
+                            "type": [
+                                "integer",
+                                "null"
+                            ]
+                        },
+                        "average_time_per_question_seconds": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "average_time_per_attempted_question_seconds": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "average_ideal_time_per_question_seconds": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "ideal_vs_actual_time_ratio": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "rapid_guess_count": {
+                            "type": "integer"
+                        },
+                        "rapid_guess_rate_percent": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "review_marked_count": {
+                            "type": "integer"
+                        },
+                        "revisit_count": {
+                            "type": "integer"
+                        },
+                        "switched_answer_count": {
+                            "type": "integer"
+                        },
+                        "positive_marks_earned": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "negative_marks_lost": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "marks_per_minute": {
+                            "type": [
+                                "number",
+                                "null"
+                            ]
+                        },
+                        "section_metrics": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "VARC",
+                                "DILR",
+                                "QA"
+                            ],
+                            "properties": {
+                                "VARC": {
+                                    "$ref": "#/$defs/performanceSectionMetric"
+                                },
+                                "DILR": {
+                                    "$ref": "#/$defs/performanceSectionMetric"
+                                },
+                                "QA": {
+                                    "$ref": "#/$defs/performanceSectionMetric"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "user_progress": {
+            "type": [
+                "object",
+                "null"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "average_score": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "average_percentile": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "best_score": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "best_percentile": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "total_mocks_taken": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "varc_average": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "dilr_average": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "qa_average": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "weak_topics": {
+                    "type": [
+                        "object",
+                        "array",
+                        "null"
+                    ]
+                },
+                "strong_topics": {
+                    "type": [
+                        "object",
+                        "array",
+                        "null"
+                    ]
+                },
+                "target_percentile": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "target_iims": {
+                    "type": [
+                        "object",
+                        "array",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "sections": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "name",
+                    "summary",
+                    "items"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "enum": [
+                            "VARC",
+                            "DILR",
+                            "QA"
+                        ]
+                    },
+                    "summary": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "score",
+                            "time_spent_seconds",
+                            "attempted",
+                            "correct",
+                            "incorrect",
+                            "unanswered"
+                        ],
+                        "properties": {
+                            "score": {
+                                "type": [
+                                    "number",
+                                    "null"
+                                ]
+                            },
+                            "time_spent_seconds": {
+                                "type": [
+                                    "integer",
+                                    "null"
+                                ]
+                            },
+                            "attempted": {
+                                "type": "integer"
+                            },
+                            "correct": {
+                                "type": "integer"
+                            },
+                            "incorrect": {
+                                "type": "integer"
+                            },
+                            "unanswered": {
+                                "type": "integer"
+                            }
+                        }
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "question",
+                                "context",
+                                "user_result",
+                                "derived"
+                            ],
+                            "properties": {
+                                "question": {
+                                    "type": "object",
+                                    "additionalProperties": true,
+                                    "required": [
+                                        "question_uuid",
+                                        "client_question_id",
+                                        "question_number",
+                                        "question_type",
+                                        "marks",
+                                        "negative_marks"
+                                    ]
+                                },
+                                "context": {
+                                    "type": [
+                                        "object",
+                                        "null"
+                                    ],
+                                    "additionalProperties": true
+                                },
+                                "user_result": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "answer",
+                                        "is_correct",
+                                        "marks_obtained",
+                                        "time_spent_seconds",
+                                        "visit_count",
+                                        "is_visited",
+                                        "is_marked_for_review",
+                                        "answer_history"
+                                    ],
+                                    "properties": {
+                                        "answer": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ]
+                                        },
+                                        "selected_option": {
+                                            "type": [
+                                                "integer",
+                                                "null"
+                                            ]
+                                        },
+                                        "is_correct": {
+                                            "type": [
+                                                "boolean",
+                                                "null"
+                                            ]
+                                        },
+                                        "marks_obtained": {
+                                            "type": [
+                                                "number",
+                                                "null"
+                                            ]
+                                        },
+                                        "time_spent_seconds": {
+                                            "type": [
+                                                "integer",
+                                                "null"
+                                            ]
+                                        },
+                                        "visit_count": {
+                                            "type": [
+                                                "integer",
+                                                "null"
+                                            ]
+                                        },
+                                        "is_visited": {
+                                            "type": [
+                                                "boolean",
+                                                "null"
+                                            ]
+                                        },
+                                        "is_marked_for_review": {
+                                            "type": [
+                                                "boolean",
+                                                "null"
+                                            ]
+                                        },
+                                        "answer_history": {
+                                            "type": [
+                                                "array",
+                                                "object",
+                                                "null"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "derived": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": [
+                                        "attempt_state",
+                                        "did_switch_answer"
+                                    ],
+                                    "properties": {
+                                        "attempt_state": {
+                                            "type": "string",
+                                            "enum": [
+                                                "correct",
+                                                "incorrect",
+                                                "unanswered"
+                                            ]
+                                        },
+                                        "did_switch_answer": {
+                                            "type": "boolean"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "raw": {
+            "type": [
+                "object",
+                "null"
+            ],
+            "additionalProperties": true,
+            "description": "Optional raw DB rows for debugging (attempt row, responses rows, user_analytics row)"
+        }
+    },
+    "$defs": {
+        "performanceSectionMetric": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "total_questions",
+                "attempted_questions",
+                "unattempted_questions",
+                "correct_questions",
+                "incorrect_questions",
+                "score",
+                "time_spent_seconds",
+                "accuracy_percent",
+                "attempt_rate_percent",
+                "average_time_per_question_seconds"
+            ],
+            "properties": {
+                "total_questions": {
+                    "type": "integer"
+                },
+                "attempted_questions": {
+                    "type": "integer"
+                },
+                "unattempted_questions": {
+                    "type": "integer"
+                },
+                "correct_questions": {
+                    "type": "integer"
+                },
+                "incorrect_questions": {
+                    "type": "integer"
+                },
+                "score": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "time_spent_seconds": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "accuracy_percent": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "attempt_rate_percent": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "average_time_per_question_seconds": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            }
+        }
+    }
+}

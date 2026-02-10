@@ -13,7 +13,9 @@
     "depcheck": "depcheck",
     "ts-prune": "ts-prune -p tsconfig.json",
     "export:vs_codebase": "node scripts/export-vs-codebase.mjs",
-    "export:vs_codebase:v2": "node scripts/export-vs-codebase-v2.mjs"
+    "export:vs_codebase:v2": "node scripts/export-vs-codebase-v2.mjs",
+    "maintenance:update-descriptions": "node scripts/maintenance/update-paper-descriptions.mjs",
+    "maintenance:sync-nexai-demo": "node scripts/maintenance/sync-nexai-insights-demo.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.4.1",

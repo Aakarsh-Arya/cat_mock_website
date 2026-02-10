@@ -34,15 +34,17 @@ export async function sbSSR() {
     const cookieStore = await cookies();
     return createServerClient(url || 'http://localhost:54321', anon || 'anon', {
         cookies: {
-            get(name: string) {
-                return cookieStore.get(name)?.value;
+            getAll() {
+                return cookieStore.getAll();
             },
-            // Avoid setting cookies during render; reads are sufficient for most queries
-            set() {
-                /* no-op during render */
-            },
-            remove() {
-                /* no-op during render */
+            setAll(cookiesToSet) {
+                try {
+                    cookiesToSet.forEach(({ name, value, options }) => {
+                        cookieStore.set(name, value, options);
+                    });
+                } catch {
+                    // Read-only cookie store in server components; safe to ignore.
+                }
             },
         },
     });

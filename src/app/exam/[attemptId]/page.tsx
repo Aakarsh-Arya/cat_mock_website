@@ -394,7 +394,19 @@ export default async function ExamPage({ params }: PageProps) {
         questionSets = buildLegacyQuestionSets(orderedQuestions, contexts, attemptData.paper_id);
     }
 
-    const { questions } = assemblePaper(questionSets);
+    const { questions: assembledQuestions } = assemblePaper(questionSets);
+    // Hide topic/subtopic metadata + context titles during active exam attempts.
+    const questions = assembledQuestions.map((question) => ({
+        ...question,
+        topic: undefined,
+        subtopic: undefined,
+        context: question.context
+            ? {
+                ...question.context,
+                title: undefined,
+            }
+            : undefined,
+    }));
 
     const { data: responseRows, error: responsesError } = await supabase
         .from('responses')

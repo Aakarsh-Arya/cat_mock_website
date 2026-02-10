@@ -359,4 +359,49 @@ EXTERNAL - Requires Supabase SQL Editor execution of `023_access_control_foundat
 
 ---
 
-*Last Updated: February 7, 2026*
+## Change 012: NexAI Insights, Build Fixes & Lint Cleanup
+
+### Change Title
+NexAI Insights Content Sync, UI Polish, Bug Fixes, Build & Lint Cleanup
+
+### Context (Before)
+- NexAI insights demo markdown stored locally, not synced to repo content files
+- Tab state on result page reset on page refresh (no persistence)
+- Scroll freeze on refresh when Mirror View was previously active (`body.style.overflow = 'hidden'` leaked)
+- Label above NexAI prompt textarea said "Reason for performance (recommended)"
+- `getUserByEmail` used in access-control actions (method doesn't exist on GoTrueAdminApi)
+- `TopProgressBar` used `useSearchParams()` without a `<Suspense>` boundary → build failed on static pages
+- 3 pre-existing ESLint errors (invalid rule name, unused disable directives)
+- "Download JSON" / "export context JSON" visible in user-facing UI
+
+### Proposal (After)
+- Sync NexAI demo markdown via `scripts/maintenance/sync-nexai-insights-demo.mjs`
+- Persist active tab in `sessionStorage` keyed by pathname in `ResultTabsClient.tsx`
+- Conditionally render Mirror View content only when active (`{activeTab === 'review' ? review : null}`)
+- Change label to "Any specific things you want the insight to include."
+- Add disclaimer: "Please fill the reason for performance in the **Mirror View** to get more precise NexAI insights."
+- Replace `getUserByEmail` with `listUsers` + `.find()` in access-control actions
+- Wrap `<TopProgressBar />` in `<Suspense fallback={null}>` in root `layout.tsx`
+- Remove invalid `react-hooks/exhaustive-deps` directive; remove unused `@typescript-eslint/no-require-imports` directives
+- Change "Download JSON" → "Download Export", "export context JSON" → "export analysis context"
+
+### Files Changed
+- `src/app/layout.tsx` — Wrapped `TopProgressBar` in `<Suspense>`
+- `src/app/result/[attemptId]/ResultTabsClient.tsx` — sessionStorage persistence, conditional review rendering
+- `src/app/result/[attemptId]/AIAnalysisButton.tsx` — Updated label and disclaimer
+- `src/app/admin/ai-analysis/DownloadExportButton.tsx` — "Download Export"
+- `src/app/admin/ai-analysis/page.tsx` — Removed "JSON" from description
+- `src/app/admin/access-control/actions.ts` — Fixed getUserByEmail → listUsers
+- `src/components/TopProgressBar.tsx` — Removed invalid eslint-disable directive
+- `src/lib/analysis/validateAiAnalysisExport.ts` — Removed unused eslint-disable directives
+- `src/content/nexaiInsightsDemo.md` — Synced from latest user edits
+- `src/content/nexaiInsightsDemo.ts` — Auto-generated from .md
+
+### Schema Impact
+None — all changes are client/server code only.
+
+### Status: COMPLETED (Build ✅, TSC ✅, ESLint ✅)
+
+---
+
+*Last Updated: July 16, 2025*

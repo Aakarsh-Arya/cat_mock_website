@@ -1099,3 +1099,76 @@ export async function pauseExam(data: {
         return { success: false, error: 'An unexpected error occurred' };
     }
 }
+
+// =============================================================================
+// REQUEST AI ANALYSIS
+// =============================================================================
+
+export async function requestAIAnalysis(
+    attemptId: string,
+    customizationPrompt?: string | null
+): Promise<ActionResult<{ status: string }>> {
+    try {
+        const supabase = await sbSSR();
+
+        // 1) Auth check
+        const {
+            data: { user },
+            error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user) return { success: false, error: 'Authentication required' };
+
+        // 2) Fetch attempt & verify ownership
+        const { data: attempt, error: attemptError } = await supabase
+            .from('attempts')
+            .select('id, user_id, status, submitted_at, ai_analysis_status')
+            .eq('id', attemptId)
+            .single();
+
+        if (attemptError || !attempt) return { success: false, error: 'Attempt not found' };
+        if (attempt.user_id !== user.id) return { success: false, error: 'Unauthorized' };
+
+        // 3) Must be submitted / completed
+        if (attempt.status !== 'submitted' && attempt.status !== 'completed') {
+            return { success: false, error: 'Attempt must be submitted before requesting analysis' };
+        }
+        if (!attempt.submitted_at) {
+            return { success: false, error: 'Attempt has no submission timestamp' };
+        }
+
+        // 4) Idempotent: if already requested (or further), return success
+        if (attempt.ai_analysis_status && attempt.ai_analysis_status !== 'none' && attempt.ai_analysis_status !== 'failed') {
+            return {
+                success: true,
+                data: { status: attempt.ai_analysis_status },
+            };
+        }
+
+        const prompt = customizationPrompt?.trim() || null;
+        if (prompt && prompt.length > 4000) {
+            return { success: false, error: 'Customization prompt is too long (max 4000 characters)' };
+        }
+
+        // 5) Update status -> requested
+        const { error: updateError } = await supabase
+            .from('attempts')
+            .update({
+                ai_analysis_status: 'requested',
+                ai_analysis_requested_at: new Date().toISOString(),
+                ai_analysis_user_prompt: prompt,
+                ai_analysis_result_text: null,
+            })
+            .eq('id', attemptId)
+            .eq('user_id', user.id); // RLS-safe: user can only update own rows
+
+        if (updateError) {
+            logger.error('requestAIAnalysis update error', updateError, { attemptId });
+            return { success: false, error: 'Failed to request analysis' };
+        }
+
+        return { success: true, data: { status: 'requested' } };
+    } catch (error) {
+        logger.error('requestAIAnalysis error', error, { attemptId });
+        return { success: false, error: 'An unexpected error occurred' };
+    }
+}

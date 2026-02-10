@@ -87,9 +87,10 @@ export async function middleware(req: NextRequest) {
         pathname.startsWith('/mocks') ||
         pathname.startsWith('/mock/');
     const isAdminRoute = pathname.startsWith('/admin');
+    const needsAuthCheck = isProtected || isAdminRoute || pathname === '/coming-soon';
 
     // Only create Supabase client if we need to check auth
-    if (!isProtected && !isAdminRoute) {
+    if (!needsAuthCheck) {
         return res;
     }
 

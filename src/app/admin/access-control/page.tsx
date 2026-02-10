@@ -36,6 +36,7 @@ export default async function AccessControlPage() {
     const { data: requestRows } = await supabase
         .from('access_requests')
         .select('id, user_id, email, status, source, created_at, decided_at')
+        .not('user_id', 'is', null)
         .order('created_at', { ascending: false })
         .limit(200);
 
