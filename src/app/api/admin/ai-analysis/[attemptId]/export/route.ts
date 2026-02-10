@@ -135,7 +135,7 @@ export async function GET(
 
         const { data: currentAttempt } = await admin
             .from('attempts')
-            .select('ai_analysis_status')
+            .select('*')
             .eq('id', attemptId)
             .maybeSingle();
 

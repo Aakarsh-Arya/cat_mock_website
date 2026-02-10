@@ -17,11 +17,16 @@ export default async function AIAnalysisDashboard() {
     const admin = getServiceRoleClient();
 
     // Fetch all attempts with analysis requested/exported/failed — most recent first
-    const { data: attempts, error } = await admin
+    // Use select('*') to avoid "column does not exist" errors if migration hasn't been run
+    const { data: rawAttempts, error } = await admin
         .from('attempts')
-        .select('id, user_id, paper_id, total_score, percentile, ai_analysis_status, ai_analysis_requested_at, ai_analysis_exported_at, ai_analysis_processed_at, ai_analysis_error, ai_analysis_user_prompt, ai_analysis_result_text, submitted_at')
-        .neq('ai_analysis_status', 'none')
-        .order('ai_analysis_requested_at', { ascending: false, nullsFirst: false });
+        .select('*')
+        .order('submitted_at', { ascending: false, nullsFirst: false });
+
+    // Filter to only attempts with ai_analysis_status != 'none' (column may not exist yet)
+    const attempts = (rawAttempts ?? []).filter(
+        (a) => a.ai_analysis_status && a.ai_analysis_status !== 'none'
+    );
 
     // Collect unique user and paper IDs for lookup
     const userIds = Array.from(new Set((attempts ?? []).map(a => a.user_id).filter(Boolean)));
