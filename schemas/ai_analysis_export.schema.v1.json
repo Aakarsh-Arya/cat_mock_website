@@ -265,6 +265,7 @@
                         "positive_marks_earned",
                         "negative_marks_lost",
                         "marks_per_minute",
+                        "reason_for_performance",
                         "section_metrics"
                     ],
                     "properties": {
@@ -384,6 +385,42 @@
                                 "number",
                                 "null"
                             ]
+                        },
+                        "reason_for_performance": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                                "incorrect",
+                                "concept_gap",
+                                "careless_error",
+                                "time_pressure",
+                                "guess_unsure",
+                                "tagged_incorrect",
+                                "untagged_incorrect"
+                            ],
+                            "properties": {
+                                "incorrect": {
+                                    "type": "integer"
+                                },
+                                "concept_gap": {
+                                    "type": "integer"
+                                },
+                                "careless_error": {
+                                    "type": "integer"
+                                },
+                                "time_pressure": {
+                                    "type": "integer"
+                                },
+                                "guess_unsure": {
+                                    "type": "integer"
+                                },
+                                "tagged_incorrect": {
+                                    "type": "integer"
+                                },
+                                "untagged_incorrect": {
+                                    "type": "integer"
+                                }
+                            }
                         },
                         "section_metrics": {
                             "type": "object",
@@ -593,7 +630,8 @@
                                         "visit_count",
                                         "is_visited",
                                         "is_marked_for_review",
-                                        "answer_history"
+                                        "answer_history",
+                                        "performance_reason"
                                     ],
                                     "properties": {
                                         "answer": {
@@ -649,6 +687,19 @@
                                                 "array",
                                                 "object",
                                                 "null"
+                                            ]
+                                        },
+                                        "performance_reason": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ],
+                                            "enum": [
+                                                "concept_gap",
+                                                "careless_error",
+                                                "time_pressure",
+                                                "guess",
+                                                null
                                             ]
                                         }
                                     }

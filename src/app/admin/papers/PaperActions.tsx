@@ -68,7 +68,7 @@ export default function PaperActions({ paperId }: PaperActionsProps) {
     };
 
     return (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
             {exportError && (
                 <span className="text-xs text-red-600" title={exportError}>
                     Export failed
@@ -78,7 +78,7 @@ export default function PaperActions({ paperId }: PaperActionsProps) {
             {/* Edit Button */}
             <Link
                 href={`/admin/papers/${paperId}/edit`}
-                className="text-blue-600 hover:text-blue-900 hover:underline"
+                className="touch-target inline-flex items-center rounded px-2 py-1 text-blue-600 hover:bg-blue-50 hover:text-blue-900 hover:underline"
                 title="Edit paper content"
             >
                 Edit
@@ -87,7 +87,7 @@ export default function PaperActions({ paperId }: PaperActionsProps) {
             {/* Preview Button */}
             <Link
                 href={`/admin/papers/${paperId}/preview`}
-                className="text-purple-600 hover:text-purple-900 hover:underline"
+                className="touch-target inline-flex items-center rounded px-2 py-1 text-purple-600 hover:bg-purple-50 hover:text-purple-900 hover:underline"
                 title="Preview as student"
             >
                 Preview
@@ -96,7 +96,7 @@ export default function PaperActions({ paperId }: PaperActionsProps) {
             {/* Settings Button */}
             <Link
                 href={`/admin/papers/${paperId}/settings`}
-                className="text-gray-600 hover:text-gray-900 hover:underline"
+                className="touch-target inline-flex items-center rounded px-2 py-1 text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:underline"
                 title="Paper settings"
             >
                 Settings
@@ -105,7 +105,7 @@ export default function PaperActions({ paperId }: PaperActionsProps) {
             {/* Questions Button */}
             <Link
                 href={`/admin/papers/${paperId}/questions`}
-                className="text-gray-600 hover:text-gray-900 hover:underline"
+                className="touch-target inline-flex items-center rounded px-2 py-1 text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:underline"
                 title="View questions"
             >
                 Questions
@@ -116,10 +116,10 @@ export default function PaperActions({ paperId }: PaperActionsProps) {
                 <button
                     onClick={() => setShowExportMenu(!showExportMenu)}
                     disabled={isExporting}
-                    className="text-green-600 hover:text-green-900 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="touch-target inline-flex items-center rounded px-2 py-1 text-green-600 hover:bg-green-50 hover:text-green-900 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                     title="Download paper JSON"
                 >
-                    {isExporting ? 'Exporting...' : 'Export ▾'}
+                    {isExporting ? 'Exporting...' : 'Export'}
                 </button>
                 {showExportMenu && (
                     <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
@@ -162,7 +162,7 @@ export default function PaperActions({ paperId }: PaperActionsProps) {
                     }
                     setIsDeleting(false);
                 }}
-                className="text-red-600 hover:text-red-900 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                className="touch-target inline-flex items-center rounded px-2 py-1 text-red-600 hover:bg-red-50 hover:text-red-900 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                 title="Delete paper"
                 disabled={isDeleting}
             >

@@ -23,30 +23,24 @@ interface SectionalPerformanceProps {
     };
 }
 
-/** Section display configuration */
 const SECTION_DISPLAY: Record<SectionName, {
     fullName: string;
-    color: string;
-    bgColor: string;
+    accent: string;
 }> = {
     VARC: {
-        fullName: 'Verbal Ability & Reading Comprehension',
-        color: 'text-blue-700',
-        bgColor: 'bg-blue-50',
+        fullName: 'Verbal Ability and Reading Comprehension',
+        accent: '#6366F1',
     },
     DILR: {
-        fullName: 'Data Interpretation & Logical Reasoning',
-        color: 'text-purple-700',
-        bgColor: 'bg-purple-50',
+        fullName: 'Data Interpretation and Logical Reasoning',
+        accent: '#D946EF',
     },
     QA: {
         fullName: 'Quantitative Aptitude',
-        color: 'text-green-700',
-        bgColor: 'bg-green-50',
+        accent: '#10B981',
     },
 };
 
-/** Default CAT 2024 section config */
 const DEFAULT_SECTION_CONFIG: Record<SectionName, { maxMarks: number; totalQuestions: number }> = {
     VARC: { maxMarks: 72, totalQuestions: 24 },
     DILR: { maxMarks: 60, totalQuestions: 20 },
@@ -59,28 +53,27 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
 
     return (
         <div className="mb-8">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+            <h2 className="mb-4 text-xl font-semibold text-[#0F172A]">
                 Section-wise Performance
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 {sections.map((sectionName) => {
                     const scores = sectionScores[sectionName];
                     const sectionDisplay = SECTION_DISPLAY[sectionName];
                     const sectionCfg = config[sectionName] || { maxMarks: 0, totalQuestions: 0 };
-
                     const sectionLabel = getSectionDisplayLabel(sectionName);
 
                     if (!scores) {
                         return (
                             <div
                                 key={sectionName}
-                                className={`${sectionDisplay.bgColor} rounded-xl p-5 border`}
+                                className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]"
+                                style={{ borderTopWidth: 4, borderTopColor: sectionDisplay.accent }}
                             >
-                                <h3 className={`font-bold text-lg ${sectionDisplay.color} mb-1`}>
-                                    {sectionLabel}
-                                </h3>
-                                <p className="text-gray-400 text-sm">No data available</p>
+                                <h3 className="mb-1 text-lg font-bold text-[#0F172A]">{sectionLabel}</h3>
+                                <p className="text-xs text-[#64748B]">{sectionDisplay.fullName}</p>
+                                <p className="mt-4 text-sm text-[#64748B]">No data available</p>
                             </div>
                         );
                     }
@@ -96,64 +89,54 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
                     return (
                         <div
                             key={sectionName}
-                            className={`${sectionDisplay.bgColor} rounded-xl p-5 border shadow-sm transition-shadow hover:shadow-md`}
+                            className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]"
+                            style={{ borderTopWidth: 4, borderTopColor: sectionDisplay.accent }}
                         >
-                            {/* Section Header */}
                             <div className="mb-4">
-                                <h3 className={`font-bold text-lg ${sectionDisplay.color}`}>
+                                <h3 className="text-lg font-bold text-[#0F172A]">
                                     {sectionLabel}
                                 </h3>
-                                <p className="text-xs text-gray-500">
+                                <p className="text-xs text-[#64748B]">
                                     {sectionDisplay.fullName}
                                 </p>
                             </div>
 
-                            {/* Score Display */}
                             <div className="mb-4">
                                 <div className="flex items-baseline gap-1">
-                                    <span className={`text-3xl font-bold ${sectionDisplay.color}`}>
+                                    <span className="text-3xl font-bold text-[#0F172A]">
                                         {scores.score}
                                     </span>
-                                    <span className="text-gray-400 text-sm">
+                                    <span className="text-sm text-[#64748B]">
                                         / {sectionCfg.maxMarks}
                                     </span>
                                 </div>
-                                {/* Progress Bar */}
-                                <div className="h-2 bg-gray-200 rounded-full mt-2 overflow-hidden">
+                                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
                                     <div
-                                        className={`h-full transition-all duration-500 ${scorePercentage >= 50 ? 'bg-green-500' :
-                                            scorePercentage >= 25 ? 'bg-yellow-500' : 'bg-red-500'
-                                            }`}
-                                        style={{ width: `${Math.max(0, Math.min(100, scorePercentage))}%` }}
+                                        className="h-full rounded-full transition-all duration-500"
+                                        style={{
+                                            width: `${Math.max(0, Math.min(100, scorePercentage))}%`,
+                                            backgroundColor: sectionDisplay.accent,
+                                        }}
                                     />
                                 </div>
                             </div>
 
-                            {/* Stats Grid */}
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                                <div className="flex justify-between">
-                                    <span className="text-gray-600">Correct</span>
-                                    <span className="font-semibold text-green-600">
-                                        {scores.correct}
-                                    </span>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                    <p className="text-xs text-[#64748B]">Correct</p>
+                                    <p className="font-semibold text-[#10B981]">{scores.correct}</p>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-600">Incorrect</span>
-                                    <span className="font-semibold text-red-600">
-                                        {scores.incorrect}
-                                    </span>
+                                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                    <p className="text-xs text-[#64748B]">Incorrect</p>
+                                    <p className="font-semibold text-[#EF4444]">{scores.incorrect}</p>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-600">Skipped</span>
-                                    <span className="font-semibold text-gray-500">
-                                        {scores.unanswered}
-                                    </span>
+                                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                    <p className="text-xs text-[#64748B]">Skipped</p>
+                                    <p className="font-semibold text-[#64748B]">{scores.unanswered}</p>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-600">Accuracy</span>
-                                    <span className="font-semibold text-orange-600">
-                                        {accuracy}%
-                                    </span>
+                                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                    <p className="text-xs text-[#64748B]">Accuracy</p>
+                                    <p className="font-semibold text-[#0F172A]">{accuracy}%</p>
                                 </div>
                             </div>
                         </div>

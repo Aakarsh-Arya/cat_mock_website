@@ -20,11 +20,8 @@ interface ResultHeaderProps {
     reviewAnchorId?: string;
 }
 
-/**
- * Format seconds to human-readable time string
- */
 function formatTime(seconds: number | null): string {
-    if (!seconds) return '—';
+    if (!seconds) return '--';
     const hours = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
@@ -50,137 +47,113 @@ export function ResultHeader({
     submittedAt,
     reviewAnchorId,
 }: ResultHeaderProps) {
-    const scorePercentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
-    const scoreColor = scorePercentage >= 70
-        ? 'text-green-600'
-        : scorePercentage >= 40
-            ? 'text-yellow-600'
-            : 'text-red-600';
+    const totalQuestions = correctCount + incorrectCount + unansweredCount;
+    const correctPercent = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
+    const incorrectPercent = totalQuestions > 0 ? (incorrectCount / totalQuestions) * 100 : 0;
+    const unansweredPercent = totalQuestions > 0 ? (unansweredCount / totalQuestions) * 100 : 0;
+
+    const submittedLabel = submittedAt
+        ? new Date(submittedAt).toLocaleString('en-IN', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        })
+        : null;
 
     return (
-        <div className="mb-8">
-            {/* Title */}
-            <div className="text-center mb-6">
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
-                    {paperTitle}
-                </h1>
-                {submittedAt && (
-                    <p className="text-gray-500 text-sm">
-                        Submitted: {new Date(submittedAt).toLocaleString('en-IN', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short',
-                        })}
-                    </p>
-                )}
-            </div>
-
-            {reviewAnchorId && (
-                <div className="mt-4 flex justify-center">
+        <div className="mb-8 space-y-4 sm:space-y-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div>
+                    <h2 className="text-xl font-bold text-[#0F172A] sm:text-2xl">Performance Snapshot</h2>
+                    <p className="text-sm text-[#64748B]">{paperTitle}</p>
+                    {submittedLabel && (
+                        <p className="text-xs text-[#64748B]">Submitted {submittedLabel}</p>
+                    )}
+                </div>
+                {reviewAnchorId && (
                     <a
                         href={`#${reviewAnchorId}`}
-                        className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                        className="touch-target inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-[#2563EB] hover:bg-[#EFF6FF] hover:text-[#2563EB] sm:w-auto"
                     >
-                        Review in Exam UI
+                        Review in Mirror View
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14m-7-7l7 7-7 7" />
                         </svg>
                     </a>
+                )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] sm:p-5">
+                    <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#2563EB]">
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v8m0 0l-3-3m3 3l3-3m6-7v10a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2h2l2-2h6l2 2h2a2 2 0 012 2z" />
+                        </svg>
+                    </div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Score</p>
+                    <p className="text-2xl font-bold text-[#0F172A] sm:text-3xl">{totalScore}</p>
+                    <p className="text-sm text-[#64748B]">of {maxScore}</p>
                 </div>
-            )}
 
-            {/* Main Score Card */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 shadow-sm border border-blue-100">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-                    {/* Score */}
-                    <div className="text-center p-4 bg-white/70 rounded-xl">
-                        <p className="text-xs md:text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">
-                            Score
-                        </p>
-                        <p className={`text-2xl md:text-4xl font-bold ${scoreColor}`}>
-                            {totalScore}
-                        </p>
-                        <p className="text-sm text-gray-400">
-                            of {maxScore}
-                        </p>
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] sm:p-5">
+                    <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#EEF2FF] text-[#6366F1]">
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 5H5v14h14v-8M15 3h6v6M10 14L21 3" />
+                        </svg>
                     </div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Percentile</p>
+                    <p className="text-2xl font-bold text-[#0F172A] sm:text-3xl">{percentile?.toFixed(1) ?? '--'}%</p>
+                    <p className="text-sm text-[#64748B]">{rank ? `Rank #${rank}` : 'Rank unavailable'}</p>
+                </div>
 
-                    {/* Percentile */}
-                    <div className="text-center p-4 bg-white/70 rounded-xl">
-                        <p className="text-xs md:text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">
-                            Percentile
-                        </p>
-                        <p className="text-2xl md:text-4xl font-bold text-purple-600">
-                            {percentile?.toFixed(1) ?? '—'}
-                        </p>
-                        {rank && (
-                            <p className="text-sm text-gray-400">
-                                Rank #{rank}
-                            </p>
-                        )}
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] sm:p-5">
+                    <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#ECFDF5] text-[#10B981]">
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
                     </div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Accuracy</p>
+                    <p className="text-2xl font-bold text-[#0F172A] sm:text-3xl">{accuracy?.toFixed(1) ?? '--'}%</p>
+                    <p className="text-sm text-[#64748B]">{correctCount}/{correctCount + incorrectCount} correct</p>
+                </div>
 
-                    {/* Accuracy */}
-                    <div className="text-center p-4 bg-white/70 rounded-xl">
-                        <p className="text-xs md:text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">
-                            Accuracy
-                        </p>
-                        <p className="text-2xl md:text-4xl font-bold text-orange-500">
-                            {accuracy?.toFixed(1) ?? '—'}%
-                        </p>
-                        <p className="text-sm text-gray-400">
-                            {correctCount}/{correctCount + incorrectCount} correct
-                        </p>
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] sm:p-5">
+                    <div className="mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#FFF7ED] text-[#F59E0B]">
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
                     </div>
-
-                    {/* Time Taken */}
-                    <div className="text-center p-4 bg-white/70 rounded-xl">
-                        <p className="text-xs md:text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">
-                            Time Taken
-                        </p>
-                        <p className="text-2xl md:text-4xl font-bold text-teal-600">
-                            {formatTime(timeTakenSeconds)}
-                        </p>
-                        <p className="text-sm text-gray-400">
-                            of 120 min
-                        </p>
-                    </div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Time Taken</p>
+                    <p className="text-2xl font-bold text-[#F59E0B] sm:text-3xl">{formatTime(timeTakenSeconds)}</p>
+                    <p className="text-sm text-[#64748B]">of 120 min</p>
                 </div>
             </div>
 
-            {/* Question Stats Bar */}
-            <div className="mt-4 bg-white rounded-xl p-4 shadow-sm border flex flex-wrap justify-center gap-6">
-                <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                        ✓
-                    </span>
-                    <div className="leading-tight">
-                        <span className="block text-[10px] uppercase tracking-wide text-gray-400">Correct</span>
-                        <span className="text-sm font-semibold text-green-600">{correctCount}</span>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] sm:p-5">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-[#E2E8F0]">
+                    <div className="flex h-full w-full">
+                        <div className="bg-[#10B981]" style={{ width: `${correctPercent}%` }} />
+                        <div className="bg-[#EF4444]" style={{ width: `${incorrectPercent}%` }} />
+                        <div className="bg-[#94A3B8]" style={{ width: `${unansweredPercent}%` }} />
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                        ✗
-                    </span>
-                    <div className="leading-tight">
-                        <span className="block text-[10px] uppercase tracking-wide text-gray-400">Incorrect</span>
-                        <span className="text-sm font-semibold text-red-600">{incorrectCount}</span>
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                    <div>
+                        <p className="text-xs uppercase tracking-wide text-[#64748B]">Correct</p>
+                        <p className="text-lg font-semibold text-[#10B981]">{correctCount}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs uppercase tracking-wide text-[#64748B]">Incorrect</p>
+                        <p className="text-lg font-semibold text-[#EF4444]">{incorrectCount}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs uppercase tracking-wide text-[#64748B]">Skipped</p>
+                        <p className="text-lg font-semibold text-[#64748B]">{unansweredCount}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs uppercase tracking-wide text-[#64748B]">Attempt Rate</p>
+                        <p className="text-lg font-semibold text-[#0F172A]">{attemptRate?.toFixed(1) ?? '--'}%</p>
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 bg-gray-400 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                        –
-                    </span>
-                    <div className="leading-tight">
-                        <span className="block text-[10px] uppercase tracking-wide text-gray-400">Skipped</span>
-                        <span className="text-sm font-semibold text-gray-500">{unansweredCount}</span>
-                    </div>
-                </div>
-                {attemptRate !== null && (
-                    <div className="flex items-center gap-2 text-gray-600">
-                        Attempt Rate: <strong>{attemptRate.toFixed(1)}%</strong>
-                    </div>
-                )}
             </div>
         </div>
     );

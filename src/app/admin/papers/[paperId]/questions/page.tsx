@@ -85,71 +85,95 @@ export default async function PaperQuestionsPage({ params }: PageProps) {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Questions</h1>
                     <p className="text-sm text-gray-500">{paper.title}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <Link
                         href={`/admin/papers/${paperId}/edit`}
-                        className="px-3 py-2 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                        className="touch-target inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700"
                     >
                         Live Edit
                     </Link>
                     <Link
                         href={`/admin/papers/${paperId}/settings`}
-                        className="px-3 py-2 text-sm rounded-md bg-slate-700 text-white hover:bg-slate-800"
+                        className="touch-target inline-flex items-center justify-center rounded-md bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-800"
                     >
                         Settings
                     </Link>
                 </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Section</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Topic</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {questions && questions.length > 0 ? (
-                            questions.map((q) => (
-                                <tr key={q.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-3 text-sm text-gray-700">{q.question_number}</td>
-                                    <td className="px-6 py-3 text-sm text-gray-700">{q.section}</td>
-                                    <td className="px-6 py-3 text-sm text-gray-700">{q.question_type}</td>
-                                    <td className="px-6 py-3 text-sm text-gray-500">{q.topic || '—'}</td>
-                                    <td className="px-6 py-3 text-sm">
-                                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${q.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
-                                            {q.is_active ? 'Active' : 'Inactive'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-3 text-right text-sm font-medium">
-                                        <QuestionRowActions
-                                            questionId={q.id}
-                                            isActive={q.is_active}
-                                            editHref={`/admin/papers/${paperId}/edit?qid=${q.id}`}
-                                        />
-                                    </td>
+            {questions && questions.length > 0 ? (
+                <>
+                    <div className="space-y-3 md:hidden">
+                        {questions.map((q) => (
+                            <article key={q.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-xs text-gray-500">Question #{q.question_number}</p>
+                                        <p className="mt-1 text-sm font-semibold text-gray-900">{q.section} - {q.question_type}</p>
+                                    </div>
+                                    <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${q.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                                        {q.is_active ? 'Active' : 'Inactive'}
+                                    </span>
+                                </div>
+                                <p className="mt-2 text-sm text-gray-600">Topic: {q.topic || '-'}</p>
+                                <div className="mt-3 border-t border-gray-100 pt-3">
+                                    <QuestionRowActions
+                                        questionId={q.id}
+                                        isActive={q.is_active}
+                                        editHref={`/admin/papers/${paperId}/edit?qid=${q.id}`}
+                                    />
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+
+                    <div className="hidden overflow-hidden rounded-lg border border-gray-200 bg-white md:block">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">#</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Section</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Type</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Topic</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Status</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
                                 </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                                    No questions found for this paper.
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white">
+                                {questions.map((q) => (
+                                    <tr key={q.id} className="hover:bg-gray-50">
+                                        <td className="px-6 py-3 text-sm text-gray-700">{q.question_number}</td>
+                                        <td className="px-6 py-3 text-sm text-gray-700">{q.section}</td>
+                                        <td className="px-6 py-3 text-sm text-gray-700">{q.question_type}</td>
+                                        <td className="px-6 py-3 text-sm text-gray-500">{q.topic || '-'}</td>
+                                        <td className="px-6 py-3 text-sm">
+                                            <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${q.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                                                {q.is_active ? 'Active' : 'Inactive'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-3 text-right text-sm font-medium">
+                                            <QuestionRowActions
+                                                questionId={q.id}
+                                                isActive={q.is_active}
+                                                editHref={`/admin/papers/${paperId}/edit?qid=${q.id}`}
+                                            />
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
+            ) : (
+                <div className="rounded-lg border border-gray-200 bg-white px-6 py-8 text-center text-gray-500">
+                    No questions found for this paper.
+                </div>
+            )}
         </div>
     );
 }

@@ -127,25 +127,31 @@ const ROADMAP_ITEMS = [
 const CAT_HUB_ITEMS = [
     {
         title: '1. The "Syllabus Completion" Trap',
-        body: 'Dropdown Content: Treating CAT as a knowledge test is fatal. Theory is 20%; application is 80%. CAT does not test if you know a formula, but if you can spot a hidden Algebra concept inside a Geometry problem.\nAI Insight: Use Mirror View to see if you are over-investing time in "easy" theory questions while failing tricky applications.',
+        body: 'Treating CAT as a knowledge test is fatal. Theory is 20%; application is 80%. CAT does not test if you know a formula, but if you can spot a hidden Algebra concept inside a Geometry problem.\nAI Insight: Use Mirror View to see if you are over-investing time in "easy" theory questions while failing tricky applications.',
     },
     {
         title: '2. Emotional "Sunk Cost" in DILR',
-        body: 'Dropdown Content: The Ego Trap: Spending 8+ minutes on a set and refusing to leave because you have already "invested" time. Breakthroughs usually happen in the first 5 minutes; if not, walk away.\nPro Move: Detach emotionally. Skipping the wrong set is as valuable as solving the right one.',
+        body: 'The Ego Trap: Spending 8+ minutes on a set and refusing to leave because you have already "invested" time. Breakthroughs usually happen in the first 5 minutes; if not, walk away.\nPro Move: Detach emotionally. Skipping the wrong set is as valuable as solving the right one.',
     },
     {
         title: '3. Rote-Rule Dependency in VARC',
-        body: 'Dropdown Content: Mechanical reading kills your rhythm. Relying solely on elimination techniques makes you slow. High percentilers build a reading ear through volume, allowing them to feel when an option is "off-tone".\nStrategy: Stop hunting for keywords; start following the author\'s argument.',
+        body: 'Mechanical reading kills your rhythm. Relying solely on elimination techniques makes you slow. High percentilers build a reading ear through volume, allowing them to feel when an option is "off-tone".\nStrategy: Stop hunting for keywords; start following the author\'s argument.',
     },
     {
         title: '4. Ignoring the "Fatigue Tax"',
-        body: 'Dropdown Content: Quant is the final section. Your brain\'s RAM is exhausted by then. Solving questions in chronological order (1, 2, 3...) is a recipe for failure.\nThe Fix: Use the Round Robin method. If the AI Coach detects you are missing easy Arithmetic late in the mock, your energy management is flawed.',
+        body: 'Quant is the final section. Your brain\'s RAM is exhausted by then. Solving questions in chronological order (1, 2, 3...) is a recipe for failure.\nThe Fix: Use the Round Robin method. If the AI Coach detects you are missing easy Arithmetic late in the mock, your energy management is flawed.',
     },
     {
         title: '5. The "Fixed Attempt" Fallacy',
-        body: 'Dropdown Content: Entering the hall with a target number (e.g., "I must do 15") leads to panic and blind guessing when a paper is tough. In difficult years, accuracy beats volume every time.\nThe Reality: 8-9 correct answers in a brutal section can still land a 99 percentile. Learn to read the paper\'s difficulty, not just chase a number.',
+        body: 'Entering the hall with a target number (e.g., "I must do 15") leads to panic and blind guessing when a paper is tough. In difficult years, accuracy beats volume every time.\nThe Reality: 8-9 correct answers in a brutal section can still land a 99 percentile. Learn to read the paper\'s difficulty, not just chase a number.',
     },
 ];
+
+const STATIC_LANDING_FALLBACKS: Record<string, string> = {
+    hero_mock_ui: '/landing-fallbacks/hero-mock-ui.svg',
+    hero_mirror_view: '/landing-fallbacks/hero-mirror-view.svg',
+    mentor_photo: '/landing-fallbacks/mentor-photo.svg',
+};
 
 function useCanHover(): boolean {
     const [canHover, setCanHover] = useState(false);
@@ -190,16 +196,24 @@ function AssetImage({
     imageClassName,
 }: AssetImageProps) {
     const [failed, setFailed] = useState(false);
+    const [useStaticFallback, setUseStaticFallback] = useState(false);
     const warnedRef = useRef(false);
     const asset = assets[assetKey];
     const source = asset?.public_url ?? '';
+    const staticFallback = STATIC_LANDING_FALLBACKS[assetKey] ?? '';
+    const activeSource = useStaticFallback || !source ? (staticFallback || source) : source;
 
     useEffect(() => {
-        if (!isLoading && !source && !warnedRef.current) {
+        setFailed(false);
+        setUseStaticFallback(false);
+    }, [assetKey, source]);
+
+    useEffect(() => {
+        if (!isLoading && !activeSource && !warnedRef.current) {
             console.warn(`[landing-assets] missing asset for ${assetKey}`);
             warnedRef.current = true;
         }
-    }, [assetKey, isLoading, source]);
+    }, [activeSource, assetKey, isLoading]);
 
     if (isLoading) {
         return (
@@ -210,7 +224,7 @@ function AssetImage({
         );
     }
 
-    if (!source || failed) {
+    if (!activeSource || failed) {
         return (
             <div
                 className={`relative flex items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white/70 ${containerClassName ?? ''
@@ -227,10 +241,16 @@ function AssetImage({
 
     return (
         <img
-            src={source}
+            src={activeSource}
             alt={asset?.alt_text ?? fallbackLabel}
             className={imageClassName ?? containerClassName}
-            onError={() => setFailed(true)}
+            onError={() => {
+                if (!useStaticFallback && source && staticFallback) {
+                    setUseStaticFallback(true);
+                    return;
+                }
+                setFailed(true);
+            }}
         />
     );
 }
@@ -500,22 +520,22 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
     }, []);
 
     return (
-        <div className={`${bodyFont.className} min-h-screen overflow-x-hidden bg-slate-50 text-slate-900`}>
-            <div className="relative overflow-hidden bg-gradient-to-br from-slate-50 via-white to-emerald-50">
+        <div className={`${bodyFont.className} min-h-screen overflow-x-clip bg-slate-50 text-slate-900`}>
+            <div className="relative overflow-x-clip bg-gradient-to-br from-slate-50 via-white to-emerald-50">
                 <div className="pointer-events-none absolute -top-32 -right-24 h-72 w-72 rounded-full bg-emerald-200/40 blur-3xl" />
                 <div className="pointer-events-none absolute -bottom-40 left-16 h-96 w-96 rounded-full bg-amber-200/40 blur-3xl" />
 
                 <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur">
-                    <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6 sm:py-5">
-                        <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">
+                    <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-5">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-xs font-semibold text-white sm:h-10 sm:w-10 sm:rounded-2xl sm:text-sm">
                                 CAT
                             </div>
-                            <div>
+                            <div className="min-w-0">
                                 <div className={`${headingFont.className} text-sm font-semibold text-slate-900`}>
                                     NEXAMS
                                 </div>
-                                <div className="text-xs text-slate-500">Prep like it's exam day</div>
+                                <div className="truncate text-xs text-slate-500">Prep like it&#39;s exam day</div>
                             </div>
                         </div>
 
@@ -535,7 +555,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                             <button
                                 type="button"
                                 onClick={() => setIsAuthOpen(true)}
-                                className="group relative inline-flex min-h-[44px] items-center justify-center rounded-full bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] sm:px-5 sm:text-sm"
+                                className="group relative hidden min-h-[44px] items-center justify-center rounded-full bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 active:scale-[0.98] lg:inline-flex lg:px-5 lg:text-sm"
                             >
                                 <span className="absolute inset-0 -z-10 rounded-full bg-emerald-300/30 opacity-0 blur-xl transition group-hover:opacity-100 motion-safe:group-hover:animate-[landing-glow_2.8s_ease-in-out_infinite]" />
                                 Start a free mock
@@ -555,14 +575,14 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                     </div>
                 </header>
 
-                <main>
+                <main className="px-4 sm:px-6">
                     <section
                         id="hero"
                         ref={heroRef}
-                        className="mx-auto w-full max-w-6xl px-4 pb-16 pt-10 sm:px-6 sm:pt-14 lg:pt-24"
+                        className="mx-auto w-full max-w-6xl pb-8 pt-6 sm:pb-16 sm:pt-12 lg:pt-24"
                     >
-                        <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
-                            <div className="space-y-6">
+                        <div className="grid items-center gap-6 lg:gap-12 lg:grid-cols-[1.05fr_0.95fr]">
+                            <div className="space-y-4 sm:space-y-6">
                                 <div className="space-y-2">
                                     <span className="inline-flex items-center rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                         Free during beta &bull; CAT 2026
@@ -570,7 +590,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                                     <p className="text-xs text-slate-500">Early access open for CAT 2026 (beta).</p>
                                 </div>
                                 <h1
-                                    className={`${headingFont.className} text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl motion-safe:animate-[landing-fade-up_0.7s_ease-out]`}
+                                    className={`${headingFont.className} max-w-full break-words whitespace-normal text-[clamp(1.55rem,6vw,2.4rem)] font-semibold leading-[1.18] tracking-tight text-slate-900 sm:leading-tight md:text-5xl lg:text-6xl motion-safe:animate-[landing-fade-up_0.7s_ease-out]`}
                                 >
                                     Practice like it's your D-Day. Get hyper-customized analytics.
                                 </h1>
@@ -580,11 +600,11 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                                 >
                                     AI coaching guided by top percentilers - built from your attempt behavior (time, order, revisits, accuracy).
                                 </p>
-                                <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600">
+                                <div className="flex flex-wrap gap-2 gap-y-1.5 text-[10px] font-semibold text-slate-600 sm:gap-3 sm:gap-y-2 sm:text-[11px]">
                                     {HERO_CHIPS.map((chip) => (
                                         <span
                                             key={chip}
-                                            className="rounded-full border border-slate-200 bg-white px-3 py-1"
+                                            className="inline-flex max-w-full shrink-0 items-center break-words whitespace-normal rounded-full border border-slate-200 bg-white px-2.5 py-0.5 leading-snug sm:px-3 sm:py-1"
                                         >
                                             {chip}
                                         </span>
@@ -606,19 +626,19 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                                 </div>
                             </div>
 
-                            <div className="space-y-4">
-                                <div className="rounded-[32px] border border-slate-200 bg-white/70 p-4 shadow-lg">
+                            <div className="min-w-0 space-y-3 sm:space-y-4">
+                                <div className="min-w-0 rounded-2xl border border-slate-200 bg-white/70 p-2.5 shadow-lg sm:rounded-[32px] sm:p-4">
                                     <div
                                         ref={carouselRef}
-                                        className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth lg:overflow-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                                        className="min-w-0 flex snap-x snap-mandatory overflow-x-auto scroll-smooth lg:overflow-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                                         onScroll={handleCarouselScroll}
                                         onMouseEnter={() => setCarouselPaused(true)}
                                         onMouseLeave={() => setCarouselPaused(false)}
                                     >
                                         {HERO_SLIDES.map((slide) => (
-                                            <div key={slide.id} className="min-w-full snap-center px-1">
-                                                <div className="space-y-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-                                                    <div className="relative h-[210px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 sm:h-[240px]">
+                                            <div key={slide.id} className="min-w-full snap-center px-0.5 sm:px-1">
+                                                <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:space-y-4 sm:rounded-[24px] sm:p-4">
+                                                    <div className="relative h-[150px] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50 sm:h-[240px] sm:rounded-2xl">
                                                         {slide.assetKey ? (
                                                             <AssetImage
                                                                 assetKey={slide.assetKey}
@@ -663,8 +683,8 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                                         ))}
                                     </div>
                                 </div>
-                                <div className="flex flex-col items-center gap-2">
-                                    <div className="flex items-center gap-2">
+                                <div className="w-full min-w-0 space-y-1.5 sm:space-y-2">
+                                    <div className="flex items-center justify-center gap-2">
                                         {HERO_SLIDES.map((slide, index) => (
                                             <button
                                                 key={slide.id}
@@ -674,7 +694,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                                                 aria-label={`Go to ${slide.label} slide`}
                                             >
                                                 <span
-                                                    className={`block h-2.5 w-2.5 rounded-full transition ${index === activeSlide
+                                                    className={`block h-2 w-2 rounded-full transition sm:h-2.5 sm:w-2.5 ${index === activeSlide
                                                         ? 'bg-slate-900'
                                                         : 'bg-slate-300'
                                                         }`}
@@ -682,11 +702,11 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                                             </button>
                                         ))}
                                     </div>
-                                    <div className="grid w-full grid-cols-3 text-center text-[11px] font-semibold text-slate-500">
+                                    <div className="mx-auto grid w-full max-w-full min-w-0 grid-cols-3 text-center text-[9px] font-semibold text-slate-500 sm:text-[11px]">
                                         {HERO_SLIDES.map((slide, index) => (
                                             <span
                                                 key={slide.id}
-                                                className={index === activeSlide ? 'text-slate-900' : ''}
+                                                className={`truncate px-0.5 sm:px-1 ${index === activeSlide ? 'text-slate-900' : ''}`}
                                             >
                                                 {slide.label}
                                             </span>
@@ -698,7 +718,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                     </section>
 
                     <section className="border-y border-slate-200 bg-white">
-                        <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
+                        <div className="mx-auto w-full max-w-6xl py-6">
                             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {LIVE_STRIP_ITEMS.map((item) => (
                                     <div
@@ -715,7 +735,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                         </div>
                     </section>
 
-                    <section id="ai-insights-marketing" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                    <section id="ai-insights-marketing" className="mx-auto w-full max-w-6xl py-10 sm:py-16">
                         <div className="space-y-4">
                             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Demo NexAI insights</p>
                             <details className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -730,7 +750,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                         </div>
                     </section>
 
-                    <section id="mentor" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                    <section id="mentor" className="mx-auto w-full max-w-6xl py-10 sm:py-16">
                         <div className="grid items-center gap-8 lg:grid-cols-[1.05fr_0.95fr]">
                             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
@@ -767,7 +787,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                     </section>
 
                     <section id="features" className="border-y border-slate-200 bg-white">
-                        <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                        <div className="mx-auto w-full max-w-6xl py-10 sm:py-16">
                             <div className="space-y-3">
                                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Features</p>
                                 <h2 className={`${headingFont.className} text-3xl font-semibold text-slate-900`}>
@@ -807,7 +827,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                         </div>
                     </section>
 
-                    <section id="roadmap" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                    <section id="roadmap" className="mx-auto w-full max-w-6xl py-10 sm:py-16">
                         <div className="space-y-8">
                             <div className="space-y-3">
                                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Roadmap</p>
@@ -837,7 +857,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                         </div>
                     </section>
 
-                    <section id="cat-hub" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
+                    <section id="cat-hub" className="mx-auto w-full max-w-6xl py-10 sm:py-16">
                         <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
                             <div>
                                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">CAT Hub</p>
@@ -867,7 +887,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                 </main>
 
                 <footer className="border-t border-slate-200 bg-white">
-                    <div className="mx-auto grid w-full max-w-6xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1.2fr_0.8fr]">
+                    <div className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8 sm:gap-8 sm:px-6 sm:py-12 md:grid-cols-[1.2fr_0.8fr]">
                         <div>
                             <div className={`${headingFont.className} text-lg font-semibold text-slate-900`}>
                                 NEXAMS
@@ -903,7 +923,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                 <button
                     type="button"
                     onClick={scrollToTop}
-                    className="fixed bottom-6 left-6 z-40 inline-flex min-h-[44px] items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 shadow-md transition hover:-translate-y-0.5 hover:bg-slate-50"
+                    className="fixed bottom-6 right-4 z-40 hidden min-h-[44px] items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 shadow-md transition hover:-translate-y-0.5 hover:bg-slate-50 sm:inline-flex sm:right-6"
                 >
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 15l6-6 6 6" />

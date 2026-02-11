@@ -10,7 +10,8 @@
 import 'server-only';
 
 import { getServiceRoleClient } from '@/lib/supabase/service-role';
-import type { SectionName, SectionScore } from '@/types/exam';
+import type { PerformanceReason, SectionName, SectionScore } from '@/types/exam';
+import { compareAnswers } from '@/features/exam-engine/lib/scoring';
 import { validateAiAnalysisExport } from './validateAiAnalysisExport';
 
 // =============================================================================
@@ -52,11 +53,31 @@ interface ResponseRow {
     answer_history?: unknown;
 }
 
-interface ContextRow {
+type QuestionReasonMap = Record<string, PerformanceReason>;
+
+interface QuestionSetContextRow {
+    id: string;
+    context_title?: string | null;
+    context_body?: string | null;
+    set_type?: string | null;
+    section?: string | null;
+    context_image_url?: string | null;
+}
+
+interface LegacyContextRow {
     id: string;
     title?: string | null;
     content?: string | null;
     context_type?: string | null;
+    section?: string | null;
+    image_url?: string | null;
+}
+
+interface ContextRow {
+    id: string;
+    title?: string | null;
+    content_text?: string | null;
+    content_type?: string | null;
     section?: string | null;
     image_url?: string | null;
 }
@@ -78,11 +99,22 @@ export interface SchemaExportItem {
         is_visited: boolean | null;
         is_marked_for_review: boolean | null;
         answer_history: unknown;
+        performance_reason: PerformanceReason | null;
     };
     derived: {
         attempt_state: 'correct' | 'incorrect' | 'unanswered';
         did_switch_answer: boolean;
     };
+}
+
+export interface ReasonForPerformanceMetrics {
+    incorrect: number;
+    concept_gap: number;
+    careless_error: number;
+    time_pressure: number;
+    guess_unsure: number;
+    tagged_incorrect: number;
+    untagged_incorrect: number;
 }
 
 export interface SchemaExportSection {
@@ -136,6 +168,7 @@ export interface PerformanceMetrics {
     positive_marks_earned: number | null;
     negative_marks_lost: number | null;
     marks_per_minute: number | null;
+    reason_for_performance: ReasonForPerformanceMetrics;
     section_metrics: Record<SectionName, PerformanceSectionMetrics>;
 }
 
@@ -210,15 +243,32 @@ export interface CompositeContextPacket {
 
 /** Determine attempt_state from response data */
 function deriveAttemptState(
+    question: QuestionRow,
     response: ResponseRow | undefined,
 ): 'correct' | 'incorrect' | 'unanswered' {
-    if (!response || response.answer == null || response.answer === '') {
+    const answer = response?.answer;
+    const normalizedAnswer = typeof answer === 'string' ? answer.trim() : '';
+    if (!response || answer == null || normalizedAnswer === '') {
         return 'unanswered';
     }
+
     if (response.is_correct === true) return 'correct';
     if (response.is_correct === false) return 'incorrect';
-    // Fallback: answered but is_correct is null (shouldn't happen for graded exams)
-    return 'unanswered';
+
+    const normalizedCorrect = typeof question.correct_answer === 'string'
+        ? question.correct_answer.trim()
+        : '';
+    if (normalizedCorrect) {
+        const qType = String(question.question_type).toUpperCase() === 'TITA' ? 'TITA' : 'MCQ';
+        return compareAnswers(normalizedAnswer, normalizedCorrect, qType) ? 'correct' : 'incorrect';
+    }
+
+    if (typeof response.marks_obtained === 'number' && Number.isFinite(response.marks_obtained)) {
+        return response.marks_obtained > 0 ? 'correct' : 'incorrect';
+    }
+
+    // Answer exists but grading metadata is missing; treat as attempted so analytics do not undercount.
+    return 'incorrect';
 }
 
 /** Check if user changed their answer at least once */
@@ -237,6 +287,59 @@ function roundMetric(value: number | null): number | null {
 function percent(numerator: number, denominator: number): number | null {
     if (denominator <= 0) return null;
     return roundMetric((numerator / denominator) * 100);
+}
+
+function hasNonEmptyText(value: string | null | undefined): boolean {
+    return typeof value === 'string' && value.trim() !== '';
+}
+
+function toContextObject(ctx: ContextRow | undefined): Record<string, unknown> | null {
+    if (!ctx) return null;
+
+    const hasStimulus = hasNonEmptyText(ctx.title)
+        || hasNonEmptyText(ctx.content_text)
+        || hasNonEmptyText(ctx.image_url);
+    if (!hasStimulus) return null;
+
+    return {
+        id: ctx.id,
+        title: ctx.title ?? null,
+        content_text: ctx.content_text ?? null,
+        content_type: ctx.content_type ?? null,
+        section: ctx.section ?? null,
+        image_url: ctx.image_url ?? null,
+    };
+}
+
+function resolveQuestionContextObject(
+    question: QuestionRow,
+    contextsMap: Map<string, ContextRow>,
+): Record<string, unknown> | null {
+    const setContext = question.set_id ? toContextObject(contextsMap.get(question.set_id)) : null;
+    if (setContext) return setContext;
+    return question.context_id ? toContextObject(contextsMap.get(question.context_id)) : null;
+}
+
+function sanitizeQuestionReasons(raw: unknown): QuestionReasonMap {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+
+    const allowed = new Set<PerformanceReason>([
+        'concept_gap',
+        'careless_error',
+        'time_pressure',
+        'guess',
+    ]);
+
+    const result: QuestionReasonMap = {};
+    for (const [questionIdRaw, reasonRaw] of Object.entries(raw as Record<string, unknown>)) {
+        const questionId = questionIdRaw.trim();
+        if (!questionId || questionId.length > 128) continue;
+        if (typeof reasonRaw !== 'string') continue;
+        if (!allowed.has(reasonRaw as PerformanceReason)) continue;
+        result[questionId] = reasonRaw as PerformanceReason;
+    }
+
+    return result;
 }
 
 // =============================================================================
@@ -282,6 +385,7 @@ export async function generateCompositeContextPacket(
     if (questionsError) {
         return { data: null, error: questionsError.message };
     }
+    const questionRows = (questions ?? []) as QuestionRow[];
 
     // ── 4) Fetch responses ───────────────────────────────────────────────────
     const { data: responses, error: responsesError } = await admin
@@ -294,23 +398,65 @@ export async function generateCompositeContextPacket(
     }
 
     // ── 5) Fetch contexts for RC / DILR passages ─────────────────────────────
-    const contextIds = Array.from(
+    const setIds = Array.from(
         new Set(
-            (questions ?? [])
+            questionRows
+                .map((q: QuestionRow) => q.set_id)
+                .filter((id): id is string => Boolean(id))
+        )
+    );
+    const legacyContextIds = Array.from(
+        new Set(
+            questionRows
                 .map((q: QuestionRow) => q.context_id)
                 .filter((id): id is string => Boolean(id))
         )
     );
 
     const contextsMap = new Map<string, ContextRow>();
-    if (contextIds.length > 0) {
-        const { data: ctxRows } = await admin
+    if (setIds.length > 0) {
+        const { data: setRows, error: setRowsError } = await admin
+            .from('question_sets')
+            .select('id, context_title, context_body, set_type, section, context_image_url')
+            .in('id', setIds);
+
+        if (setRowsError) {
+            console.warn('[AI Analysis Export] Failed to fetch question_sets for context mapping:', setRowsError);
+        } else {
+            for (const row of (setRows ?? []) as QuestionSetContextRow[]) {
+                contextsMap.set(row.id, {
+                    id: row.id,
+                    title: row.context_title ?? null,
+                    content_text: row.context_body ?? null,
+                    content_type: row.set_type ?? null,
+                    section: row.section ?? null,
+                    image_url: row.context_image_url ?? null,
+                });
+            }
+        }
+    }
+
+    // Legacy fallback for older papers that still rely on question_contexts.
+    if (legacyContextIds.length > 0) {
+        const { data: ctxRows, error: ctxRowsError } = await admin
             .from('question_contexts')
             .select('id, title, content, context_type, section, image_url')
-            .in('id', contextIds);
+            .in('id', legacyContextIds);
 
-        for (const c of (ctxRows ?? []) as ContextRow[]) {
-            contextsMap.set(c.id, c);
+        if (ctxRowsError) {
+            console.warn('[AI Analysis Export] Failed to fetch question_contexts fallback:', ctxRowsError);
+        } else {
+            for (const row of (ctxRows ?? []) as LegacyContextRow[]) {
+                if (contextsMap.has(row.id)) continue;
+                contextsMap.set(row.id, {
+                    id: row.id,
+                    title: row.title ?? null,
+                    content_text: row.content ?? null,
+                    content_type: row.context_type ?? null,
+                    section: row.section ?? null,
+                    image_url: row.image_url ?? null,
+                });
+            }
         }
     }
 
@@ -346,6 +492,9 @@ export async function generateCompositeContextPacket(
     for (const r of (responses ?? []) as ResponseRow[]) {
         responseMap.set(r.question_id, r);
     }
+    const questionReasonMap = sanitizeQuestionReasons(
+        (attempt as { ai_analysis_question_reasons?: unknown }).ai_analysis_question_reasons
+    );
 
     // ── 8) Group questions by section & build sections[] ─────────────────────
     const sectionOrder: SectionName[] = ['VARC', 'DILR', 'QA'];
@@ -353,7 +502,7 @@ export async function generateCompositeContextPacket(
     for (const s of sectionOrder) {
         sectionQuestions.set(s, []);
     }
-    for (const q of (questions ?? []) as QuestionRow[]) {
+    for (const q of questionRows) {
         const sec = q.section as SectionName;
         if (sectionQuestions.has(sec)) {
             sectionQuestions.get(sec)!.push(q);
@@ -386,8 +535,13 @@ export async function generateCompositeContextPacket(
 
         const items: SchemaExportItem[] = sQuestions.map((q) => {
             const resp = responseMap.get(q.id);
-            const attemptState = deriveAttemptState(resp);
+            const attemptState = deriveAttemptState(q, resp);
             const didSwitch = deriveDidSwitchAnswer(resp);
+            const inferredIsCorrect = attemptState === 'correct'
+                ? true
+                : attemptState === 'incorrect'
+                    ? false
+                    : null;
 
             // Count for summary
             if (attemptState === 'correct') sectionCorrect++;
@@ -397,19 +551,8 @@ export async function generateCompositeContextPacket(
             const timeSpent = resp?.time_spent_seconds ?? 0;
             sectionTimeSpent += typeof timeSpent === 'number' ? timeSpent : 0;
 
-            // Build context object if this question has a passage/context
-            let contextObj: Record<string, unknown> | null = null;
-            if (q.context_id && contextsMap.has(q.context_id)) {
-                const ctx = contextsMap.get(q.context_id)!;
-                contextObj = {
-                    id: ctx.id,
-                    title: ctx.title ?? null,
-                    content_text: ctx.content ?? null,
-                    content_type: ctx.context_type ?? null,
-                    section: ctx.section ?? null,
-                    image_url: ctx.image_url ?? null,
-                };
-            }
+            // Prefer set-based context mapping; fallback to legacy context_id when needed.
+            const contextObj = resolveQuestionContextObject(q, contextsMap);
 
             return {
                 question: {
@@ -430,20 +573,21 @@ export async function generateCompositeContextPacket(
                     difficulty_level: q.difficulty ?? null,
                     ideal_time_seconds: q.ideal_time_seconds ?? null,
                     set_id: q.set_id ?? null,
-                    context_id: q.context_id ?? null,
+                    context_id: q.context_id ?? q.set_id ?? null,
                     question_image_url: q.question_image_url ?? null,
                 },
                 context: contextObj,
                 user_result: {
                     answer: resp?.answer ?? null,
                     selected_option: null,
-                    is_correct: resp?.is_correct ?? null,
+                    is_correct: resp?.is_correct ?? inferredIsCorrect,
                     marks_obtained: resp?.marks_obtained != null ? Number(resp.marks_obtained) : null,
                     time_spent_seconds: resp?.time_spent_seconds != null ? Number(resp.time_spent_seconds) : null,
                     visit_count: resp?.visit_count != null ? Number(resp.visit_count) : null,
                     is_visited: resp?.is_visited ?? null,
                     is_marked_for_review: resp?.is_marked_for_review ?? null,
                     answer_history: Array.isArray(resp?.answer_history) ? resp.answer_history : null,
+                    performance_reason: questionReasonMap[q.id] ?? null,
                 },
                 derived: {
                     attempt_state: attemptState,
@@ -471,7 +615,6 @@ export async function generateCompositeContextPacket(
     }
 
     // ── 9) Build composite packet (schema v1) ────────────────────────────────
-    const questionRows = (questions ?? []) as QuestionRow[];
     const responseRows = (responses ?? []) as ResponseRow[];
     const sectionSummaryByName = new Map(sections.map((section) => [section.name, section.summary]));
 
@@ -510,7 +653,7 @@ export async function generateCompositeContextPacket(
     let rapidGuessCount = 0;
     for (const q of questionRows) {
         const response = responseMap.get(q.id);
-        const state = deriveAttemptState(response);
+        const state = deriveAttemptState(q, response);
         if (state === 'unanswered') continue;
 
         const spent = response?.time_spent_seconds;
@@ -592,6 +735,30 @@ export async function generateCompositeContextPacket(
         };
     }
 
+    const reasonCounts: ReasonForPerformanceMetrics = {
+        incorrect: totalIncorrect,
+        concept_gap: 0,
+        careless_error: 0,
+        time_pressure: 0,
+        guess_unsure: 0,
+        tagged_incorrect: 0,
+        untagged_incorrect: 0,
+    };
+
+    for (const section of sections) {
+        for (const item of section.items) {
+            if (item.derived.attempt_state !== 'incorrect') continue;
+            const reason = item.user_result.performance_reason;
+            if (!reason) continue;
+            reasonCounts.tagged_incorrect += 1;
+            if (reason === 'concept_gap') reasonCounts.concept_gap += 1;
+            else if (reason === 'careless_error') reasonCounts.careless_error += 1;
+            else if (reason === 'time_pressure') reasonCounts.time_pressure += 1;
+            else if (reason === 'guess') reasonCounts.guess_unsure += 1;
+        }
+    }
+    reasonCounts.untagged_incorrect = Math.max(reasonCounts.incorrect - reasonCounts.tagged_incorrect, 0);
+
     const performanceMetrics: PerformanceMetrics = {
         self_reported_reason: attempt.ai_analysis_user_prompt ?? null,
         total_questions: totalQuestions,
@@ -629,6 +796,7 @@ export async function generateCompositeContextPacket(
         marks_per_minute: timeTakenSeconds != null && timeTakenSeconds > 0 && netScore != null
             ? roundMetric(netScore / (timeTakenSeconds / 60))
             : null,
+        reason_for_performance: reasonCounts,
         section_metrics: sectionMetrics,
     };
 

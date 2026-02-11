@@ -21,7 +21,7 @@ import {
     type FetchPaperResponse,
     type SubmitExamResponse,
 } from './validation';
-import type { Question, Attempt, SectionName, TimeRemaining, QuestionContext } from '@/types/exam';
+import type { Question, Attempt, SectionName, TimeRemaining, QuestionContext, PerformanceReason } from '@/types/exam';
 import { getSectionDurationSecondsMap, getPaperTotalDurationSeconds } from '@/types/exam';
 
 export interface ActionResult<T> {
@@ -573,18 +573,18 @@ export async function submitExam(
         // CRITICAL: Select 'id' so we can promote fallback attempt ID
         let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, paper_id, started_at, paused_at, total_paused_seconds')
+            .select('id, user_id, status, paper_id, started_at, paused_at, total_paused_seconds, time_remaining')
             .eq('id', normalizedAttemptId)
             .maybeSingle();
 
         if (attemptError?.code === '42703') {
             const retry = await adminClient
                 .from('attempts')
-                .select('id, user_id, status, paper_id, started_at')
+                .select('id, user_id, status, paper_id, started_at, time_remaining')
                 .eq('id', normalizedAttemptId)
                 .maybeSingle();
             attempt = retry.data
-                ? { ...retry.data, paused_at: null, total_paused_seconds: 0 }
+                ? { ...retry.data, paused_at: null, total_paused_seconds: 0, time_remaining: retry.data.time_remaining ?? null }
                 : attempt;
             attemptError = retry.error ?? null;
         }
@@ -715,24 +715,88 @@ export async function submitExam(
             const startedAtMs = new Date(attempt.started_at).getTime();
             const rawElapsedSeconds = Math.floor((Date.now() - startedAtMs) / 1000);
             const elapsedSeconds = Math.max(0, rawElapsedSeconds - effectivePausedSeconds);
+            const timeRemainingRecord = attempt.time_remaining as Record<string, unknown> | null | undefined;
+            const hasServerRemainingTime = Boolean(
+                timeRemainingRecord &&
+                ['VARC', 'DILR', 'QA'].some((section) => {
+                    const value = timeRemainingRecord[section];
+                    return typeof value === 'number' && Number.isFinite(value) && value > 0;
+                })
+            );
 
-            if (elapsedSeconds > MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS) {
+            if (elapsedSeconds > MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS && !hasServerRemainingTime) {
                 examLogger.securityEvent('Late submission rejected', {
                     attemptId: normalizedAttemptId,
                     elapsedSeconds,
                     maxAllowed: MAX_EXAM_DURATION_SECONDS + GRACE_PERIOD_SECONDS,
                 });
 
-                await adminClient
-                    .from('attempts')
-                    .update({
-                        status: 'completed',
-                        submitted_at: new Date().toISOString(),
-                        completed_at: new Date().toISOString(),
-                    })
-                    .eq('id', normalizedAttemptId);
+                // FIX: Still score the attempt so results aren't all-zero / null.
+                // Previously this returned without calling calculateScore, leaving
+                // total_score, correct_count, etc. as null → UI showed -1 or 0.
+                const lateNow = new Date().toISOString();
+                try {
+                    const { data: lateQuestions } = await adminClient
+                        .from('questions')
+                        .select('*')
+                        .eq('paper_id', attempt.paper_id)
+                        .eq('is_active', true);
+                    const { data: lateResponses } = await supabase
+                        .from('responses')
+                        .select('question_id, answer, time_spent_seconds')
+                        .eq('attempt_id', normalizedAttemptId);
+                    if (lateQuestions && lateResponses) {
+                        const { calculateScore, calculateTimeTaken } = await import('./scoring');
+                        const lateScoring = calculateScore(
+                            lateQuestions as Array<Question & { correct_answer: string }>,
+                            lateResponses
+                        );
+                        const lateTimeTaken = calculateTimeTaken(attempt.started_at, lateNow, effectivePausedSeconds);
+                        await adminClient
+                            .from('attempts')
+                            .update({
+                                status: 'completed',
+                                submitted_at: lateNow,
+                                completed_at: lateNow,
+                                total_score: lateScoring.total_score,
+                                max_possible_score: lateScoring.max_possible_score,
+                                correct_count: lateScoring.correct_count,
+                                incorrect_count: lateScoring.incorrect_count,
+                                unanswered_count: lateScoring.unanswered_count,
+                                accuracy: lateScoring.accuracy,
+                                attempt_rate: lateScoring.attempt_rate,
+                                section_scores: lateScoring.section_scores,
+                                time_taken_seconds: lateTimeTaken,
+                            })
+                            .eq('id', normalizedAttemptId);
+                    } else {
+                        // Fallback: mark completed without scores if queries fail
+                        await adminClient
+                            .from('attempts')
+                            .update({ status: 'completed', submitted_at: lateNow, completed_at: lateNow })
+                            .eq('id', normalizedAttemptId);
+                    }
+                } catch (scoringErr) {
+                    logger.error('Late-submit scoring failed, marking completed without scores', scoringErr, {
+                        attemptId: normalizedAttemptId,
+                    });
+                    await adminClient
+                        .from('attempts')
+                        .update({ status: 'completed', submitted_at: lateNow, completed_at: lateNow })
+                        .eq('id', normalizedAttemptId);
+                }
 
-                return { success: false, error: 'Exam time exceeded. Late submissions are not accepted.' };
+                // Attempt has been finalized; return success to avoid false negative UX
+                // where user sees an error but refresh shows completed analytics.
+                return {
+                    success: true,
+                    data: {
+                        success: true,
+                        already_submitted: true,
+                        late_submission_finalized: true,
+                        attemptId: normalizedAttemptId,
+                    } as unknown as SubmitExamResponse,
+                };
             }
         }
 
@@ -846,17 +910,33 @@ export async function submitExam(
                 attemptId: normalizedAttemptId,
                 paperId: attempt.paper_id,
             });
-            return { success: false, error: 'Failed to fetch questions for scoring' };
+            // Do not surface a hard failure after we have already transitioned to "submitted".
+            // Result page can still render using submitted status and derived client-side scoring.
+            return {
+                success: true,
+                data: {
+                    success: true,
+                    already_submitted: true,
+                    attemptId: normalizedAttemptId,
+                } as unknown as SubmitExamResponse,
+            };
         }
 
-        const { data: responses, error: responsesError } = await supabase
+        const { data: responses, error: responsesError } = await adminClient
             .from('responses')
             .select('question_id, answer, time_spent_seconds')
             .eq('attempt_id', normalizedAttemptId);
 
         if (responsesError) {
             logger.error('Failed to fetch responses for scoring', responsesError, { attemptId: normalizedAttemptId });
-            return { success: false, error: 'Failed to fetch responses' };
+            return {
+                success: true,
+                data: {
+                    success: true,
+                    already_submitted: true,
+                    attemptId: normalizedAttemptId,
+                } as unknown as SubmitExamResponse,
+            };
         }
 
         // Submission integrity check (log-only)
@@ -1107,7 +1187,8 @@ export async function pauseExam(data: {
 
 export async function requestAIAnalysis(
     attemptId: string,
-    customizationPrompt?: string | null
+    customizationPrompt?: string | null,
+    questionReasons?: Record<string, PerformanceReason | null> | null
 ): Promise<ActionResult<{ status: string }>> {
     try {
         const supabase = await sbSSR();
@@ -1161,16 +1242,47 @@ export async function requestAIAnalysis(
             return { success: false, error: 'Customization prompt is too long (max 4000 characters)' };
         }
 
+        const allowedReasons = new Set<PerformanceReason>([
+            'concept_gap',
+            'careless_error',
+            'time_pressure',
+            'guess',
+        ]);
+        const sanitizedQuestionReasons: Record<string, PerformanceReason> = {};
+
+        if (questionReasons && typeof questionReasons === 'object' && !Array.isArray(questionReasons)) {
+            for (const [questionIdRaw, reasonRaw] of Object.entries(questionReasons)) {
+                const questionId = questionIdRaw.trim();
+                if (!questionId || questionId.length > 128) continue;
+                if (!reasonRaw || typeof reasonRaw !== 'string') continue;
+                if (!allowedReasons.has(reasonRaw as PerformanceReason)) continue;
+                sanitizedQuestionReasons[questionId] = reasonRaw as PerformanceReason;
+            }
+        }
+
         // 5) Update status -> requested (use service-role to bypass RLS column restrictions)
-        const { error: updateError } = await admin
+        const updatePayload: Record<string, unknown> = {
+            ai_analysis_status: 'requested',
+            ai_analysis_requested_at: new Date().toISOString(),
+            ai_analysis_user_prompt: prompt,
+            ai_analysis_result_text: null,
+            ai_analysis_question_reasons: sanitizedQuestionReasons,
+        };
+
+        let { error: updateError } = await admin
             .from('attempts')
-            .update({
-                ai_analysis_status: 'requested',
-                ai_analysis_requested_at: new Date().toISOString(),
-                ai_analysis_user_prompt: prompt,
-                ai_analysis_result_text: null,
-            })
+            .update(updatePayload)
             .eq('id', attemptId);
+
+        // Migration fallback: allow request to succeed even before ai_analysis_question_reasons column exists.
+        if (updateError?.code === '42703') {
+            delete updatePayload.ai_analysis_question_reasons;
+            const fallback = await admin
+                .from('attempts')
+                .update(updatePayload)
+                .eq('id', attemptId);
+            updateError = fallback.error;
+        }
 
         if (updateError) {
             logger.error('requestAIAnalysis update error', updateError, { attemptId });

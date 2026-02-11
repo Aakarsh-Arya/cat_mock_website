@@ -72,8 +72,7 @@ export function ResultReviewClient({
     attemptId,
 }: ResultReviewClientProps) {
     const assembled = useMemo(() => assemblePaper(questionSets), [questionSets]);
-    // Default to expanded/fullscreen for better editing experience
-    const [isExpanded, setIsExpanded] = useState(true);
+    const [isExpanded, setIsExpanded] = useState(false);
     const hasInitializedRef = useRef(false);
     const storageKey = `attempt:${attemptId ?? 'unknown'}:reviewNav`;
 
@@ -148,6 +147,11 @@ export function ResultReviewClient({
         const minutes = Math.floor(totalSeconds / 60);
         const remainingSeconds = totalSeconds % 60;
         return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+    };
+
+    const formatVisitCount = (visitCount?: number | null) => {
+        if (visitCount == null || !Number.isFinite(visitCount)) return '--';
+        return String(Math.max(0, Math.floor(visitCount)));
     };
 
     const questionPositionMap = useMemo(() => {
@@ -315,8 +319,16 @@ export function ResultReviewClient({
     }, [navState, storageKey, currentSet]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (window.matchMedia('(min-width: 1024px)').matches) {
+            setIsExpanded(true);
+        }
+    }, []);
+
+    useEffect(() => {
         if (typeof document === 'undefined') return;
-        if (isExpanded) {
+        const isDesktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
+        if (isExpanded && isDesktop) {
             document.body.style.overflow = 'hidden';
         } else {
             document.body.style.overflow = '';
@@ -329,50 +341,52 @@ export function ResultReviewClient({
     return (
         <section
             id="exam-review"
-            className={`bg-exam-bg-page border border-exam-bg-border-light overflow-hidden font-exam flex flex-col min-h-[620px] ${isExpanded ? 'fixed inset-0 z-[80] rounded-none h-screen shadow-2xl' : 'rounded-2xl h-[calc(100vh-220px)]'}`}
+            className={`bg-exam-bg-page border border-exam-bg-border-light overflow-hidden font-exam flex flex-col min-h-[560px] ${isExpanded ? 'fixed inset-0 z-[80] h-[100dvh] rounded-none shadow-2xl' : 'h-auto rounded-2xl md:h-[calc(100vh-220px)]'}`}
         >
-            <header className="h-14 flex items-center justify-between px-6 bg-gradient-to-r from-exam-header-from to-exam-header-to text-white">
-                <div className="flex items-center gap-3">
+            <header className="flex min-h-14 flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-exam-header-from to-exam-header-to px-3 py-2 text-white sm:px-4">
+                <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                     <span className="inline-flex items-center rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
                         Review Mode
                     </span>
-                    <h2 className="text-base font-semibold">{paperTitle}</h2>
+                    <h2 className="truncate text-sm font-semibold sm:text-base">{paperTitle}</h2>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-white/80">
-                    <span>Exam-style Review</span>
+                <div className="flex items-center gap-2 text-xs text-white/80">
+                    <span className="hidden sm:inline">Exam-style Review</span>
                     <button
                         type="button"
                         onClick={() => setIsExpanded((prev) => !prev)}
-                        className="rounded-full border border-white/30 px-3 py-1 text-[11px] font-semibold text-white hover:bg-white/10"
+                        className="touch-target hidden rounded-full border border-white/30 px-3 py-1 text-[11px] font-semibold text-white hover:bg-white/10 sm:inline-flex sm:items-center"
                     >
                         {isExpanded ? 'Exit Fullscreen' : 'Expand'}
                     </button>
                 </div>
             </header>
 
-            <div className="bg-white border-b border-exam-bg-border flex">
-                {SECTION_ORDER.map((section) => {
-                    const isActive = navState.section === section;
-                    const label = section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section;
-                    return (
-                        <button
-                            key={section}
-                            type="button"
-                            onClick={() => handleSectionChange(section)}
-                            className={`px-6 py-3 text-sm font-semibold transition-colors border-b-2 ${isActive
-                                ? 'border-blue-600 text-blue-600 bg-blue-50'
-                                : 'border-transparent text-gray-600 hover:text-gray-800 hover:bg-gray-50'
-                                }`}
-                        >
-                            {label} ({sectionCounts[section]})
-                        </button>
-                    );
-                })}
+            <div className="mobile-table-scroll border-b border-exam-bg-border bg-white">
+                <div className="flex min-w-max">
+                    {SECTION_ORDER.map((section) => {
+                        const isActive = navState.section === section;
+                        const label = section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section;
+                        return (
+                            <button
+                                key={section}
+                                type="button"
+                                onClick={() => handleSectionChange(section)}
+                                className={`touch-target whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition-colors sm:px-6 ${isActive
+                                    ? 'border-blue-600 bg-blue-50 text-blue-600'
+                                    : 'border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-800'
+                                    }`}
+                            >
+                                {label} ({sectionCounts[section]})
+                            </button>
+                        );
+                    })}
+                </div>
             </div>
 
             <div className="flex-1 overflow-hidden">
-                <div className={`h-full grid ${hasContextPane ? 'grid-cols-[48%_33%_19%]' : 'grid-cols-[81%_19%]'}`}>
-                    <div className={`min-h-0 overflow-hidden ${hasContextPane ? 'col-span-2 grid grid-cols-2' : 'col-span-1'}`}>
+                <div className={`h-full grid ${hasContextPane ? 'grid-cols-1 lg:grid-cols-[48%_33%_19%]' : 'grid-cols-1 lg:grid-cols-[81%_19%]'}`}>
+                    <div className={`min-h-0 overflow-hidden ${hasContextPane ? 'col-span-1 lg:col-span-2 lg:grid lg:grid-cols-2' : 'col-span-1'}`}>
                         {currentSet ? (
                             <QuestionRenderer
                                 questionSet={currentSet}
@@ -392,10 +406,10 @@ export function ResultReviewClient({
                         )}
                     </div>
 
-                    <aside className="border-l border-exam-bg-border bg-slate-50 overflow-y-auto min-h-0">
-                        <div className="p-4">
+                    <aside className="min-h-0 overflow-y-auto border-t border-exam-bg-border bg-slate-50 lg:border-l lg:border-t-0">
+                        <div className="p-3 sm:p-4">
                             <h3 className="font-semibold text-gray-700 mb-3">Attempt Order</h3>
-                            <div className="grid grid-cols-5 gap-2">
+                            <div className="grid grid-cols-6 gap-2 sm:grid-cols-7 lg:grid-cols-5">
                                 {attemptOrderIds.map((questionId, index) => {
                                     const q = questionById.get(questionId);
                                     if (!q) return null;
@@ -424,7 +438,7 @@ export function ResultReviewClient({
                                             key={q.id}
                                             type="button"
                                             onClick={() => handlePaletteSelect(q.id)}
-                                            className={`w-10 h-10 rounded text-sm font-medium transition-colors ${isActive
+                                            className={`touch-target h-11 w-11 rounded text-sm font-medium transition-colors ${isActive
                                                 ? `${statusClass} ring-2 ring-offset-1 ring-blue-400`
                                                 : `${statusClass} hover:opacity-90`
                                                 }`}
@@ -443,14 +457,14 @@ export function ResultReviewClient({
                                 })}
                             </div>
 
-                            <div className="mt-6 p-3 bg-white rounded border border-gray-200 text-xs text-gray-600 space-y-2">
+                            <div className="mt-5 rounded border border-gray-200 bg-white p-3 text-xs text-gray-600 space-y-2">
                                 <div className="flex items-center justify-between">
                                     <div className="font-semibold text-gray-700">Question Metadata</div>
                                     {currentQuestion && (
                                         <button
                                             type="button"
                                             onClick={() => toggleBookmark(currentQuestion.id)}
-                                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold transition-colors ${isBookmarked
+                                            className={`touch-target inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold transition-colors ${isBookmarked
                                                 ? 'border-amber-300 bg-amber-50 text-amber-600'
                                                 : 'border-gray-200 text-gray-500 hover:bg-gray-50'
                                                 }`}
@@ -473,10 +487,14 @@ export function ResultReviewClient({
                                         </button>
                                     )}
                                 </div>
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                                     <div>
                                         <span className="text-gray-400 block">Time Spent</span>
                                         <span className="font-semibold text-gray-800">{formatDuration(currentResponseMeta?.time_spent_seconds)}</span>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-400 block">Visit Count</span>
+                                        <span className="font-semibold text-gray-800">{formatVisitCount(currentResponseMeta?.visit_count)}</span>
                                     </div>
                                     <div>
                                         <span className="text-gray-400 block">Status</span>
@@ -484,15 +502,15 @@ export function ResultReviewClient({
                                     </div>
                                     <div>
                                         <span className="text-gray-400 block">Topic</span>
-                                        <span className="font-semibold text-gray-800">{currentQuestion?.topic ?? '—'}</span>
+                                        <span className="font-semibold text-gray-800">{currentQuestion?.topic ?? '-'}</span>
                                     </div>
                                     <div>
                                         <span className="text-gray-400 block">Subtopic</span>
-                                        <span className="font-semibold text-gray-800">{currentQuestion?.subtopic ?? '—'}</span>
+                                        <span className="font-semibold text-gray-800">{currentQuestion?.subtopic ?? '-'}</span>
                                     </div>
                                     <div>
                                         <span className="text-gray-400 block">Difficulty</span>
-                                        <span className="font-semibold text-gray-800">{currentQuestion?.difficulty ?? '—'}</span>
+                                        <span className="font-semibold text-gray-800">{currentQuestion?.difficulty ?? '-'}</span>
                                     </div>
                                     <div>
                                         <span className="text-gray-400 block">Section</span>
@@ -518,7 +536,7 @@ export function ResultReviewClient({
                                                             if (!currentQuestion) return;
                                                             setAnalysisReason(currentQuestion.id, isActive ? null : option.value);
                                                         }}
-                                                        className={`px-2.5 py-1 text-[11px] rounded-full border transition-colors ${isActive
+                                                        className={`touch-target rounded-full border px-2.5 py-1 text-[11px] transition-colors ${isActive
                                                             ? 'bg-amber-500 text-white border-amber-500'
                                                             : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-100'
                                                             }`}
@@ -539,3 +557,4 @@ export function ResultReviewClient({
         </section>
     );
 }
+

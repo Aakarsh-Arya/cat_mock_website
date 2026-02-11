@@ -82,11 +82,11 @@ export default async function QuestionsPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h1 className="text-2xl font-bold text-gray-900">Questions</h1>
                 <Link
                     href="/admin/questions/new"
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    className="touch-target inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
                 >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -95,80 +95,127 @@ export default async function QuestionsPage() {
                 </Link>
             </div>
 
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                #
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Question
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Paper
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Section
-                            </th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Type
-                            </th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                Actions
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {questions && questions.length > 0 ? (
-                            questions.map((question) => (
-                                <tr key={question.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        {question.question_number}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="text-sm text-gray-900 line-clamp-2 max-w-md">
-                                            {question.question_text.substring(0, 100)}...
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        {question.papers?.title || 'Unknown'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${question.section === 'VARC' ? 'bg-blue-100 text-blue-800' :
-                                            question.section === 'DILR' ? 'bg-purple-100 text-purple-800' :
-                                                'bg-green-100 text-green-800'
-                                            }`}>
-                                            {question.section}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${question.question_type === 'MCQ'
-                                            ? 'bg-gray-100 text-gray-800'
-                                            : 'bg-yellow-100 text-yellow-800'
-                                            }`}>
-                                            {question.question_type}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                        <QuestionRowActions
-                                            questionId={question.id}
-                                            isActive={question.is_active}
-                                            editHref={`/admin/papers/${question.paper_id}/edit`}
-                                        />
-                                    </td>
+            {questions && questions.length > 0 ? (
+                <>
+                    <div className="space-y-3 md:hidden">
+                        {questions.map((question) => (
+                            <article key={question.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                                <div className="mb-3 flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-xs text-gray-500">Question #{question.question_number}</p>
+                                        <p className="mt-1 text-sm text-gray-900">
+                                            {question.question_text.substring(0, 120)}...
+                                        </p>
+                                    </div>
+                                    <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${question.question_type === 'MCQ'
+                                        ? 'bg-gray-100 text-gray-800'
+                                        : 'bg-yellow-100 text-yellow-800'
+                                        }`}>
+                                        {question.question_type}
+                                    </span>
+                                </div>
+
+                                <dl className="mobile-kv">
+                                    <div className="col-span-2">
+                                        <dt>Paper</dt>
+                                        <dd>{question.papers?.title || 'Unknown'}</dd>
+                                    </div>
+                                    <div>
+                                        <dt>Section</dt>
+                                        <dd>{question.section}</dd>
+                                    </div>
+                                    <div>
+                                        <dt>Status</dt>
+                                        <dd>{question.is_active ? 'Active' : 'Inactive'}</dd>
+                                    </div>
+                                </dl>
+
+                                <div className="mt-4 border-t border-gray-100 pt-3">
+                                    <QuestionRowActions
+                                        questionId={question.id}
+                                        isActive={question.is_active}
+                                        editHref={`/admin/papers/${question.paper_id}/edit`}
+                                    />
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+
+                    <div className="hidden overflow-hidden rounded-lg bg-white shadow md:block">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                                        #
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                                        Question
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                                        Paper
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                                        Section
+                                    </th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                                        Type
+                                    </th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
+                                        Actions
+                                    </th>
                                 </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                                    No questions found. <Link href="/admin/questions/new" className="text-blue-600 hover:underline">Add your first question</Link>
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 bg-white">
+                                {questions.map((question) => (
+                                    <tr key={question.id} className="hover:bg-gray-50">
+                                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                                            {question.question_number}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="line-clamp-2 max-w-md text-sm text-gray-900">
+                                                {question.question_text.substring(0, 100)}...
+                                            </div>
+                                        </td>
+                                        <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                                            {question.papers?.title || 'Unknown'}
+                                        </td>
+                                        <td className="whitespace-nowrap px-6 py-4">
+                                            <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${question.section === 'VARC' ? 'bg-blue-100 text-blue-800' :
+                                                question.section === 'DILR' ? 'bg-purple-100 text-purple-800' :
+                                                    'bg-green-100 text-green-800'
+                                                }`}>
+                                                {question.section}
+                                            </span>
+                                        </td>
+                                        <td className="whitespace-nowrap px-6 py-4">
+                                            <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${question.question_type === 'MCQ'
+                                                ? 'bg-gray-100 text-gray-800'
+                                                : 'bg-yellow-100 text-yellow-800'
+                                                }`}>
+                                                {question.question_type}
+                                            </span>
+                                        </td>
+                                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm font-medium">
+                                            <QuestionRowActions
+                                                questionId={question.id}
+                                                isActive={question.is_active}
+                                                editHref={`/admin/papers/${question.paper_id}/edit`}
+                                            />
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </>
+            ) : (
+                <div className="rounded-lg border border-gray-200 bg-white px-6 py-12 text-center text-gray-500">
+                    No questions found.{' '}
+                    <Link href="/admin/questions/new" className="text-blue-600 hover:underline">
+                        Add your first question
+                    </Link>
+                </div>
+            )}
         </div>
     );
 }

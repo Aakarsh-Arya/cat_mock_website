@@ -34,7 +34,7 @@ export default async function MockDetailPage({
     searchParams,
 }: {
     params: Promise<Record<string, unknown>>;
-    searchParams?: { error?: string };
+    searchParams?: { error?: string; limit_reached?: string };
 }) {
     const { paperId } = (await params) as { paperId: string };
 
@@ -44,7 +44,6 @@ export default async function MockDetailPage({
     let paper: Paper | null = null;
     let paperError: unknown = null;
 
-    // Check if paperId looks like a UUID
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
 
     if (isUUID) {
@@ -57,7 +56,6 @@ export default async function MockDetailPage({
         paperError = result.error;
     }
 
-    // If not found by UUID or not a UUID, try by slug
     if (!paper && !paperError) {
         const result = await supabase
             .from('papers')
@@ -68,7 +66,6 @@ export default async function MockDetailPage({
         paperError = result.error;
     }
 
-    // Get user's previous attempts on this paper
     const { data: { user } } = await supabase.auth.getUser();
     let previousAttempts: { id: string; status: string; total_score: number | null; created_at: string }[] = [];
 
@@ -82,7 +79,6 @@ export default async function MockDetailPage({
         previousAttempts = attempts || [];
     }
 
-    // Check attempt limit (count completed + submitted only)
     const attemptLimitStatuses = new Set(['completed', 'submitted']);
     const activeAttemptsCount = previousAttempts.filter((a) => attemptLimitStatuses.has(a.status)).length;
     const attemptLimit = paper?.attempt_limit ?? null;
@@ -108,7 +104,6 @@ export default async function MockDetailPage({
             redirect(`/mock/${paperId}?error=rate_limited`);
         }
 
-        // Check if paperId looks like a UUID
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
 
         type PaperData = { id: string; published: boolean; sections: SectionConfig[]; duration_minutes: number; attempt_limit: number | null };
@@ -136,12 +131,9 @@ export default async function MockDetailPage({
             throw new Error('Paper not available');
         }
 
-        // Prepare section durations for attempt validation and initialization
         const sections = (p.sections as SectionConfig[]) || [];
         const sectionDurations = getSectionDurationSecondsMap(sections);
 
-        // Start Mock always creates a new attempt.
-        // If an existing in-progress/paused attempt exists, abandon it (resume only via Continue button).
         try {
             const adminClient = getServiceRoleClient();
             const { data: existingAttempt } = await adminClient
@@ -186,7 +178,6 @@ export default async function MockDetailPage({
             }
         }
 
-        // Initialize time remaining for each section
         const timeRemaining: Record<SectionName, number> = {
             VARC: sectionDurations.VARC,
             DILR: sectionDurations.DILR,
@@ -212,169 +203,152 @@ export default async function MockDetailPage({
         }
 
         incrementMetric('attempt_created');
-
         redirect(`/exam/${attempt.id}`);
     }
 
     if (paperError) {
         return (
-            <main style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
-                <h1>Error Loading Paper</h1>
-                <p style={{ color: 'crimson' }}>Failed to load paper. Please try again later.</p>
-                <Link href="/mocks">Back to Mocks</Link>
+            <main className="page-shell py-6 sm:py-8">
+                <h1 className="text-2xl font-bold text-slate-900">Error Loading Paper</h1>
+                <p className="mt-2 text-red-700">Failed to load paper. Please try again later.</p>
+                <Link href="/mocks" className="touch-target mt-4 inline-flex items-center text-blue-600 hover:text-blue-800">
+                    Back to Mocks
+                </Link>
             </main>
         );
     }
 
     if (!paper) {
         return (
-            <main style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
-                <h1>Paper Not Found</h1>
-                <p>The requested mock test does not exist.</p>
-                <Link href="/mocks">Browse Available Mocks</Link>
+            <main className="page-shell py-6 sm:py-8">
+                <h1 className="text-2xl font-bold text-slate-900">Paper Not Found</h1>
+                <p className="mt-2 text-slate-600">The requested mock test does not exist.</p>
+                <Link href="/mocks" className="touch-target mt-4 inline-flex items-center text-blue-600 hover:text-blue-800">
+                    Browse Available Mocks
+                </Link>
             </main>
         );
     }
 
     const queryError = searchParams?.error ?? null;
+    const limitReached = searchParams?.limit_reached === '1';
+    const difficultyClass = paper.difficulty_level === 'hard'
+        ? 'bg-rose-100 text-rose-700'
+        : paper.difficulty_level === 'medium'
+            ? 'bg-amber-100 text-amber-700'
+            : 'bg-emerald-100 text-emerald-700';
 
     return (
-        <main style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
+        <main className="page-shell py-6 sm:py-8">
             {queryError === 'rate_limited' && (
-                <div style={{ marginBottom: 16, color: 'crimson' }}>
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     Too many start attempts. Please wait a minute and try again.
                 </div>
             )}
+            {limitReached && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    You have reached the maximum number of attempts for this paper.
+                </div>
+            )}
 
-            {/* Paper Header */}
-            <div style={{ marginBottom: 32 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                    <h1 style={{ margin: 0 }}>{paper.title}</h1>
+            <div className="mb-8">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">{paper.title}</h1>
                     {paper.is_free && (
-                        <span style={{
-                            padding: '4px 8px',
-                            background: '#4caf50',
-                            color: 'white',
-                            borderRadius: 4,
-                            fontSize: 12
-                        }}>FREE</span>
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">FREE</span>
                     )}
                     {paper.difficulty_level && (
-                        <span style={{
-                            padding: '4px 8px',
-                            background: paper.difficulty_level === 'hard' ? '#f44336' : paper.difficulty_level === 'medium' ? '#ff9800' : '#4caf50',
-                            color: 'white',
-                            borderRadius: 4,
-                            fontSize: 12
-                        }}>{paper.difficulty_level.toUpperCase()}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${difficultyClass}`}>
+                            {paper.difficulty_level.toUpperCase()}
+                        </span>
                     )}
                 </div>
-                {paper.description && <p style={{ color: '#666', marginTop: 8 }}>{paper.description}</p>}
+                {paper.description && <p className="mt-2 text-slate-600">{paper.description}</p>}
             </div>
 
-            {/* Paper Stats */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
-                gap: 16,
-                marginBottom: 32,
-                padding: 20,
-                background: '#f5f5f5',
-                borderRadius: 12
-            }}>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Questions</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 'bold' }}>{paper.total_questions}</p>
+            <div className="mb-8 grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-4 sm:gap-4 sm:p-5">
+                <div className="text-center">
+                    <p className="text-xs text-slate-500 sm:text-sm">Questions</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-900">{paper.total_questions}</p>
                 </div>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Total Marks</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 'bold' }}>{paper.total_marks}</p>
+                <div className="text-center">
+                    <p className="text-xs text-slate-500 sm:text-sm">Total Marks</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-900">{paper.total_marks}</p>
                 </div>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Duration</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 'bold' }}>{paper.duration_minutes} min</p>
+                <div className="text-center">
+                    <p className="text-xs text-slate-500 sm:text-sm">Duration</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-900">{paper.duration_minutes} min</p>
                 </div>
-                <div style={{ textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#666' }}>Year</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 24, fontWeight: 'bold' }}>{paper.year}</p>
+                <div className="text-center">
+                    <p className="text-xs text-slate-500 sm:text-sm">Year</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-900">{paper.year}</p>
                 </div>
             </div>
 
-            {/* Marking Scheme */}
-            <h2 style={{ marginBottom: 16 }}>Marking Scheme</h2>
-            <div style={{
-                padding: 16,
-                background: '#fff3e0',
-                borderRadius: 8,
-                marginBottom: 32,
-                fontSize: 14
-            }}>
-                <p style={{ margin: '0 0 8px' }}><strong>MCQ Questions:</strong> +3 for correct, -1 for incorrect, 0 for unanswered</p>
-                <p style={{ margin: 0 }}><strong>TITA Questions:</strong> +3 for correct, 0 for incorrect/unanswered (No negative marking)</p>
+            <h2 className="mb-3 text-xl font-semibold text-slate-900">Marking Scheme</h2>
+            <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="mb-2"><strong>MCQ Questions:</strong> +3 for correct, -1 for incorrect, 0 for unanswered</p>
+                <p><strong>TITA Questions:</strong> +3 for correct, 0 for incorrect/unanswered (No negative marking)</p>
             </div>
 
-            {/* Previous Attempts */}
             {previousAttempts.length > 0 && (
                 <>
-                    <h2 style={{ marginBottom: 16 }}>Your Previous Attempts</h2>
-                    <div style={{ marginBottom: 32 }}>
+                    <h2 className="mb-4 text-xl font-semibold text-slate-900">Your Previous Attempts</h2>
+                    <div className="mb-8 space-y-3">
                         {previousAttempts.map((attempt, idx) => (
-                            <div key={attempt.id} style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                padding: 12,
-                                background: idx % 2 === 0 ? '#f9f9f9' : '#fff',
-                                borderRadius: 4,
-                                marginBottom: 4
-                            }}>
-                                <span>Attempt {previousAttempts.length - idx}</span>
-                                <span style={{ color: '#666' }}>{new Date(attempt.created_at).toLocaleDateString()}</span>
-                                <span style={{
-                                    color: attempt.status === 'completed' || attempt.status === 'submitted' ? '#4caf50' : '#ff9800'
-                                }}>{attempt.status}</span>
-                                <span style={{ fontWeight: 'bold' }}>
-                                    {attempt.total_score !== null ? `${attempt.total_score} marks` : '—'}
-                                </span>
-                                {attempt.status === 'completed' || attempt.status === 'submitted' ? (
-                                    <Link href={`/result/${attempt.id}`} style={{ color: '#1976d2' }}>View Result</Link>
-                                ) : attempt.status === 'in_progress' ? (
-                                    <Link href={`/exam/${attempt.id}`} style={{ color: '#ff9800' }}>Continue</Link>
-                                ) : (
-                                    <span style={{ color: '#999' }}>—</span>
-                                )}
+                            <div key={attempt.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                                <div className="mb-2 flex items-center justify-between gap-3">
+                                    <span className="text-sm font-semibold text-slate-900">Attempt {previousAttempts.length - idx}</span>
+                                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${(attempt.status === 'completed' || attempt.status === 'submitted') ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {attempt.status}
+                                    </span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                                    <span>{new Date(attempt.created_at).toLocaleDateString()}</span>
+                                    <span className="font-semibold text-slate-900">
+                                        {attempt.total_score !== null ? `${attempt.total_score} marks` : '-'}
+                                    </span>
+                                </div>
+                                <div className="mt-3">
+                                    {attempt.status === 'completed' || attempt.status === 'submitted' ? (
+                                        <Link href={`/result/${attempt.id}`} className="touch-target inline-flex items-center text-blue-600 hover:text-blue-800">
+                                            View Result
+                                        </Link>
+                                    ) : attempt.status === 'in_progress' ? (
+                                        <Link href={`/exam/${attempt.id}`} className="touch-target inline-flex items-center text-amber-700 hover:text-amber-800">
+                                            Continue
+                                        </Link>
+                                    ) : (
+                                        <span className="text-sm text-slate-400">-</span>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
                 </>
             )}
 
-            {/* Start Exam Button */}
-            <div style={{ textAlign: 'center' }}>
+            <div className="text-center">
                 {!paper.published ? (
-                    <p style={{ color: '#666' }}>This paper is not yet available.</p>
+                    <p className="text-slate-600">This paper is not yet available.</p>
                 ) : !canAttempt ? (
-                    <p style={{ color: '#f44336' }}>You have reached the maximum number of attempts for this paper.</p>
+                    <p className="text-red-700">You have reached the maximum number of attempts for this paper.</p>
                 ) : (
                     <form action={startExam}>
-                        <button type="submit" style={{
-                            padding: '16px 48px',
-                            background: '#1976d2',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: 8,
-                            fontSize: 18,
-                            fontWeight: 'bold',
-                            cursor: 'pointer'
-                        }}>
+                        <button
+                            type="submit"
+                            className="touch-target inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700 sm:w-auto sm:px-10"
+                        >
                             {previousAttempts.length > 0 ? 'Start New Attempt' : 'Start Exam'}
                         </button>
                     </form>
                 )}
             </div>
 
-            <div style={{ marginTop: 24, textAlign: 'center' }}>
-                <Link href="/mocks" style={{ color: '#666' }}>← Back to All Mocks</Link>
+            <div className="mt-6 text-center">
+                <Link href="/mocks" className="touch-target inline-flex items-center text-slate-600 hover:text-slate-900">
+                    Back to All Mocks
+                </Link>
             </div>
         </main>
     );

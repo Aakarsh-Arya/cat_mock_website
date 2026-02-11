@@ -27,7 +27,6 @@ export default async function MocksPage() {
         data: { user },
     } = await supabase.auth.getUser();
 
-    // Fetch published papers. Availability window is filtered in code for reliability.
     const { data, error } = await supabase
         .from('papers')
         .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, difficulty_level, is_free, available_from, available_until')
@@ -63,8 +62,8 @@ export default async function MocksPage() {
             }
 
             if (
-                (attempt.status === 'in_progress' || attempt.status === 'paused')
-                && hasRemainingTime(attempt.time_remaining)
+                (attempt.status === 'in_progress' || attempt.status === 'paused') &&
+                hasRemainingTime(attempt.time_remaining)
             ) {
                 attemptStateByPaper.set(attempt.paper_id, {
                     kind: 'continue',
@@ -73,10 +72,7 @@ export default async function MocksPage() {
                 return;
             }
 
-            if (
-                !existing
-                && (attempt.status === 'completed' || attempt.status === 'submitted')
-            ) {
+            if (!existing && (attempt.status === 'completed' || attempt.status === 'submitted')) {
                 attemptStateByPaper.set(attempt.paper_id, {
                     kind: 'analysis',
                     attemptId: attempt.id,
@@ -92,7 +88,6 @@ export default async function MocksPage() {
         return (fromOk && untilOk) || attemptStateByPaper.has(p.id);
     });
 
-    // Group papers by year
     const papersByYear = papers.reduce((acc, paper) => {
         const year = paper.year;
         if (!acc[year]) acc[year] = [];
@@ -100,125 +95,105 @@ export default async function MocksPage() {
         return acc;
     }, {} as Record<number, Paper[]>);
 
-    const getDifficultyColor = (level: string | null) => {
-        switch (level) {
-            case 'easy': return '#4caf50';
-            case 'medium': return '#ff9800';
-            case 'hard': return '#f44336';
-            case 'cat-level': return '#9c27b0';
-            default: return '#666';
-        }
+    const difficultyClass: Record<string, string> = {
+        easy: 'bg-emerald-100 text-emerald-700',
+        medium: 'bg-amber-100 text-amber-700',
+        hard: 'bg-rose-100 text-rose-700',
+        'cat-level': 'bg-violet-100 text-violet-700',
     };
 
     return (
-        <main style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-            <h1 style={{ marginBottom: 8 }}>NEXAMS Mock Tests</h1>
-            <p style={{ color: '#666', marginBottom: 32 }}>
+        <main className="page-shell py-6 sm:py-8">
+            <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">NEXAMS Mock Tests</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600 sm:text-base">
                 Practice with full-length CAT mock tests designed to simulate the actual exam experience.
             </p>
 
             {error ? (
-                <p style={{ color: 'crimson' }}>Failed to load papers. Please try again later.</p>
+                <p className="mt-6 text-red-700">Failed to load papers. Please try again later.</p>
             ) : papers.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 48, background: '#f5f5f5', borderRadius: 12 }}>
-                    <h2>No Mock Tests Available</h2>
-                    <p style={{ color: '#666' }}>Check back soon for new mock tests!</p>
+                <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 px-6 py-10 text-center">
+                    <h2 className="text-xl font-semibold text-slate-900">No Mock Tests Available</h2>
+                    <p className="mt-2 text-slate-600">Check back soon for new mock tests.</p>
                 </div>
             ) : (
-                Object.entries(papersByYear)
-                    .sort(([a], [b]) => Number(b) - Number(a))
-                    .map(([year, yearPapers]) => (
-                        <div key={year} style={{ marginBottom: 32 }}>
-                            <h2 style={{ borderBottom: '2px solid #1976d2', paddingBottom: 8, marginBottom: 16 }}>
-                                CAT {year} Pattern
-                            </h2>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-                                {yearPapers.map((p) => {
-                                    const attemptState = attemptStateByPaper.get(p.id);
-                                    const href = attemptState?.kind === 'continue'
-                                        ? `/exam/${attemptState.attemptId}`
-                                        : attemptState?.kind === 'analysis'
-                                            ? `/result/${attemptState.attemptId}`
-                                            : `/mock/${p.slug || p.id}`;
-                                    const ctaLabel = attemptState?.kind === 'continue'
-                                        ? 'Continue Mock'
-                                        : attemptState?.kind === 'analysis'
-                                            ? 'View Analysis'
-                                            : 'Start Mock';
-                                    return (
-                                        <div key={p.id} style={{
-                                            border: '1px solid #ddd',
-                                            borderRadius: 12,
-                                            padding: 20,
-                                            background: '#fff',
-                                            boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-                                            transition: 'box-shadow 0.2s',
-                                        }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                                                <h3 style={{ margin: 0, fontSize: 18 }}>{p.title}</h3>
-                                                <div style={{ display: 'flex', gap: 6 }}>
-                                                    {p.is_free && (
-                                                        <span style={{
-                                                            padding: '2px 8px',
-                                                            background: '#4caf50',
-                                                            color: 'white',
-                                                            borderRadius: 4,
-                                                            fontSize: 11,
-                                                            fontWeight: 'bold'
-                                                        }}>FREE</span>
-                                                    )}
-                                                    {p.difficulty_level && (
-                                                        <span style={{
-                                                            padding: '2px 8px',
-                                                            background: getDifficultyColor(p.difficulty_level),
-                                                            color: 'white',
-                                                            borderRadius: 4,
-                                                            fontSize: 11,
-                                                            fontWeight: 'bold'
-                                                        }}>{p.difficulty_level.toUpperCase()}</span>
-                                                    )}
+                <div className="mt-8 space-y-8">
+                    {Object.entries(papersByYear)
+                        .sort(([a], [b]) => Number(b) - Number(a))
+                        .map(([year, yearPapers]) => (
+                            <section key={year} className="space-y-4">
+                                <div className="border-b border-blue-200 pb-2">
+                                    <h2 className="text-xl font-semibold text-slate-900">CAT {year} Pattern</h2>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                    {yearPapers.map((p) => {
+                                        const attemptState = attemptStateByPaper.get(p.id);
+                                        const href = attemptState?.kind === 'continue'
+                                            ? `/exam/${attemptState.attemptId}`
+                                            : attemptState?.kind === 'analysis'
+                                                ? `/result/${attemptState.attemptId}`
+                                                : `/mock/${p.slug || p.id}`;
+                                        const ctaLabel = attemptState?.kind === 'continue'
+                                            ? 'Continue Mock'
+                                            : attemptState?.kind === 'analysis'
+                                                ? 'View Analysis'
+                                                : 'Start Mock';
+                                        return (
+                                            <article
+                                                key={p.id}
+                                                className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+                                            >
+                                                <div className="mb-3 flex items-start justify-between gap-3">
+                                                    <h3 className="text-lg font-semibold text-slate-900">{p.title}</h3>
+                                                    <div className="flex flex-wrap justify-end gap-1">
+                                                        {p.is_free && (
+                                                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                                                                FREE
+                                                            </span>
+                                                        )}
+                                                        {p.difficulty_level && (
+                                                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${difficultyClass[p.difficulty_level] ?? 'bg-slate-100 text-slate-700'}`}>
+                                                                {p.difficulty_level.toUpperCase()}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {p.description && (
-                                                <p style={{ margin: '0 0 12px', color: '#666', fontSize: 14, lineHeight: 1.4 }}>
-                                                    {p.description.length > 100 ? p.description.substring(0, 100) + '...' : p.description}
-                                                </p>
-                                            )}
+                                                {p.description && (
+                                                    <p className="text-clamp-mobile mb-4 text-sm text-slate-600">
+                                                        {p.description}
+                                                    </p>
+                                                )}
 
-                                            <div style={{
-                                                display: 'flex',
-                                                gap: 16,
-                                                fontSize: 13,
-                                                color: '#666',
-                                                marginBottom: 16,
-                                                paddingTop: 12,
-                                                borderTop: '1px solid #eee'
-                                            }}>
-                                                <span>📝 {p.total_questions} Qs</span>
-                                                <span>🎯 {p.total_marks} marks</span>
-                                                <span>⏱️ {p.duration_minutes} min</span>
-                                            </div>
+                                                <dl className="mb-5 grid grid-cols-3 gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 text-center">
+                                                    <div>
+                                                        <dt className="text-[11px] text-slate-500">Questions</dt>
+                                                        <dd className="text-sm font-semibold text-slate-800">{p.total_questions}</dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt className="text-[11px] text-slate-500">Marks</dt>
+                                                        <dd className="text-sm font-semibold text-slate-800">{p.total_marks}</dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt className="text-[11px] text-slate-500">Duration</dt>
+                                                        <dd className="text-sm font-semibold text-slate-800">{p.duration_minutes ?? '-'}</dd>
+                                                    </div>
+                                                </dl>
 
-                                            <Link href={href} style={{
-                                                display: 'block',
-                                                textAlign: 'center',
-                                                padding: '10px 16px',
-                                                background: '#1976d2',
-                                                color: 'white',
-                                                textDecoration: 'none',
-                                                borderRadius: 6,
-                                                fontWeight: 'bold',
-                                                fontSize: 14
-                                            }}>
-                                                {ctaLabel}
-                                            </Link>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ))
+                                                <Link
+                                                    href={href}
+                                                    className="touch-target mt-auto inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                                                >
+                                                    {ctaLabel}
+                                                </Link>
+                                            </article>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+                        ))}
+                </div>
             )}
         </main>
     );

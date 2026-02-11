@@ -84,23 +84,23 @@ function getStatusStyle(isCorrect: boolean | null, hasAnswer: boolean): {
 } {
     if (!hasAnswer) {
         return {
-            bgClass: 'bg-gray-100',
-            borderClass: 'border-gray-300',
-            textClass: 'text-gray-600',
+            bgClass: 'bg-slate-50',
+            borderClass: 'border-slate-200',
+            textClass: 'text-slate-500',
             label: 'Unanswered',
         };
     }
     if (isCorrect) {
         return {
-            bgClass: 'bg-green-50',
-            borderClass: 'border-green-400',
-            textClass: 'text-green-700',
+            bgClass: 'bg-emerald-50',
+            borderClass: 'border-emerald-300',
+            textClass: 'text-emerald-700',
             label: 'Correct',
         };
     }
     return {
         bgClass: 'bg-red-50',
-        borderClass: 'border-red-400',
+        borderClass: 'border-red-300',
         textClass: 'text-red-700',
         label: 'Incorrect',
     };
@@ -115,8 +115,8 @@ function getMaskedStyle(): {
 } {
     return {
         bgClass: 'bg-white',
-        borderClass: 'border-gray-200',
-        textClass: 'text-gray-700',
+        borderClass: 'border-slate-200',
+        textClass: 'text-slate-700',
         label: 'Review',
     };
 }
@@ -281,9 +281,9 @@ export function QuestionAnalysis({
         <div className="mb-8">
             {showHeader && (
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                    <h2 className="text-xl font-semibold text-gray-800">Question Analysis</h2>
+                    <h2 className="text-xl font-semibold text-[#0F172A]">Question Analysis</h2>
                     {attemptSequenceLabel && (
-                        <span className="text-xs font-semibold uppercase tracking-wide text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1 rounded-full">
+                        <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
                             {attemptSequenceLabel}
                         </span>
                     )}
@@ -291,61 +291,67 @@ export function QuestionAnalysis({
             )}
 
             {/* Filters */}
-            <div className="flex flex-wrap gap-3 mb-6">
-                {/* Section Filter */}
-                <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            <div className="mb-6 rounded-xl border border-slate-200 bg-white p-3 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]">
+                <div className="flex flex-wrap gap-3">
+                    {/* Section Filter */}
+                    <div className="mobile-table-scroll rounded-lg bg-slate-100 p-1">
+                    <div className="flex min-w-max gap-1">
                     {(['all', 'VARC', 'DILR', 'QA'] as const).map((section) => (
                         <button
                             key={section}
                             onClick={() => setActiveSection(section)}
-                            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${activeSection === section
-                                ? 'bg-white shadow text-blue-600 font-medium'
-                                : 'text-gray-600 hover:bg-gray-50'
+                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${activeSection === section
+                                ? 'bg-white shadow-sm text-[#2563EB] font-medium'
+                                : 'text-slate-600 hover:bg-slate-50'
                                 }`}
                         >
                             {section === 'all' ? 'All' : section}
                         </button>
                     ))}
-                </div>
+                    </div>
+                    </div>
 
-                {/* Status Filter */}
-                <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-                    <button
-                        onClick={() => setFilter('all')}
-                        className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'all'
-                            ? 'bg-white shadow text-gray-800 font-medium'
-                            : 'text-gray-600 hover:bg-gray-50'
+                    {/* Status Filter */}
+                    <div className="mobile-table-scroll rounded-lg bg-slate-100 p-1">
+                        <div className="flex min-w-max gap-1">
+                        <button
+                            onClick={() => setFilter('all')}
+                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'all'
+                            ? 'bg-white shadow-sm text-slate-800 font-medium'
+                            : 'text-slate-600 hover:bg-slate-50'
                             }`}
-                    >
-                        All ({questions.length})
-                    </button>
-                    <button
-                        onClick={() => setFilter('correct')}
-                        className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'correct'
-                            ? 'bg-green-100 text-green-700 font-medium'
-                            : 'text-gray-600 hover:bg-gray-50'
+                        >
+                            All ({questions.length})
+                        </button>
+                        <button
+                            onClick={() => setFilter('correct')}
+                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'correct'
+                            ? 'bg-emerald-100 text-emerald-700 font-medium'
+                            : 'text-slate-600 hover:bg-slate-50'
                             }`}
-                    >
-                        ✓ Correct ({stats.correct})
-                    </button>
-                    <button
-                        onClick={() => setFilter('incorrect')}
-                        className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'incorrect'
+                        >
+                            Correct ({stats.correct})
+                        </button>
+                        <button
+                            onClick={() => setFilter('incorrect')}
+                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'incorrect'
                             ? 'bg-red-100 text-red-700 font-medium'
-                            : 'text-gray-600 hover:bg-gray-50'
+                            : 'text-slate-600 hover:bg-slate-50'
                             }`}
-                    >
-                        ✗ Wrong ({stats.incorrect})
-                    </button>
-                    <button
-                        onClick={() => setFilter('unanswered')}
-                        className={`px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'unanswered'
-                            ? 'bg-gray-300 text-gray-700 font-medium'
-                            : 'text-gray-600 hover:bg-gray-50'
+                        >
+                            Incorrect ({stats.incorrect})
+                        </button>
+                        <button
+                            onClick={() => setFilter('unanswered')}
+                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'unanswered'
+                            ? 'bg-slate-300 text-slate-700 font-medium'
+                            : 'text-slate-600 hover:bg-slate-50'
                             }`}
-                    >
-                        – Skipped ({stats.unanswered})
-                    </button>
+                        >
+                            Skipped ({stats.unanswered})
+                        </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -374,12 +380,17 @@ export function QuestionAnalysis({
                                 const isIncorrect = hasAnswer && isCorrect === false;
                                 const isSkipped = !hasAnswer;
                                 const showReasonPicker = isIncorrect || isSkipped;
+                                const hasContext = Boolean(
+                                    question.context_title?.trim()
+                                    || question.context_body?.trim()
+                                    || question.context_image_url
+                                );
 
                                 return (
                                     <div
                                         key={question.id}
                                         id={`question-${question.id}`}
-                                        className={`border-2 ${style.borderClass} ${style.bgClass} rounded-lg overflow-hidden transition-all`}
+                                        className={`border ${style.borderClass} ${style.bgClass} rounded-xl overflow-hidden transition-all shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]`}
                                     >
                                         {/* Question Header (Click to expand) */}
                                         <div
@@ -392,11 +403,11 @@ export function QuestionAnalysis({
                                                     toggleQuestion(question.id);
                                                 }
                                             }}
-                                            className="w-full flex items-center gap-4 p-4 text-left hover:bg-white/50 transition-colors cursor-pointer"
+                                            className="w-full flex items-center gap-4 p-4 text-left hover:bg-slate-50/80 transition-colors cursor-pointer"
                                         >
                                             {/* Question Number */}
-                                            <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-white border flex items-center justify-center">
-                                                <span className="text-sm text-gray-500">Q{question.question_number}</span>
+                                            <div className="flex-shrink-0 h-12 w-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center">
+                                                <span className="text-sm text-slate-500">Q{question.question_number}</span>
                                             </div>
 
                                             {/* Status & Section */}
@@ -411,24 +422,29 @@ export function QuestionAnalysis({
                                                             {hasAnswer ? 'Attempted' : 'Skipped'}
                                                         </span>
                                                     )}
-                                                    <span className="text-xs text-gray-500">
+                                                    <span className="text-xs text-slate-500">
                                                         {question.section}
                                                     </span>
                                                     {question.topic && (
-                                                        <span className="text-xs text-gray-400">
-                                                            • {question.topic}
+                                                        <span className="text-xs text-slate-400">
+                                                            - {question.topic}
+                                                        </span>
+                                                    )}
+                                                    {hasContext && (
+                                                        <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                                                            Context
                                                         </span>
                                                     )}
                                                 </div>
-                                                <div className="text-sm text-gray-700">
+                                                <div className="text-sm text-slate-700">
                                                     <MathText
                                                         text={question.question_text}
                                                         className="line-clamp-2 [&_p]:line-clamp-2 [&_p]:whitespace-pre-wrap"
                                                     />
                                                 </div>
-                                                <p className="text-xs text-gray-500 mt-1">
+                                                <p className="text-xs text-slate-500 mt-1">
                                                     Time: {response?.time_spent_seconds ? formatDuration(response.time_spent_seconds) : '—'}
-                                                    {' '}• Visits: {response?.visit_count ?? '—'}
+                                                    {' '}| Visits: {response?.visit_count ?? '—'}
                                                 </p>
                                             </div>
 
@@ -442,10 +458,10 @@ export function QuestionAnalysis({
                                                                 : '0'
                                                             }
                                                         </span>
-                                                        <span className="text-xs text-gray-400 block">marks</span>
+                                                        <span className="text-xs text-slate-400 block">marks</span>
                                                     </>
                                                 ) : (
-                                                    <span className="text-xs text-gray-400">Click to review</span>
+                                                    <span className="text-xs text-slate-400">Click to review</span>
                                                 )}
                                             </div>
 
@@ -458,7 +474,7 @@ export function QuestionAnalysis({
                                                 }}
                                                 className={`flex-shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full border transition-colors ${isBookmarked
                                                     ? 'border-amber-300 bg-amber-50 text-amber-600'
-                                                    : 'border-gray-200 text-gray-400 hover:bg-gray-50'
+                                                    : 'border-slate-200 text-slate-400 hover:bg-slate-50'
                                                     }`}
                                                 aria-pressed={isBookmarked}
                                                 aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark question'}
@@ -481,7 +497,7 @@ export function QuestionAnalysis({
                                             {/* Expand Icon */}
                                             <div className="flex-shrink-0">
                                                 <svg
-                                                    className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                                    className={`h-5 w-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                                                     fill="none"
                                                     stroke="currentColor"
                                                     viewBox="0 0 24 24"
@@ -493,37 +509,60 @@ export function QuestionAnalysis({
 
                                         {/* Expanded Content */}
                                         {isExpanded && (
-                                        <div className="border-t bg-white p-4 space-y-4">
+                                        <div className="space-y-4 border-t border-slate-200 bg-white p-4">
+                                            {/* Shared Context */}
+                                            {hasContext && (
+                                                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                                                    <h4 className="mb-2 text-sm font-medium text-slate-600">
+                                                        {question.context_title?.trim() || 'Shared Context'}
+                                                    </h4>
+                                                    {question.context_image_url && (
+                                                        <img
+                                                            src={question.context_image_url}
+                                                            alt={question.context_title?.trim()
+                                                                ? `${question.context_title} diagram`
+                                                                : `Context for question ${question.question_number}`}
+                                                            className="mb-3 max-h-96 max-w-full rounded-lg border border-slate-200 object-contain"
+                                                        />
+                                                    )}
+                                                    {question.context_body?.trim() && (
+                                                        <div className="prose prose-sm max-w-none text-slate-700">
+                                                            <MathText text={question.context_body} />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
                                             {/* Question Image */}
                                             {question.question_image_url && (
                                                 <div className="mb-4">
                                                     <img
                                                         src={question.question_image_url}
                                                         alt={`Question ${question.question_number} diagram`}
-                                                        className="max-w-full max-h-96 object-contain rounded-lg border border-gray-200"
+                                                        className="max-h-96 max-w-full rounded-lg border border-slate-200 object-contain"
                                                     />
                                                 </div>
                                             )}
 
                                             {/* Full Question Text */}
                                             <div>
-                                                <h4 className="text-sm font-medium text-gray-500 mb-2">Question</h4>
-                                                <div className="text-gray-800 prose prose-sm max-w-none">
+                                                <h4 className="mb-2 text-sm font-medium text-slate-500">Question</h4>
+                                                <div className="prose prose-sm max-w-none text-slate-800">
                                                     <MathText text={question.question_text} />
                                                 </div>
                                             </div>
 
                                             {/* Response Analytics */}
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-gray-600">
+                                            <div className="grid grid-cols-1 gap-3 text-sm text-slate-600 sm:grid-cols-2">
                                                 <div>
-                                                    <span className="text-xs text-gray-500 block">Time Spent</span>
-                                                    <span className="font-semibold text-gray-800">
+                                                    <span className="block text-xs text-slate-500">Time Spent</span>
+                                                    <span className="font-semibold text-slate-800">
                                                         {formatDuration(response?.time_spent_seconds)}
                                                     </span>
                                                 </div>
                                                 <div>
-                                                    <span className="text-xs text-gray-500 block">Visits</span>
-                                                    <span className="font-semibold text-gray-800">
+                                                    <span className="block text-xs text-slate-500">Visits</span>
+                                                    <span className="font-semibold text-slate-800">
                                                         {response?.visit_count ?? 0}
                                                     </span>
                                                 </div>
@@ -564,7 +603,7 @@ export function QuestionAnalysis({
                                             {/* Options (for MCQ) with Masked Review Mode */}
                                             {question.question_type === 'MCQ' && question.options && (
                                                 <div>
-                                                    <h4 className="text-sm font-medium text-gray-500 mb-2">Options</h4>
+                                                    <h4 className="mb-2 text-sm font-medium text-slate-500">Options</h4>
                                                     <div className="space-y-2">
                                                         {question.options.map((option, idx) => {
                                                             const optionLabel = getOptionLabel(idx);
@@ -605,7 +644,7 @@ export function QuestionAnalysis({
                                                                     <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${badgeClass}`}>
                                                                         {optionLabel}
                                                                     </span>
-                                                                    <span className="flex-1 text-sm text-gray-700">
+                                                                    <span className="flex-1 text-sm text-slate-700">
                                                                         <MathText text={option} />
                                                                     </span>
 
@@ -618,14 +657,14 @@ export function QuestionAnalysis({
                                                                                     style={{ width: `${peerPercent}%` }}
                                                                                 />
                                                                             </div>
-                                                                            <span className="text-xs text-gray-500 w-8">{peerPercent}%</span>
+                                                                            <span className="text-xs text-slate-500 w-8">{peerPercent}%</span>
                                                                         </div>
                                                                     )}
 
                                                                     {/* Labels */}
                                                                     {isRevealed && isCorrectAnswer && (
                                                                         <span className="text-xs text-green-600 font-medium whitespace-nowrap">
-                                                                            ✓ Correct
+                                                                            Correct
                                                                         </span>
                                                                     )}
                                                                     {isRevealed && isUserAnswer && !isCorrectAnswer && (
@@ -651,14 +690,14 @@ export function QuestionAnalysis({
                                                     {isRevealed ? (
                                                         <>
                                                             <div>
-                                                                <h4 className="text-sm font-medium text-gray-500 mb-1">Correct Answer</h4>
+                                                                <h4 className="text-sm font-medium text-slate-500 mb-1">Correct Answer</h4>
                                                                 <MathText
                                                                     text={question.correct_answer}
                                                                     className="text-lg font-bold text-green-600 [&_p]:my-0"
                                                                 />
                                                             </div>
                                                             <div>
-                                                                <h4 className="text-sm font-medium text-gray-500 mb-1">Your Answer</h4>
+                                                                <h4 className="text-sm font-medium text-slate-500 mb-1">Your Answer</h4>
                                                                 <MathText
                                                                     text={response?.answer || '(Not answered)'}
                                                                     className={`text-lg font-bold ${isCorrect === true ? 'text-green-600' : isCorrect === false ? 'text-red-600' : 'text-gray-500'} [&_p]:my-0`}
@@ -667,7 +706,7 @@ export function QuestionAnalysis({
                                                         </>
                                                     ) : (
                                                         <div>
-                                                            <h4 className="text-sm font-medium text-gray-500 mb-1">Your Answer</h4>
+                                                            <h4 className="text-sm font-medium text-slate-500 mb-1">Your Answer</h4>
                                                             <MathText
                                                                 text={response?.answer || '(Not answered)'}
                                                                 className="text-lg font-bold text-blue-600 [&_p]:my-0"
@@ -683,9 +722,9 @@ export function QuestionAnalysis({
                                                     <button
                                                         type="button"
                                                         onClick={() => revealAnswer(question.id)}
-                                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+                                                        className="rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8]"
                                                     >
-                                                        🔍 Check Answer & Show Solution
+                                                        Check Answer and Show Solution
                                                     </button>
                                                 </div>
                                             )}
@@ -694,11 +733,11 @@ export function QuestionAnalysis({
                                             {isRevealed && question.solution_text && (
                                                 <div>
                                                     <div className="flex items-center justify-between mb-2">
-                                                        <h4 className="text-sm font-medium text-gray-500">Solution</h4>
+                                                        <h4 className="text-sm font-medium text-slate-500">Solution</h4>
                                                         <button
                                                             type="button"
                                                             onClick={() => toggleSolution(question.id)}
-                                                            className="text-blue-600 hover:underline text-sm"
+                                                            className="text-sm text-[#2563EB] hover:underline"
                                                             aria-expanded={isSolutionVisible}
                                                         >
                                                             {isSolutionVisible ? 'Hide Solution' : 'View Solution'}
@@ -707,7 +746,7 @@ export function QuestionAnalysis({
                                                     <div
                                                         className={`transition-all duration-200 ${isSolutionVisible ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}
                                                     >
-                                                        <div className="text-gray-700 prose prose-sm max-w-none bg-blue-50 p-4 rounded-lg">
+                                                        <div className="prose prose-sm max-w-none rounded-lg bg-blue-50 p-4 text-slate-700">
                                                             <MathText text={question.solution_text ?? ''} />
                                                         </div>
                                                     </div>
@@ -723,22 +762,22 @@ export function QuestionAnalysis({
 
                 {/* Topic Navigator */}
                 <aside className="lg:col-span-1">
-                    <div className="sticky top-4 space-y-3">
-                        <div className="bg-white border border-gray-200 rounded-lg p-4">
-                            <h3 className="text-sm font-semibold text-gray-800 mb-3">Topics</h3>
+                    <div className="space-y-3 lg:sticky lg:top-4">
+                        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]">
+                            <h3 className="text-sm font-semibold text-slate-800 mb-3">Topics</h3>
                             <button
                                 type="button"
                                 onClick={() => setActiveTopic('all')}
                                 className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${activeTopic === 'all'
-                                    ? 'bg-blue-50 text-blue-700'
-                                    : 'text-gray-600 hover:bg-gray-50'
+                                    ? 'bg-[#EFF6FF] text-[#2563EB]'
+                                    : 'text-slate-600 hover:bg-slate-50'
                                     }`}
                             >
                                 All Topics ({baseFilteredQuestions.length})
                             </button>
                             <div className="mt-2 space-y-1">
                                 {topics.length === 0 ? (
-                                    <div className="text-xs text-gray-400">No topics available.</div>
+                                    <div className="text-xs text-slate-400">No topics available.</div>
                                 ) : (
                                     topics.map((topic) => (
                                         <button
@@ -746,8 +785,8 @@ export function QuestionAnalysis({
                                             type="button"
                                             onClick={() => setActiveTopic(topic.name)}
                                             className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${activeTopic === topic.name
-                                                ? 'bg-blue-50 text-blue-700'
-                                                : 'text-gray-600 hover:bg-gray-50'
+                                                ? 'bg-[#EFF6FF] text-[#2563EB]'
+                                                : 'text-slate-600 hover:bg-slate-50'
                                                 }`}
                                         >
                                             {topic.name} ({topic.count})

@@ -79,14 +79,14 @@ export default async function AdminPage() {
     const completedAttempts = attemptsResult.data?.filter(a => a.status === 'completed').length || 0;
 
     return (
-        <div className="space-y-8">
-            <div className="flex items-center justify-between">
+        <div className="space-y-6 sm:space-y-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
             </div>
 
             {/* Statistics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white rounded-lg shadow p-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 sm:gap-6">
+                <div className="rounded-lg bg-white p-5 shadow sm:p-6">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-500">Total Papers</p>
@@ -101,7 +101,7 @@ export default async function AdminPage() {
                     <p className="text-sm text-gray-500 mt-2">{publishedPapers} published</p>
                 </div>
 
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="rounded-lg bg-white p-5 shadow sm:p-6">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-500">Total Questions</p>
@@ -116,7 +116,7 @@ export default async function AdminPage() {
                     <p className="text-sm text-gray-500 mt-2">Across all papers</p>
                 </div>
 
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="rounded-lg bg-white p-5 shadow sm:p-6">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-500">Total Attempts</p>
@@ -131,7 +131,7 @@ export default async function AdminPage() {
                     <p className="text-sm text-gray-500 mt-2">{completedAttempts} completed</p>
                 </div>
 
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="rounded-lg bg-white p-5 shadow sm:p-6">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm font-medium text-gray-500">Completion Rate</p>
@@ -151,8 +151,8 @@ export default async function AdminPage() {
             </div>
 
             {/* Access Control */}
-            <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex items-center justify-between mb-4">
+            <div className="rounded-lg bg-white p-5 shadow sm:p-6">
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h2 className="text-lg font-semibold text-gray-900">Launch Controls</h2>
                         <p className="text-sm text-gray-500">Pending requests: {pendingAccessRequests}</p>
@@ -164,18 +164,18 @@ export default async function AdminPage() {
                         Manage access
                     </Link>
                 </div>
-                <form action={updateSignupMode} className="flex flex-wrap items-center gap-3">
+                <form action={updateSignupMode} className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                     <select
                         name="signup_mode"
                         defaultValue={signupMode}
-                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="touch-target w-full rounded-lg border border-gray-300 px-3 py-2 text-sm sm:w-auto"
                     >
                         <option value="OPEN">OPEN (auto-approve)</option>
                         <option value="GATED">GATED (waitlist)</option>
                     </select>
                     <button
                         type="submit"
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700"
+                        className="touch-target rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
                     >
                         Update mode
                     </button>
@@ -186,12 +186,12 @@ export default async function AdminPage() {
             </div>
 
             {/* Quick Actions */}
-            <div className="bg-white rounded-lg shadow p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-lg bg-white p-5 shadow sm:p-6">
+                <h2 className="mb-4 text-lg font-semibold text-gray-900">Quick Actions</h2>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 sm:gap-4">
                     <Link
                         href="/admin/papers"
-                        className="flex items-center gap-3 p-4 border-2 border-indigo-500 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+                        className="touch-target flex min-h-[84px] items-center gap-3 rounded-lg border-2 border-indigo-500 bg-indigo-50 p-4 transition-colors hover:bg-indigo-100"
                     >
                         <div className="w-10 h-10 bg-indigo-500 rounded-lg flex items-center justify-center">
                             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -207,7 +207,7 @@ export default async function AdminPage() {
 
                     <Link
                         href="/admin/papers/new"
-                        className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                        className="touch-target flex min-h-[84px] items-center gap-3 rounded-lg border border-gray-200 p-4 transition-colors hover:border-blue-500 hover:bg-blue-50"
                     >
                         <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -222,7 +222,7 @@ export default async function AdminPage() {
 
                     <Link
                         href="/admin/questions/new"
-                        className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                        className="touch-target flex min-h-[84px] items-center gap-3 rounded-lg border border-gray-200 p-4 transition-colors hover:border-green-500 hover:bg-green-50"
                     >
                         <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
                             <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -237,7 +237,7 @@ export default async function AdminPage() {
 
                     <Link
                         href="/admin/access-control"
-                        className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-colors"
+                        className="touch-target flex min-h-[84px] items-center gap-3 rounded-lg border border-gray-200 p-4 transition-colors hover:border-purple-500 hover:bg-purple-50"
                     >
                         <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
                             <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -318,6 +318,7 @@ export type QuestionStatus =
     | 'answered_marked';
 
 export type PerformanceReason = 'concept_gap' | 'careless_error' | 'time_pressure' | 'guess';
+export type AIQuestionReasonMap = Record<string, PerformanceReason>;
 
 /** Response entity from database */
 export interface Response extends BaseEntity {
@@ -410,6 +411,7 @@ export interface Attempt extends BaseEntity, TimeTracked {
     readonly ai_analysis_error?: string | null;
     readonly ai_analysis_user_prompt?: string | null;
     readonly ai_analysis_result_text?: string | null;
+    readonly ai_analysis_question_reasons?: AIQuestionReasonMap | null;
 
     // Paper version snapshot (set at attempt creation, Migration 031)
     readonly paper_ingest_run_id?: string | null;

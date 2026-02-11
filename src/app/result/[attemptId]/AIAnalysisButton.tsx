@@ -7,7 +7,8 @@
 
 import { useCallback, useState, useTransition } from 'react';
 import { requestAIAnalysis } from '@/features/exam-engine/lib/actions';
-import type { AIAnalysisStatus } from '@/types/exam';
+import { getAnalysisStore } from '@/features/exam-engine/model/useExamStore';
+import type { AIAnalysisStatus, PerformanceReason } from '@/types/exam';
 
 interface AIAnalysisButtonProps {
     attemptId: string;
@@ -99,6 +100,21 @@ export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt }: AI
     const config = STATUS_CONFIG[status];
     const canEditPrompt = status === 'none' || status === 'failed';
 
+    const snapshotQuestionReasons = useCallback((): Record<string, PerformanceReason> => {
+        const store = getAnalysisStore(attemptId);
+        const reasons = store.getState().reasons ?? {};
+        const allowed = new Set<PerformanceReason>(['concept_gap', 'careless_error', 'time_pressure', 'guess']);
+        const snapshot: Record<string, PerformanceReason> = {};
+
+        for (const [questionId, reason] of Object.entries(reasons)) {
+            if (!questionId || typeof questionId !== 'string') continue;
+            if (!reason || !allowed.has(reason)) continue;
+            snapshot[questionId] = reason;
+        }
+
+        return snapshot;
+    }, [attemptId]);
+
     const handleRequest = useCallback(() => {
         if (config.disabled && status !== 'failed') return;
 
@@ -106,10 +122,11 @@ export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt }: AI
 
         const prevStatus = status;
         const trimmedPrompt = prompt.trim();
+        const questionReasons = snapshotQuestionReasons();
         setStatus('requested');
 
         startTransition(async () => {
-            const result = await requestAIAnalysis(attemptId, trimmedPrompt);
+            const result = await requestAIAnalysis(attemptId, trimmedPrompt, questionReasons);
 
             if (result.success) {
                 setStatus((result.data?.status as AIAnalysisStatus) || 'requested');

@@ -48,26 +48,48 @@ export default function TestLoginPage() {
         } finally {
             setLoading(false);
         }
-    }, [refreshSession]);
+    }, []);
 
     return (
-        <main style={{ padding: 24, maxWidth: 720, margin: '0 auto' }}>
-            <h1>Auth Test Utility</h1>
-            <p style={{ marginBottom: 12 }}>Quickly verify Supabase auth/session locally or in deployments.</p>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <button onClick={onSignIn} disabled={loading} style={{ padding: 8 }}>
-                    {loading ? 'Working…' : 'Sign in with Google'}
+        <main className="page-shell py-6 sm:py-8">
+            <h1 className="text-2xl font-bold text-slate-900">Auth Test Utility</h1>
+            <p className="mt-2 text-sm text-slate-600">
+                Quickly verify Supabase auth/session locally or in deployments.
+            </p>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <button
+                    onClick={onSignIn}
+                    disabled={loading}
+                    className="touch-target rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                    {loading ? 'Working...' : 'Sign in with Google'}
                 </button>
-                <button onClick={onSignOut} disabled={loading} style={{ padding: 8 }}>
+                <button
+                    onClick={onSignOut}
+                    disabled={loading}
+                    className="touch-target rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
                     Sign out
                 </button>
-                <button onClick={refreshSession} disabled={loading} style={{ padding: 8 }}>
+                <button
+                    onClick={refreshSession}
+                    disabled={loading}
+                    className="touch-target rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
                     Refresh session
                 </button>
-                <Link href="/dashboard" style={{ padding: 8, textDecoration: 'underline' }}>Go to dashboard</Link>
+                <Link
+                    href="/dashboard"
+                    className="touch-target inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                    Go to dashboard
+                </Link>
             </div>
-            {error && <p style={{ color: 'crimson' }}>{error}</p>}
-            <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 8, minHeight: 120, overflow: 'auto' }}>
+
+            {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+
+            <pre className="mt-4 max-h-[60vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700">
                 {sessionJson || 'No session'}
             </pre>
         </main>

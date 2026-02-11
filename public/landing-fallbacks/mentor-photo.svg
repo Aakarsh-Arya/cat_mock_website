@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">Mentor Fallback</title>
+  <desc id="desc">Fallback artwork for mentor spotlight image.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="900" fill="url(#bg)"/>
+  <circle cx="600" cy="380" r="260" fill="#e2e8f0"/>
+  <circle cx="600" cy="355" r="168" fill="#cbd5e1"/>
+  <rect x="360" y="540" width="480" height="240" rx="120" fill="#cbd5e1"/>
+  <circle cx="600" cy="380" r="260" fill="none" stroke="url(#ring)" stroke-width="12"/>
+  <rect x="250" y="760" width="700" height="92" rx="24" fill="#0f172a"/>
+  <text x="600" y="817" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" fill="#f8fafc" font-weight="700">
+    Mentor Spotlight
+  </text>
+</svg>

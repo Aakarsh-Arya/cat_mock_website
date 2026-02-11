@@ -97,7 +97,7 @@ export default async function QuestionSetsPage() {
 
     return (
         <div className="space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">Question Sets</h1>
                     <p className="text-gray-600 mt-1">
@@ -106,7 +106,7 @@ export default async function QuestionSetsPage() {
                 </div>
                 <Link
                     href="/admin/question-sets/new"
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    className="touch-target inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
                 >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -116,7 +116,7 @@ export default async function QuestionSetsPage() {
             </div>
 
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div className="bg-white rounded-lg shadow p-4">
                     <p className="text-sm text-gray-500">Total Sets</p>
                     <p className="text-2xl font-bold">{questionSets?.length ?? 0}</p>
@@ -164,16 +164,16 @@ export default async function QuestionSetsPage() {
             ) : (
                 <div className="space-y-6">
                     {Object.entries(groupedSets).map(([paperId, { paper, sets }]) => (
-                        <div key={paperId} className="bg-white rounded-lg shadow overflow-hidden">
-                            <div className="bg-gray-50 px-6 py-4 border-b">
+                        <div key={paperId} className="overflow-hidden rounded-lg bg-white shadow">
+                            <div className="border-b bg-gray-50 px-4 py-4 sm:px-6">
                                 <h2 className="font-semibold text-gray-900">{paper.title}</h2>
                                 <p className="text-sm text-gray-500">{sets.length} question set(s)</p>
                             </div>
                             <div className="divide-y">
                                 {sets.map((set) => (
-                                    <div key={set.id} className="px-6 py-4 hover:bg-gray-50 transition-colors">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-4">
+                                    <div key={set.id} className="px-4 py-4 transition-colors hover:bg-gray-50 sm:px-6">
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="flex items-start gap-4">
                                                 <div className="flex gap-2">
                                                     <span className={`px-2 py-1 rounded text-xs font-medium ${getSectionColor(set.section)}`}>
                                                         {set.section}
@@ -198,7 +198,7 @@ export default async function QuestionSetsPage() {
                                             <div className="flex items-center gap-2">
                                                 <Link
                                                     href={`/admin/question-sets/${set.id}/edit`}
-                                                    className="text-blue-600 hover:text-blue-800 px-3 py-1 rounded hover:bg-blue-50"
+                                                    className="touch-target inline-flex items-center rounded px-3 py-1 text-blue-600 hover:bg-blue-50 hover:text-blue-800"
                                                 >
                                                     Edit
                                                 </Link>

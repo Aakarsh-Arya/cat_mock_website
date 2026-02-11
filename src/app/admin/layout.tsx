@@ -16,6 +16,16 @@ interface JWTClaims {
     };
 }
 
+const ADMIN_NAV = [
+    { href: '/admin/papers', label: 'Papers' },
+    { href: '/admin/landing-page', label: 'Landing Page' },
+    { href: '/admin/question-sets', label: 'Question Sets' },
+    { href: '/admin/questions', label: 'Questions' },
+    { href: '/admin/bug-reports', label: 'Bug Reports' },
+    { href: '/admin/access-control', label: 'Access Control' },
+    { href: '/admin/ai-analysis', label: 'NexAI Insights' },
+] as const;
+
 export default async function AdminLayout({
     children,
 }: {
@@ -63,85 +73,80 @@ export default async function AdminLayout({
 
     return (
         <div className="min-h-screen bg-gray-100">
-            {/* Admin Header */}
             <header className="bg-[#0b3d91] text-white shadow-md">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between h-16">
-                        <div className="flex items-center gap-8">
-                            {/* Back to Dashboard */}
+                <div className="page-shell py-3 sm:py-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                             <Link
                                 href="/dashboard"
-                                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                                className="touch-target inline-flex h-11 w-11 items-center justify-center rounded-lg text-white hover:bg-white/10"
                                 title="Back to Dashboard"
                             >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                                 </svg>
                             </Link>
-                            <Link href="/admin" className="font-bold text-xl">
+                            <Link href="/admin" className="truncate text-lg font-bold sm:text-xl">
                                 NEXAMS Admin
                             </Link>
-                            <nav className="flex gap-6">
-                                <Link
-                                    href="/admin/papers"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    Papers
-                                </Link>
-                                <Link
-                                    href="/admin/landing-page"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    Landing Page
-                                </Link>
-                                <Link
-                                    href="/admin/question-sets"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    Question Sets
-                                </Link>
-                                <Link
-                                    href="/admin/questions"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    Questions
-                                </Link>
-                                <Link
-                                    href="/admin/bug-reports"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    Bug Reports
-                                </Link>
-                                <Link
-                                    href="/admin/access-control"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    Access Control
-                                </Link>
-                                <Link
-                                    href="/admin/ai-analysis"
-                                    className="text-gray-200 hover:text-white transition-colors"
-                                >
-                                    NexAI Insights
-                                </Link>
-                            </nav>
                         </div>
-                        <div className="flex items-center gap-4">
-                            <span className="text-xs bg-green-500 px-2 py-0.5 rounded">Admin</span>
-                            <span className="text-sm text-gray-300">{user.email}</span>
+
+                        <div className="hidden items-center gap-4 lg:flex">
+                            <span className="rounded bg-green-500 px-2 py-0.5 text-xs font-semibold">Admin</span>
+                            <span className="max-w-[240px] truncate text-sm text-gray-200">{user.email}</span>
                             <Link
                                 href="/dashboard"
-                                className="text-sm bg-yellow-500 text-gray-900 px-3 py-1.5 rounded hover:bg-yellow-400 transition-colors"
+                                className="touch-target inline-flex items-center rounded-lg bg-yellow-500 px-3 py-2 text-sm font-semibold text-gray-900 transition-colors hover:bg-yellow-400"
                             >
                                 Back to Dashboard
                             </Link>
                         </div>
+
+                        <details className="relative lg:hidden">
+                            <summary className="touch-target inline-flex h-11 cursor-pointer list-none items-center justify-center rounded-lg border border-white/20 px-3 text-sm font-semibold text-white hover:bg-white/10 [&::-webkit-details-marker]:hidden">
+                                Menu
+                            </summary>
+                            <div className="absolute right-0 z-20 mt-2 w-[min(88vw,20rem)] overflow-hidden rounded-xl border border-slate-200 bg-white p-3 text-slate-800 shadow-xl">
+                                <div className="mb-2 border-b border-slate-100 pb-2">
+                                    <p className="text-xs uppercase tracking-wide text-slate-500">Signed in as</p>
+                                    <p className="truncate text-sm font-semibold text-slate-900">{user.email}</p>
+                                </div>
+                                <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+                                    {ADMIN_NAV.map((item) => (
+                                        <Link
+                                            key={item.href}
+                                            href={item.href}
+                                            className="touch-target flex items-center rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                                        >
+                                            {item.label}
+                                        </Link>
+                                    ))}
+                                </div>
+                                <Link
+                                    href="/dashboard"
+                                    className="touch-target mt-3 inline-flex w-full items-center justify-center rounded-lg bg-yellow-400 px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-yellow-300"
+                                >
+                                    Back to Dashboard
+                                </Link>
+                            </div>
+                        </details>
                     </div>
+
+                    <nav className="mt-3 hidden flex-wrap gap-2 lg:flex">
+                        {ADMIN_NAV.map((item) => (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                className="touch-target inline-flex items-center rounded-full border border-white/15 bg-white/5 px-3 py-2 text-sm text-gray-200 transition-colors hover:bg-white/15 hover:text-white"
+                            >
+                                {item.label}
+                            </Link>
+                        ))}
+                    </nav>
                 </div>
             </header>
 
-            {/* Main Content */}
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <main className="page-shell py-6 sm:py-8">
                 {children}
             </main>
         </div>

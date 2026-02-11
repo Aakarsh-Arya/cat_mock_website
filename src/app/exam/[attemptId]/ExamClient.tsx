@@ -54,8 +54,11 @@ const EXAM_LAYOUT_MODE = (process.env.NEXT_PUBLIC_EXAM_LAYOUT_MODE ?? 'current')
 
 type SectionTimersSnapshot = Partial<Record<SectionName, Pick<SectionTimerState, 'remainingSeconds'>>>;
 
-function getPersistedAnswer(status: string, answer: string | null) {
-    return status === 'answered' || status === 'answered_marked' ? answer : null;
+function getPersistedAnswer(_status: string, answer: string | null) {
+    // FIX: Never erase a valid answer just because status hasn't caught up.
+    // Old logic gated on status === 'answered'|'answered_marked', which drops
+    // answers when the status is still 'visited' due to a race condition.
+    return answer !== null && answer.trim() !== '' ? answer : null;
 }
 
 function buildTimeRemainingSafe(timers: SectionTimersSnapshot | null | undefined): TimeRemaining | null {

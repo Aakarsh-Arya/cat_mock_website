@@ -28,6 +28,62 @@ type UserProfile = {
     target_percentile: number | null;
 };
 
+function formatTime(seconds: number | null): string {
+    if (seconds == null) return '-';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const paddedSecs = secs.toString().padStart(2, '0');
+    return `${mins}m ${paddedSecs}s`;
+}
+
+function getStatusBadgeClass(status: string): string {
+    switch (status) {
+        case 'completed':
+            return 'bg-emerald-600 text-white';
+        case 'in_progress':
+            return 'bg-amber-500 text-white';
+        case 'paused':
+            return 'bg-orange-600 text-white';
+        case 'abandoned':
+            return 'bg-slate-500 text-white';
+        default:
+            return 'bg-slate-400 text-white';
+    }
+}
+
+function getActionConfig(attempt: Attempt): { href: string | null; label: string | null; className: string } {
+    if (attempt.status === 'in_progress' || attempt.status === 'paused') {
+        return {
+            href: `/exam/${attempt.id}`,
+            label: 'Continue',
+            className: 'text-amber-700 hover:text-amber-800',
+        };
+    }
+
+    if (attempt.status === 'completed') {
+        return {
+            href: `/result/${attempt.id}`,
+            label: 'View Result',
+            className: 'text-blue-700 hover:text-blue-800',
+        };
+    }
+
+    return {
+        href: null,
+        label: null,
+        className: 'text-slate-400',
+    };
+}
+
+function attemptDisplayTitle(a: Attempt): string {
+    return a.papers?.title ?? `Paper ${a.paper_id.slice(0, 8)}...`;
+}
+
+function attemptDisplayScore(a: Attempt): string {
+    if (a.total_score === null) return '-';
+    return `${a.total_score}/${a.max_possible_score || a.papers?.total_marks || 198}`;
+}
+
 export default async function DashboardPage({
     searchParams,
 }: {
@@ -35,33 +91,31 @@ export default async function DashboardPage({
 }) {
     const params = await searchParams;
     const supabase = await sbSSR();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+        data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
         return (
-            <main style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-                <h1>My Dashboard</h1>
-                <p>You need to sign in to access your dashboard.</p>
-                <Link href="/auth/sign-in?redirect_to=/dashboard" style={{
-                    display: 'inline-block',
-                    padding: '12px 24px',
-                    background: '#1976d2',
-                    color: 'white',
-                    textDecoration: 'none',
-                    borderRadius: 6
-                }}>Sign In</Link>
+            <main className="mx-auto min-h-screen w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+                <h1 className="text-2xl font-bold text-slate-900">My Dashboard</h1>
+                <p className="mt-2 text-slate-600">You need to sign in to access your dashboard.</p>
+                <Link
+                    href="/auth/sign-in?redirect_to=/dashboard"
+                    className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                >
+                    Sign In
+                </Link>
             </main>
         );
     }
 
-    // Get user profile
-    const { data: profile } = await supabase
+    const { data: profile } = (await supabase
         .from('users')
         .select('id, name, email, avatar_url, total_mocks_taken, best_percentile, target_percentile')
         .eq('id', user.id)
-        .maybeSingle() as { data: UserProfile | null };
+        .maybeSingle()) as { data: UserProfile | null };
 
-    // Get attempts with paper details
     const { data, error } = await supabase
         .from('attempts')
         .select(`
@@ -72,237 +126,232 @@ export default async function DashboardPage({
         .eq('user_id', user.id)
         .order('started_at', { ascending: false });
 
-    const attempts: Attempt[] = (data ?? []).map(a => ({
+    const attempts: Attempt[] = (data ?? []).map((a) => ({
         ...a,
-        papers: Array.isArray(a.papers) ? a.papers[0] : a.papers
+        papers: Array.isArray(a.papers) ? a.papers[0] : a.papers,
     }));
 
-    // Calculate stats
-    const completedAttempts = attempts.filter(a => a.status === 'completed');
+    const completedAttempts = attempts.filter((a) => a.status === 'completed');
     const totalMocks = completedAttempts.length;
-    const averageScore = totalMocks > 0
-        ? completedAttempts.reduce((sum, a) => sum + (a.total_score || 0), 0) / totalMocks
-        : 0;
-    const bestScore = totalMocks > 0
-        ? Math.max(...completedAttempts.map(a => a.total_score || 0))
-        : 0;
-    const bestPercentile = totalMocks > 0
-        ? Math.max(...completedAttempts.map(a => a.percentile || 0))
-        : 0;
-
-    const formatTime = (seconds: number | null) => {
-        if (!seconds && seconds !== 0) return '—';
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        const paddedSecs = secs.toString().padStart(2, '0');
-        return `${mins}m ${paddedSecs}s`;
-    };
-
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'completed': return '#4caf50';
-            case 'in_progress': return '#ff9800';
-            case 'paused': return '#f57c00';
-            case 'abandoned': return '#9e9e9e';
-            default: return '#666';
-        }
-    };
+    const averageScore =
+        totalMocks > 0 ? completedAttempts.reduce((sum, a) => sum + (a.total_score || 0), 0) / totalMocks : 0;
+    const bestScore = totalMocks > 0 ? Math.max(...completedAttempts.map((a) => a.total_score || 0)) : 0;
+    const bestPercentile =
+        totalMocks > 0 ? Math.max(...completedAttempts.map((a) => a.percentile || 0)) : 0;
 
     return (
-        <main style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
-            {/* Unauthorized Error Banner */}
+        <main className="mx-auto min-h-screen w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
             {params.error === 'unauthorized' && (
-                <div style={{
-                    padding: '12px 16px',
-                    background: '#ffebee',
-                    border: '1px solid #ef5350',
-                    borderRadius: 8,
-                    marginBottom: 24,
-                    color: '#c62828',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12
-                }}>
-                    <span style={{ fontSize: 20 }}>⚠️</span>
+                <div className="mb-6 flex items-center gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-700">
+                    <span className="text-lg">!</span>
                     <span>You don&apos;t have admin access. Contact the administrator to request access.</span>
                 </div>
             )}
 
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
-                <div>
-                    <h1 style={{ margin: 0 }}>My Dashboard</h1>
-                    <p style={{ margin: '8px 0 0', color: '#666' }}>
-                        Welcome back, {profile?.name || user.email}
-                    </p>
+            <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                    <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">My Dashboard</h1>
+                    <p className="mt-2 text-sm text-slate-600 sm:text-base">Welcome back, {profile?.name || user.email}</p>
                 </div>
-                <div style={{ display: 'flex', gap: 12 }}>
-                    <Link href="/admin" style={{
-                        padding: '12px 24px',
-                        background: '#0b3d91',
-                        color: 'white',
-                        textDecoration: 'none',
-                        borderRadius: 6,
-                        fontWeight: 'bold'
-                    }}>Admin Panel</Link>
-                    <Link href="/mocks" style={{
-                        padding: '12px 24px',
-                        background: '#1976d2',
-                        color: 'white',
-                        textDecoration: 'none',
-                        borderRadius: 6,
-                        fontWeight: 'bold'
-                    }}>Take New Mock</Link>
-                    <a href="/auth/logout" style={{
-                        padding: '12px 24px',
-                        background: '#f5f5f5',
-                        color: '#666',
-                        textDecoration: 'none',
-                        borderRadius: 6,
-                        fontWeight: 'bold',
-                        border: '1px solid #ddd'
-                    }}>Logout</a>
+
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <Link
+                        href="/admin"
+                        className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-blue-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-950"
+                    >
+                        Admin
+                    </Link>
+                    <Link
+                        href="/mocks"
+                        className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                    >
+                        New Mock
+                    </Link>
+                    <a
+                        href="/auth/logout"
+                        className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                    >
+                        Logout
+                    </a>
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
-                gap: 16,
-                marginBottom: 32
-            }}>
-                <div style={{ padding: 20, background: '#e3f2fd', borderRadius: 12, textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#1976d2' }}>Mocks Completed</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#1976d2' }}>{totalMocks}</p>
+            <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl bg-blue-50 px-4 py-5 text-center">
+                    <p className="text-sm text-blue-700">Mocks Completed</p>
+                    <p className="mt-2 text-3xl font-bold text-blue-700">{totalMocks}</p>
                 </div>
-                <div style={{ padding: 20, background: '#e8f5e9', borderRadius: 12, textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#4caf50' }}>Best Score</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#4caf50' }}>{bestScore.toFixed(0)}</p>
+                <div className="rounded-xl bg-emerald-50 px-4 py-5 text-center">
+                    <p className="text-sm text-emerald-700">Best Score</p>
+                    <p className="mt-2 text-3xl font-bold text-emerald-700">{bestScore.toFixed(0)}</p>
                 </div>
-                <div style={{ padding: 20, background: '#fff3e0', borderRadius: 12, textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#ff9800' }}>Average Score</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#ff9800' }}>{averageScore.toFixed(1)}</p>
+                <div className="rounded-xl bg-amber-50 px-4 py-5 text-center">
+                    <p className="text-sm text-amber-700">Average Score</p>
+                    <p className="mt-2 text-3xl font-bold text-amber-700">{averageScore.toFixed(1)}</p>
                 </div>
-                <div style={{ padding: 20, background: '#f3e5f5', borderRadius: 12, textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: 14, color: '#9c27b0' }}>Best Percentile</p>
-                    <p style={{ margin: '8px 0 0', fontSize: 32, fontWeight: 'bold', color: '#9c27b0' }}>
-                        {bestPercentile > 0 ? bestPercentile.toFixed(1) : '—'}
+                <div className="rounded-xl bg-fuchsia-50 px-4 py-5 text-center">
+                    <p className="text-sm text-fuchsia-700">Best Percentile</p>
+                    <p className="mt-2 text-3xl font-bold text-fuchsia-700">
+                        {bestPercentile > 0 ? bestPercentile.toFixed(1) : '-'}
                     </p>
                 </div>
             </div>
 
-            {/* Target Progress */}
             {profile?.target_percentile && (
-                <div style={{
-                    padding: 20,
-                    background: '#f5f5f5',
-                    borderRadius: 12,
-                    marginBottom: 32
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div className="mb-8 rounded-xl bg-slate-100 p-4 sm:p-5">
+                    <div className="mb-2 flex items-center justify-between gap-3 text-sm sm:text-base">
                         <span>Progress to Target ({profile.target_percentile}%ile)</span>
-                        <span>{bestPercentile > 0 ? `${((bestPercentile / profile.target_percentile) * 100).toFixed(0)}%` : '0%'}</span>
+                        <span>
+                            {bestPercentile > 0
+                                ? `${((bestPercentile / profile.target_percentile) * 100).toFixed(0)}%`
+                                : '0%'}
+                        </span>
                     </div>
-                    <div style={{ height: 8, background: '#ddd', borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{
-                            height: '100%',
-                            width: `${Math.min((bestPercentile / profile.target_percentile) * 100, 100)}%`,
-                            background: '#4caf50',
-                            borderRadius: 4
-                        }}></div>
+                    <div className="h-2 overflow-hidden rounded bg-slate-300">
+                        <div
+                            className="h-full rounded bg-emerald-600"
+                            style={{
+                                width: `${Math.min((bestPercentile / profile.target_percentile) * 100, 100)}%`,
+                            }}
+                        />
                     </div>
                 </div>
             )}
 
-            {/* Attempts List */}
-            <h2 style={{ marginBottom: 16 }}>My Attempts</h2>
+            <h2 className="mb-4 text-xl font-semibold text-slate-900">My Attempts</h2>
+
             {error ? (
-                <p style={{ color: 'crimson' }}>Failed to load attempts. Please try again later.</p>
+                <p className="text-red-700">Failed to load attempts. Please try again later.</p>
             ) : attempts.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 48, background: '#f5f5f5', borderRadius: 12 }}>
-                    <h3>No attempts yet</h3>
-                    <p style={{ color: '#666' }}>Start your CAT preparation by taking a mock test!</p>
-                    <Link href="/mocks" style={{
-                        display: 'inline-block',
-                        marginTop: 16,
-                        padding: '12px 24px',
-                        background: '#1976d2',
-                        color: 'white',
-                        textDecoration: 'none',
-                        borderRadius: 6
-                    }}>Browse Mocks</Link>
+                <div className="rounded-xl bg-slate-100 px-6 py-10 text-center">
+                    <h3 className="text-lg font-semibold text-slate-900">No attempts yet</h3>
+                    <p className="mt-2 text-slate-600">Start your CAT preparation by taking a mock test.</p>
+                    <Link
+                        href="/mocks"
+                        className="mt-4 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                    >
+                        Browse Mocks
+                    </Link>
                 </div>
             ) : (
-                <div style={{ border: '1px solid #ddd', borderRadius: 12, overflow: 'hidden' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                            <tr style={{ background: '#f5f5f5' }}>
-                                <th style={{ padding: 12, textAlign: 'left', borderBottom: '1px solid #ddd' }}>Paper</th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Status</th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Score</th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Accuracy</th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Percentile</th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>
-                                    <div title="Duration (not submission timestamp)">Time Taken</div>
-                                    <div style={{ fontSize: 11, color: '#777', marginTop: 2 }}>Duration</div>
-                                </th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Date</th>
-                                <th style={{ padding: 12, textAlign: 'center', borderBottom: '1px solid #ddd' }}>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {attempts.map((a) => (
-                                <tr key={a.id} style={{ borderBottom: '1px solid #eee' }}>
-                                    <td style={{ padding: 12 }}>
-                                        <strong>{a.papers?.title ?? `Paper ${a.paper_id.slice(0, 8)}…`}</strong>
-                                    </td>
-                                    <td style={{ padding: 12, textAlign: 'center' }}>
-                                        <span style={{
-                                            padding: '4px 8px',
-                                            background: getStatusColor(a.status),
-                                            color: 'white',
-                                            borderRadius: 4,
-                                            fontSize: 12,
-                                            fontWeight: 'bold'
-                                        }}>{a.status.replace('_', ' ').toUpperCase()}</span>
-                                    </td>
-                                    <td style={{ padding: 12, textAlign: 'center', fontWeight: 'bold' }}>
-                                        {a.total_score !== null ? `${a.total_score}/${a.max_possible_score || a.papers?.total_marks || 198}` : '—'}
-                                    </td>
-                                    <td style={{ padding: 12, textAlign: 'center' }}>
-                                        {a.accuracy !== null ? `${a.accuracy.toFixed(1)}%` : '—'}
-                                    </td>
-                                    <td style={{ padding: 12, textAlign: 'center' }}>
-                                        {a.percentile !== null ? a.percentile.toFixed(1) : '—'}
-                                    </td>
-                                    <td style={{ padding: 12, textAlign: 'center' }}>
-                                        {formatTime(a.time_taken_seconds)}
-                                    </td>
-                                    <td style={{ padding: 12, textAlign: 'center', color: '#666', fontSize: 13 }}>
-                                        {a.started_at ? new Date(a.started_at).toLocaleDateString() : '—'}
-                                    </td>
-                                    <td style={{ padding: 12, textAlign: 'center' }}>
-                                        {a.status === 'in_progress' || a.status === 'paused' ? (
-                                            <Link href={`/exam/${a.id}`} style={{
-                                                color: '#ff9800',
-                                                fontWeight: 'bold',
-                                                textDecoration: 'none'
-                                            }}>Continue</Link>
-                                        ) : a.status === 'completed' ? (
-                                            <Link href={`/result/${a.id}`} style={{
-                                                color: '#1976d2',
-                                                fontWeight: 'bold',
-                                                textDecoration: 'none'
-                                            }}>View Result</Link>
+                <div className="space-y-4">
+                    <div className="space-y-3 md:hidden">
+                        {attempts.map((a) => {
+                            const action = getActionConfig(a);
+                            return (
+                                <article key={a.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <h3 className="text-sm font-semibold text-slate-900">{attemptDisplayTitle(a)}</h3>
+                                        <span
+                                            className={`rounded px-2 py-1 text-[11px] font-bold ${getStatusBadgeClass(a.status)}`}
+                                        >
+                                            {a.status.replace('_', ' ').toUpperCase()}
+                                        </span>
+                                    </div>
+
+                                    <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                                        <div>
+                                            <dt className="text-slate-500">Score</dt>
+                                            <dd className="font-semibold text-slate-900">{attemptDisplayScore(a)}</dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-slate-500">Accuracy</dt>
+                                            <dd className="font-semibold text-slate-900">
+                                                {a.accuracy !== null ? `${a.accuracy.toFixed(1)}%` : '-'}
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-slate-500">Percentile</dt>
+                                            <dd className="font-semibold text-slate-900">
+                                                {a.percentile !== null ? a.percentile.toFixed(1) : '-'}
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt className="text-slate-500">Time</dt>
+                                            <dd className="font-semibold text-slate-900">{formatTime(a.time_taken_seconds)}</dd>
+                                        </div>
+                                        <div className="col-span-2">
+                                            <dt className="text-slate-500">Date</dt>
+                                            <dd className="font-semibold text-slate-900">
+                                                {a.started_at ? new Date(a.started_at).toLocaleDateString() : '-'}
+                                            </dd>
+                                        </div>
+                                    </dl>
+
+                                    <div className="mt-4">
+                                        {action.href && action.label ? (
+                                            <Link
+                                                href={action.href}
+                                                className={`inline-flex min-h-[44px] w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold ${action.className}`}
+                                            >
+                                                {action.label}
+                                            </Link>
                                         ) : (
-                                            <span style={{ color: '#999' }}>—</span>
+                                            <span className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-400">
+                                                -
+                                            </span>
                                         )}
-                                    </td>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+
+                    <div className="hidden overflow-x-auto rounded-xl border border-slate-200 bg-white md:block">
+                        <table className="min-w-[860px] w-full border-collapse">
+                            <thead>
+                                <tr className="bg-slate-100 text-left text-sm text-slate-700">
+                                    <th className="border-b border-slate-200 px-3 py-3 font-semibold">Paper</th>
+                                    <th className="border-b border-slate-200 px-3 py-3 text-center font-semibold">Status</th>
+                                    <th className="border-b border-slate-200 px-3 py-3 text-center font-semibold">Score</th>
+                                    <th className="border-b border-slate-200 px-3 py-3 text-center font-semibold">Accuracy</th>
+                                    <th className="border-b border-slate-200 px-3 py-3 text-center font-semibold">Percentile</th>
+                                    <th className="border-b border-slate-200 px-3 py-3 text-center font-semibold">Time Taken</th>
+                                    <th className="border-b border-slate-200 px-3 py-3 text-center font-semibold">Date</th>
+                                    <th className="border-b border-slate-200 px-3 py-3 text-center font-semibold">Action</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                {attempts.map((a) => {
+                                    const action = getActionConfig(a);
+                                    return (
+                                        <tr key={a.id} className="border-b border-slate-100 text-sm">
+                                            <td className="px-3 py-3">
+                                                <strong>{attemptDisplayTitle(a)}</strong>
+                                            </td>
+                                            <td className="px-3 py-3 text-center">
+                                                <span
+                                                    className={`rounded px-2 py-1 text-[11px] font-bold ${getStatusBadgeClass(a.status)}`}
+                                                >
+                                                    {a.status.replace('_', ' ').toUpperCase()}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-3 text-center font-semibold">{attemptDisplayScore(a)}</td>
+                                            <td className="px-3 py-3 text-center">
+                                                {a.accuracy !== null ? `${a.accuracy.toFixed(1)}%` : '-'}
+                                            </td>
+                                            <td className="px-3 py-3 text-center">
+                                                {a.percentile !== null ? a.percentile.toFixed(1) : '-'}
+                                            </td>
+                                            <td className="px-3 py-3 text-center">{formatTime(a.time_taken_seconds)}</td>
+                                            <td className="px-3 py-3 text-center text-slate-600">
+                                                {a.started_at ? new Date(a.started_at).toLocaleDateString() : '-'}
+                                            </td>
+                                            <td className="px-3 py-3 text-center">
+                                                {action.href && action.label ? (
+                                                    <Link href={action.href} className={`font-semibold ${action.className}`}>
+                                                        {action.label}
+                                                    </Link>
+                                                ) : (
+                                                    <span className="text-slate-400">-</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
         </main>

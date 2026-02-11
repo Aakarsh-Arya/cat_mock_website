@@ -267,7 +267,10 @@ export async function POST(req: NextRequest) {
                 errorMessage: validateError.message,
                 errorCode: validateError.code,
             });
-            // If RPC error and force_resume is set, try to proceed with force resume
+
+            // If RPC validation fails but caller requested force_resume, treat force-resume as best effort
+            // and continue to submit path. This avoids false negatives ("submit failed") when the attempt
+            // has actually been transitioned and can already be opened on refresh.
             if (force_resume === true) {
                 const ip = req.headers.get('x-forwarded-for') ?? 'unknown';
                 const userAgent = req.headers.get('user-agent') ?? 'unknown';
@@ -284,22 +287,19 @@ export async function POST(req: NextRequest) {
                         p_new_session_token: sessionToken,
                     });
 
-                if (!forceResumeError) {
-                    // Force resume succeeded, continue with submit
-                    const result = await submitExam(effectiveAttemptId, { sessionToken, force_resume: true, submissionId });
-                    if (!result.success) {
-                        return addVersionHeader(NextResponse.json({ error: result.error }, { status: 400 }));
-                    }
-                    const successHeaders = getRateLimitHeaders(rateLimitResult, RATE_LIMITS.SUBMIT_EXAM.limit);
-                    const success = addVersionHeader(NextResponse.json({ success: true, ...result.data }, { headers: successHeaders }));
-                    res.cookies.getAll().forEach((cookie) => success.cookies.set(cookie));
-                    return success;
+                if (forceResumeError) {
+                    examLogger.securityEvent('Force resume on RPC error failed; continuing submit path', {
+                        attemptId: effectiveAttemptId,
+                        errorMessage: forceResumeError.message,
+                    });
                 }
+                // Continue to main submitExam() call below.
+            } else {
+                return addVersionHeader(NextResponse.json({ error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' }, { status: 500 }));
             }
-            return addVersionHeader(NextResponse.json({ error: 'Failed to validate session', code: 'VALIDATION_RPC_ERROR' }, { status: 500 }));
         }
 
-        if (!isValidSession) {
+        if (!validateError && !isValidSession) {
             if (force_resume === true) {
                 const ip = req.headers.get('x-forwarded-for') ?? 'unknown';
                 const userAgent = req.headers.get('user-agent') ?? 'unknown';
@@ -317,14 +317,10 @@ export async function POST(req: NextRequest) {
                     });
 
                 if (forceResumeError) {
-                    if (forceResumeError.message?.includes('FORCE_RESUME_STALE') || forceResumeError.message?.includes('stale')) {
-                        return addVersionHeader(NextResponse.json({
-                            error: 'Force resume denied. Session is too old.',
-                            code: 'FORCE_RESUME_STALE',
-                        }, { status: 409 }));
-                    }
-
-                    return addVersionHeader(NextResponse.json({ error: 'Failed to force resume session' }, { status: 500 }));
+                    examLogger.securityEvent('Force resume failed; continuing submit path', {
+                        attemptId: effectiveAttemptId,
+                        errorMessage: forceResumeError.message,
+                    });
                 }
             } else {
                 examLogger.securityEvent('Submit session mismatch', { attemptId: effectiveAttemptId });

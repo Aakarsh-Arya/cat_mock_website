@@ -11,7 +11,6 @@ import { fetchExamResults } from '@/features/exam-engine/lib/actions';
 import { ResultHeader } from '@/features/exam-engine/ui/ResultHeader';
 import { SectionalPerformance } from '@/features/exam-engine/ui/SectionalPerformance';
 import { QuestionAnalysis } from '@/features/exam-engine/ui/QuestionAnalysis';
-import { BackToDashboard } from '@/components/BackToDashboard';
 import { AIInsightsAdCard } from '@/components/AIInsightsAdCard';
 import { ResultReviewClient } from './ResultReviewClient';
 import { ResultTabsClient } from './ResultTabsClient';
@@ -59,7 +58,7 @@ function ErrorState({ title, message, linkHref, linkText, icon }: {
     const cfg = iconConfig[icon || 'error'];
 
     return (
-        <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <main className="min-h-screen bg-gray-50 flex items-center justify-center p-4 sm:p-6">
             <div className="text-center max-w-md">
                 <div className={`w-16 h-16 ${cfg.bg} rounded-full flex items-center justify-center mx-auto mb-4`}>
                     <svg className={`w-8 h-8 ${cfg.color}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -70,7 +69,7 @@ function ErrorState({ title, message, linkHref, linkText, icon }: {
                 <p className="text-gray-600 mb-6">{message}</p>
                 <Link
                     href={linkHref}
-                    className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    className="touch-target inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
                 >
                     {linkText}
                 </Link>
@@ -409,29 +408,36 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     const nexaiMarkdown = hasNexAIInsight ? attempt.ai_analysis_result_text?.trim() : nexaiDemoMarkdown;
 
     return (
-        <main className="min-h-screen bg-gray-50">
-            <BackToDashboard variant="fixed" />
-            {/* Header with paper title and submission info */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-8 px-6">
-                <div className="max-w-5xl mx-auto">
-                    <h1 className="text-3xl font-bold mb-2">{paperTitle}</h1>
-                    <p className="text-blue-100">
-                        Submitted: {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : 'â€”'}
-                    </p>
-                    {attemptSequenceLabel && (
-                        <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white">
-                            {attemptSequenceLabel}
-                        </div>
-                    )}
-                    <div className="mt-4">
+        <main className="min-h-screen bg-[var(--bg-app)]">
+            <header className="border-b border-slate-200 bg-white px-4 py-4 sm:px-6 sm:py-5">
+                <div className="mx-auto flex max-w-6xl flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold text-[#0F172A]">{paperTitle}</h1>
+                        <p className="text-sm text-[#64748B]">
+                            Submitted: {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : '--'}
+                        </p>
+                        {attemptSequenceLabel && (
+                            <div className="mt-2 inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
+                                {attemptSequenceLabel}
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+                        <Link
+                            href="/dashboard"
+                            className="touch-target inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                        >
+                            Back to Dashboard
+                        </Link>
                         <AIInsightsJumpButton />
                     </div>
                 </div>
-            </div>
+            </header>
 
-            {/* Main content */}
-            <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+            <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8">
                 <ResultTabsClient
+                    hasReview={questionSets.length > 0}
+                    hasNexAI={true}
                     analytics={(
                         <>
                             <ResultHeader
@@ -524,10 +530,10 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                 />
 
                 {/* Action buttons */}
-                <div className="flex flex-wrap justify-center gap-4 pt-4">
+                <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap sm:justify-center sm:gap-4 sm:pt-4">
                     <Link
                         href="/dashboard"
-                        className="inline-flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                        className="touch-target inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-6 py-3 font-medium text-slate-700 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 sm:w-auto"
                     >
                         <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
@@ -536,7 +542,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                     </Link>
                     <Link
                         href="/mocks"
-                        className="inline-flex items-center px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                        className="touch-target inline-flex w-full items-center justify-center rounded-lg bg-[#2563EB] px-6 py-3 font-medium text-white shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] transition-colors hover:bg-[#1D4ED8] sm:w-auto"
                     >
                         <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
