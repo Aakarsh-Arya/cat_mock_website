@@ -11,6 +11,8 @@ type SaveResponsePayload = {
     isVisited?: boolean;
     timeSpentSeconds: number;
     visitCount?: number;
+    timePerVisit?: number[];
+    userNote?: string;
     sessionToken?: string | null;
     force_resume?: boolean;
 };
@@ -31,6 +33,7 @@ type ProgressPayload = {
     currentQuestion: number;
     sessionToken?: string | null;
     force_resume?: boolean;
+    visitOrder?: Record<string, readonly string[]>;
 };
 
 type PausePayload = ProgressPayload & {

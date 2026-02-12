@@ -361,6 +361,15 @@ export type AttemptStatus = 'in_progress' | 'paused' | 'submitted' | 'completed'
 /** AI analysis lifecycle states (matches ai_analysis_status_type enum in DB) */
 export type AIAnalysisStatus = 'none' | 'requested' | 'exported' | 'processed' | 'failed';
 
+/** History entry for each AI insight request on an attempt */
+export interface AIRequestHistoryEntry {
+    readonly request_number: number;
+    readonly user_prompt: string | null;
+    readonly question_reasons: AIQuestionReasonMap | null;
+    readonly requested_at: string;
+    readonly status: AIAnalysisStatus;
+}
+
 export interface SectionScore {
     readonly score: number;
     readonly correct: number;
@@ -412,6 +421,10 @@ export interface Attempt extends BaseEntity, TimeTracked {
     readonly ai_analysis_user_prompt?: string | null;
     readonly ai_analysis_result_text?: string | null;
     readonly ai_analysis_question_reasons?: AIQuestionReasonMap | null;
+    /** Number of AI insight requests made for this attempt */
+    readonly ai_analysis_request_count?: number;
+    /** History of all AI insight requests (array of {prompt, requested_at, status}) */
+    readonly ai_analysis_request_history?: readonly AIRequestHistoryEntry[] | null;
 
     // Paper version snapshot (set at attempt creation, Migration 031)
     readonly paper_ingest_run_id?: string | null;
@@ -441,6 +454,10 @@ export interface ResponseState {
     readonly isMarkedForReview: boolean;
     readonly timeSpentSeconds: number;
     readonly visitCount: number;
+    /** Time spent on each individual visit (array of seconds per visit) */
+    readonly timePerVisit: readonly number[];
+    /** User's personal note for this question (max 50 words) */
+    readonly userNote: string;
 }
 
 export interface SectionTimerState {
@@ -469,6 +486,11 @@ export interface ExamEngineState {
     readonly pendingSyncResponses: Record<string, { answer: string | null; timestamp: number }>;
     readonly lastSyncTimestamp: number;
     readonly sectionTimers: Record<SectionName, SectionTimerState>;
+
+    /** Per-section ordered log of question IDs visited (may repeat) */
+    readonly sectionVisitOrder: Record<SectionName, readonly string[]>;
+    /** Timestamp when the current question was entered (for per-visit time tracking) */
+    readonly currentQuestionEnteredAt: number;
 
     // Sets
     readonly visitedQuestions: ReadonlySet<string>;
@@ -507,6 +529,8 @@ export interface ExamEngineActions {
     // Status
     markQuestionVisited: (qId: string) => void;
     updateTimeSpent: (qId: string, seconds: number) => void;
+    /** Set user note for a question (max 50 words) */
+    setUserNote: (qId: string, note: string) => void;
 
     // Section
     completeSection: (name: SectionName) => void;

@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     const res = NextResponse.next();
 
     try {
-        const { attemptId, timeRemaining, currentSection, currentQuestion, sessionToken } = await req.json();
+        const { attemptId, timeRemaining, currentSection, currentQuestion, sessionToken, visitOrder } = await req.json();
 
         if (!isNonEmptyString(attemptId)) {
             return addVersionHeader(NextResponse.json({ error: 'attemptId is required' }, { status: 400 }));
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
                 },
             });
 
-                const { data: { user } } = await supabase.auth.getUser();
+            const { data: { user } } = await supabase.auth.getUser();
             if (user) {
                 const { data: isValidSession } = await supabase.rpc('validate_session_token', {
                     p_attempt_id: attemptId,
@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
             timeRemaining,
             currentSection: currentSection as import('@/types/exam').SectionName,
             currentQuestion,
+            visitOrder,
         });
 
         if (!result.success) {

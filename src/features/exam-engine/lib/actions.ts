@@ -464,6 +464,7 @@ export async function updateAttemptProgress(data: {
     timeRemaining: TimeRemaining;
     currentSection: SectionName;
     currentQuestion: number;
+    visitOrder?: Record<string, readonly string[]>;
 }): Promise<ActionResult<void>> {
     try {
         const parsed = UpdateTimerRequestSchema.safeParse(data);
@@ -484,6 +485,18 @@ export async function updateAttemptProgress(data: {
             p_current_question: data.currentQuestion,
             p_client_now: new Date().toISOString(),
         });
+
+        // Best-effort save visit_order alongside progress (non-blocking)
+        if (data.visitOrder && !rpcError) {
+            await supabase
+                .from('attempts')
+                .update({ visit_order: data.visitOrder })
+                .eq('id', data.attemptId)
+                .eq('user_id', user.id)
+                .then(({ error }) => {
+                    if (error) logger.warn('Failed to save visit_order', { attemptId: data.attemptId, error: error.message });
+                });
+        }
 
         if (!rpcError) return { success: true };
 
@@ -1147,6 +1160,7 @@ export async function pauseExam(data: {
     timeRemaining: TimeRemaining;
     currentSection: SectionName;
     currentQuestion: number;
+    visitOrder?: Record<string, readonly string[]>;
 }): Promise<ActionResult<void>> {
     try {
         const supabase = await sbSSR();
@@ -1157,12 +1171,27 @@ export async function pauseExam(data: {
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
 
-        // Client hint timeRemaining is intentionally unused; RPC is server-authoritative.
+        // Pass client timeRemaining to the RPC so it's saved atomically with
+        // the status transition.  This prevents data loss from race conditions
+        // where a beacon pause lands at the server before the progress save.
         const { error: rpcError } = await supabase.rpc('pause_exam_state', {
             p_attempt_id: data.attemptId,
             p_current_section: data.currentSection,
             p_current_question: data.currentQuestion,
+            p_time_remaining: data.timeRemaining,
         });
+
+        // Best-effort save visit_order alongside pause (non-blocking)
+        if (data.visitOrder && !rpcError) {
+            await supabase
+                .from('attempts')
+                .update({ visit_order: data.visitOrder })
+                .eq('id', data.attemptId)
+                .eq('user_id', user.id)
+                .then(({ error }) => {
+                    if (error) logger.warn('Failed to save visit_order on pause', { attemptId: data.attemptId, error: error.message });
+                });
+        }
 
         if (!rpcError) return { success: true };
 
@@ -1229,8 +1258,9 @@ export async function requestAIAnalysis(
 
         const currentStatus = statusRow?.ai_analysis_status ?? 'none';
 
-        // Idempotent: if already requested (or further), return success
-        if (currentStatus && currentStatus !== 'none' && currentStatus !== 'failed') {
+        // Allow re-requesting if previous request was processed.
+        // Block if currently requested or exported (in-flight).
+        if (currentStatus === 'requested' || currentStatus === 'exported') {
             return {
                 success: true,
                 data: { status: currentStatus },
@@ -1260,13 +1290,35 @@ export async function requestAIAnalysis(
             }
         }
 
-        // 5) Update status -> requested (use service-role to bypass RLS column restrictions)
+        // 5) Build request history entry
+        const { data: fullAttempt } = await admin
+            .from('attempts')
+            .select('ai_analysis_request_count, ai_analysis_request_history')
+            .eq('id', attemptId)
+            .maybeSingle();
+
+        const prevCount = (fullAttempt?.ai_analysis_request_count as number) ?? 0;
+        const prevHistory = Array.isArray(fullAttempt?.ai_analysis_request_history)
+            ? (fullAttempt.ai_analysis_request_history as unknown[])
+            : [];
+
+        const historyEntry = {
+            request_number: prevCount + 1,
+            user_prompt: prompt,
+            question_reasons: sanitizedQuestionReasons,
+            requested_at: new Date().toISOString(),
+            status: 'requested',
+        };
+
+        // 6) Update status -> requested (use service-role to bypass RLS column restrictions)
         const updatePayload: Record<string, unknown> = {
             ai_analysis_status: 'requested',
             ai_analysis_requested_at: new Date().toISOString(),
             ai_analysis_user_prompt: prompt,
             ai_analysis_result_text: null,
             ai_analysis_question_reasons: sanitizedQuestionReasons,
+            ai_analysis_request_count: prevCount + 1,
+            ai_analysis_request_history: [...prevHistory, historyEntry],
         };
 
         let { error: updateError } = await admin
@@ -1274,9 +1326,11 @@ export async function requestAIAnalysis(
             .update(updatePayload)
             .eq('id', attemptId);
 
-        // Migration fallback: allow request to succeed even before ai_analysis_question_reasons column exists.
+        // Migration fallback: allow request to succeed even before new columns exist.
         if (updateError?.code === '42703') {
             delete updatePayload.ai_analysis_question_reasons;
+            delete updatePayload.ai_analysis_request_count;
+            delete updatePayload.ai_analysis_request_history;
             const fallback = await admin
                 .from('attempts')
                 .update(updatePayload)

@@ -14,6 +14,7 @@ interface AIAnalysisButtonProps {
     attemptId: string;
     initialStatus: AIAnalysisStatus;
     initialPrompt?: string | null;
+    initialRequestCount?: number;
 }
 
 const STATUS_CONFIG: Record<AIAnalysisStatus, {
@@ -41,10 +42,10 @@ const STATUS_CONFIG: Record<AIAnalysisStatus, {
         icon: 'download',
     },
     processed: {
-        label: 'NexAI Insight Ready',
-        className: 'bg-green-100 text-green-700 cursor-default',
-        disabled: true,
-        icon: 'check',
+        label: 'Request Another NexAI Insight',
+        className: 'bg-cyan-600 text-white hover:bg-cyan-700',
+        disabled: false,
+        icon: 'sparkle',
     },
     failed: {
         label: 'NexAI Processing Failed - Retry',
@@ -91,14 +92,16 @@ function StatusIcon({ icon }: { icon: string }) {
     }
 }
 
-export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt }: AIAnalysisButtonProps) {
+export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt, initialRequestCount }: AIAnalysisButtonProps) {
     const [status, setStatus] = useState<AIAnalysisStatus>(initialStatus || 'none');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [prompt, setPrompt] = useState(initialPrompt ?? '');
+    const [requestCount, setRequestCount] = useState(initialRequestCount ?? 0);
     const [isPending, startTransition] = useTransition();
 
     const config = STATUS_CONFIG[status];
-    const canEditPrompt = status === 'none' || status === 'failed';
+    const canEditPrompt = status === 'none' || status === 'failed' || status === 'processed';
+    const canRequest = status === 'none' || status === 'failed' || status === 'processed';
 
     const snapshotQuestionReasons = useCallback((): Record<string, PerformanceReason> => {
         const store = getAnalysisStore(attemptId);
@@ -116,7 +119,7 @@ export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt }: AI
     }, [attemptId]);
 
     const handleRequest = useCallback(() => {
-        if (config.disabled && status !== 'failed') return;
+        if (!canRequest) return;
 
         setErrorMessage(null);
 
@@ -130,12 +133,17 @@ export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt }: AI
 
             if (result.success) {
                 setStatus((result.data?.status as AIAnalysisStatus) || 'requested');
+                setRequestCount((c) => c + 1);
+                // Clear prompt for next request
+                if (status === 'processed') {
+                    setPrompt('');
+                }
             } else {
                 setStatus(prevStatus);
                 setErrorMessage(result.error ?? 'Failed to request NexAI insight');
             }
         });
-    }, [attemptId, config.disabled, prompt, startTransition, status]);
+    }, [attemptId, canRequest, prompt, startTransition, status]);
 
     return (
         <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
@@ -161,7 +169,7 @@ export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt }: AI
             <button
                 type="button"
                 onClick={handleRequest}
-                disabled={config.disabled || isPending}
+                disabled={!canRequest || isPending}
                 className={`inline-flex items-center rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${config.className} ${isPending ? 'cursor-wait opacity-60' : ''}`}
             >
                 {isPending ? (
@@ -174,6 +182,12 @@ export function AIAnalysisButton({ attemptId, initialStatus, initialPrompt }: AI
                 )}
                 {isPending ? 'Submitting Request...' : config.label}
             </button>
+
+            {requestCount > 0 && (
+                <p className="text-xs text-slate-500">
+                    Requests made: <strong className="text-slate-700">{requestCount}</strong>
+                </p>
+            )}
 
             {errorMessage && (
                 <p className="text-sm text-red-600">{errorMessage}</p>

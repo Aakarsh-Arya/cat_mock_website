@@ -23,6 +23,8 @@ type BatchItem = {
     isVisited?: boolean;
     timeSpentSeconds?: number;
     visitCount?: number;
+    timePerVisit?: number[];
+    userNote?: string;
 };
 
 type ValidateSessionResult = { data: boolean | null; error: { code?: string; message?: string } | null };
@@ -209,6 +211,8 @@ export async function POST(req: NextRequest) {
                 if (typeof r.isVisited === 'boolean') row.is_visited = r.isVisited;
                 if (typeof r.timeSpentSeconds === 'number') row.time_spent_seconds = r.timeSpentSeconds;
                 if (typeof r.visitCount === 'number') row.visit_count = r.visitCount;
+                if (Array.isArray(r.timePerVisit)) row.time_per_visit = r.timePerVisit;
+                if (typeof r.userNote === 'string' && r.userNote.length > 0) row.user_note = r.userNote;
 
                 return row;
             });

@@ -125,6 +125,32 @@ function isNonEmptyString(value: unknown): value is string {
     return typeof value === 'string' && value.trim().length > 0;
 }
 
+/**
+ * Close the current question's visit timing in a batch payload.
+ * Called before pause/submit saves to capture the final visit duration.
+ */
+function closeCurrentVisitInBatch<T extends { questionId: string; timePerVisit: number[] }>(
+    batch: T[],
+    visitOrder: Record<string, readonly string[]>,
+    sectionIndex: number,
+    enteredAt: number,
+): T[] {
+    if (enteredAt <= 0) return batch;
+    const sectionName = getSectionByIndex(sectionIndex);
+    const order = visitOrder[sectionName];
+    const currentQId = order?.[order.length - 1];
+    if (!currentQId) return batch;
+
+    const now = Date.now();
+    const visitDuration = Math.max(0, Math.floor((now - enteredAt) / 1000));
+
+    return batch.map((item) =>
+        item.questionId === currentQId
+            ? { ...item, timePerVisit: [...item.timePerVisit, visitDuration] }
+            : item
+    );
+}
+
 export function ExamClient({ paper, questions, attempt, responses: serverResponses }: ExamClientProps) {
     const router = useRouter();
 
@@ -142,6 +168,8 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const isSubmitting = useExamStore((s) => s.isSubmitting);
     const isAutoSubmitting = useExamStore((s) => s.isAutoSubmitting);
     const sessionToken = useExamStore((s) => s.sessionToken);
+    const sectionVisitOrder = useExamStore((s) => s.sectionVisitOrder);
+    const currentQuestionEnteredAt = useExamStore((s) => s.currentQuestionEnteredAt);
     const mockReturnPath = `/mock/${paper.slug || paper.id}`;
     const submissionIdRef = useRef<string>(
         typeof crypto !== 'undefined' && crypto.randomUUID
@@ -154,6 +182,8 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const sessionTokenRef = useRef(sessionToken);
     const currentSectionIndexRef = useRef(currentSectionIndex);
     const currentQuestionIndexRef = useRef(currentQuestionIndex);
+    const sectionVisitOrderRef = useRef(sectionVisitOrder);
+    const currentQuestionEnteredAtRef = useRef(currentQuestionEnteredAt);
     const sessionTokenPromiseRef = useRef<Promise<string | null> | null>(null);
     const sessionVerifiedRef = useRef(false);
     const attemptFinalizedRef = useRef(false);
@@ -216,6 +246,14 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         currentSectionIndexRef.current = currentSectionIndex;
         currentQuestionIndexRef.current = currentQuestionIndex;
     }, [currentSectionIndex, currentQuestionIndex]);
+
+    useEffect(() => {
+        sectionVisitOrderRef.current = sectionVisitOrder;
+    }, [sectionVisitOrder]);
+
+    useEffect(() => {
+        currentQuestionEnteredAtRef.current = currentQuestionEnteredAt;
+    }, [currentQuestionEnteredAt]);
 
     // Initialize exam on mount - but only once per session
     // The initializeExam function now handles the case where state is already loaded
@@ -369,7 +407,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const persistSnapshotBeforePause = useCallback(
         async (attemptIdValue: string, snapshot: PauseSnapshot, token: string | null) => {
             const snapshotResponses = responsesRef.current;
-            const batch = Object.entries(snapshotResponses)
+            let batch = Object.entries(snapshotResponses)
                 .filter(([, response]) => hasAnswer(response.answer) || response.status !== 'not_visited')
                 .map(([questionId, response]) => {
                     const persistedAnswer = getPersistedAnswer(response.status, response.answer);
@@ -381,8 +419,18 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                         isVisited: getIsVisited(response.status, persistedAnswer),
                         timeSpentSeconds: response.timeSpentSeconds,
                         visitCount: response.visitCount,
+                        timePerVisit: [...response.timePerVisit],
+                        userNote: response.userNote,
                     };
                 });
+
+            // Close the current visit timing before saving
+            batch = closeCurrentVisitInBatch(
+                batch,
+                sectionVisitOrderRef.current,
+                currentSectionIndexRef.current,
+                currentQuestionEnteredAtRef.current,
+            );
 
             if (batch.length > 0 && token) {
                 try {
@@ -410,6 +458,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                         currentQuestion: snapshot.currentQuestion,
                         sessionToken: token ?? undefined,
                         force_resume: true,
+                        visitOrder: sectionVisitOrderRef.current,
                     }),
                     8000,
                     'updateAttemptProgress(pause)'
@@ -530,6 +579,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 timeRemaining,
                 currentSection,
                 currentQuestion: currentQuestionIndex + 1,
+                visitOrder: sectionVisitOrder,
             });
             if (!progressResult.success) {
                 if (progressResult.error === 'Attempt is not in progress') {
@@ -560,6 +610,8 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                             isVisited: getIsVisited(response.status, persistedAnswer),
                             timeSpentSeconds: response.timeSpentSeconds,
                             visitCount: response.visitCount,
+                            timePerVisit: [...response.timePerVisit],
+                            userNote: response.userNote,
                         };
                     });
 
@@ -611,6 +663,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         sectionTimers,
         currentSectionIndex,
         currentQuestionIndex,
+        sectionVisitOrder,
         responses,
         ensureSessionToken,
         hasAnswer,
@@ -642,6 +695,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 timeRemaining,
                 currentSection,
                 currentQuestion: currentQuestionIndex + 1,
+                visitOrder: sectionVisitOrderRef.current,
             });
             if (!progressResult.success && progressResult.error === 'Attempt is not in progress') {
                 attemptFinalizedRef.current = true;
@@ -695,6 +749,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                     currentQuestion,
                     sessionToken: sessionTokenRef.current ?? undefined,
                     force_resume: true,
+                    visitOrder: sectionVisitOrderRef.current,
                 });
                 return;
             }
@@ -706,6 +761,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 currentQuestion,
                 sessionToken: sessionTokenRef.current ?? undefined,
                 force_resume: true,
+                visitOrder: sectionVisitOrderRef.current,
             });
 
             navigator.sendBeacon('/api/progress', new Blob([payload], { type: 'application/json' }));
@@ -721,7 +777,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             const snapshot = responsesRef.current;
             const token = sessionTokenRef.current;
 
-            const responsesPayload = Object.entries(snapshot)
+            let responsesPayload = Object.entries(snapshot)
                 .filter(([, response]) => hasAnswer(response.answer) || response.status !== 'not_visited')
                 .map(([questionId, response]) => {
                     const persistedAnswer = getPersistedAnswer(response.status, response.answer);
@@ -733,8 +789,18 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                         isVisited: getIsVisited(response.status, persistedAnswer),
                         timeSpentSeconds: response.timeSpentSeconds,
                         visitCount: response.visitCount,
+                        timePerVisit: [...response.timePerVisit],
+                        userNote: response.userNote,
                     };
                 });
+
+            // Close current visit timing before beacon save
+            responsesPayload = closeCurrentVisitInBatch(
+                responsesPayload,
+                sectionVisitOrderRef.current,
+                currentSectionIndexRef.current,
+                currentQuestionEnteredAtRef.current,
+            );
 
             if (responsesPayload.length === 0) return;
 
@@ -812,6 +878,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 currentSection: getSectionByIndex(currentSectionIndexRef.current),
                 currentQuestion: currentQuestionIndexRef.current + 1,
                 sessionToken: sessionTokenRef.current ?? undefined,
+                visitOrder: sectionVisitOrderRef.current,
             });
 
             if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
@@ -990,6 +1057,8 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 isVisited: getIsVisited(response.status, persistedAnswer),
                 timeSpentSeconds: response.timeSpentSeconds,
                 visitCount: response.visitCount,
+                timePerVisit: [...response.timePerVisit],
+                userNote: response.userNote,
                 sessionToken: activeSessionToken,
             };
 
@@ -1096,7 +1165,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
         const activeSessionToken = await ensureSessionToken({ reason: 'section-expire' });
         if (activeSessionToken) {
-            const batch = sectionQuestions
+            let batch = sectionQuestions
                 .map((q) => {
                     const response = responses[q.id];
                     if (!response || (!hasAnswer(response.answer) && response.status === 'not_visited')) {
@@ -1111,6 +1180,8 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                         isVisited: getIsVisited(response.status, persistedAnswer),
                         timeSpentSeconds: response.timeSpentSeconds,
                         visitCount: response.visitCount,
+                        timePerVisit: [...response.timePerVisit],
+                        userNote: response.userNote,
                     };
                 })
                 .filter(Boolean) as Array<{
@@ -1121,7 +1192,17 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                     isVisited: boolean;
                     timeSpentSeconds: number;
                     visitCount?: number;
+                    timePerVisit: number[];
+                    userNote: string;
                 }>;
+
+            // Close current visit timing before section expire save
+            batch = closeCurrentVisitInBatch(
+                batch,
+                sectionVisitOrderRef.current,
+                currentSectionIndexRef.current,
+                currentQuestionEnteredAtRef.current,
+            );
 
             if (batch.length > 0) {
                 const batchResult = await saveResponsesBatch({
@@ -1187,7 +1268,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             // PHASE 4 FIX: Batch-save remaining responses before submit (best-effort)
             try {
                 updateSubmissionProgress('saving', 45);
-                const batch = Object.entries(responses)
+                let batch = Object.entries(responses)
                     .filter(([, response]) => hasAnswer(response.answer) || response.status !== 'not_visited')
                     .map(([questionId, response]) => {
                         const persistedAnswer = getPersistedAnswer(response.status, response.answer);
@@ -1199,8 +1280,18 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                             isVisited: getIsVisited(response.status, persistedAnswer),
                             timeSpentSeconds: response.timeSpentSeconds,
                             visitCount: response.visitCount,
+                            timePerVisit: [...response.timePerVisit],
+                            userNote: response.userNote,
                         };
                     });
+
+                // Close the current visit timing before final save
+                batch = closeCurrentVisitInBatch(
+                    batch,
+                    sectionVisitOrderRef.current,
+                    currentSectionIndexRef.current,
+                    currentQuestionEnteredAtRef.current,
+                );
 
                 if (batch.length > 0) {
                     const batchResult = await withTimeout(
@@ -1218,6 +1309,27 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 }
             } catch (err) {
                 logger.warn('Some responses failed to save during submit', err);
+            }
+
+            // Save visit_order to server before submit (best-effort)
+            try {
+                await withTimeout(
+                    updateAttemptProgress({
+                        attemptId,
+                        timeRemaining: {
+                            VARC: sectionTimers.VARC.remainingSeconds,
+                            DILR: sectionTimers.DILR.remainingSeconds,
+                            QA: sectionTimers.QA.remainingSeconds,
+                        },
+                        currentSection: getSectionByIndex(currentSectionIndex),
+                        currentQuestion: currentQuestionIndex + 1,
+                        visitOrder: sectionVisitOrderRef.current,
+                    }),
+                    5000,
+                    'updateAttemptProgress(pre-submit)'
+                );
+            } catch {
+                // best-effort, don't block submit
             }
 
             updateSubmissionProgress('submitting', 75);
@@ -1416,7 +1528,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             submitLockRef.current = false;
             setSubmitting(false);
         }
-    }, [attemptId, responses, router, setUiError, hasAnswer, getPersistedAnswer, getIsVisited, forceRefreshSessionToken, isSubmitting, isAutoSubmitting, setSubmitting, withTimeout]);
+    }, [attemptId, responses, sectionTimers, currentSectionIndex, currentQuestionIndex, router, setUiError, hasAnswer, getPersistedAnswer, getIsVisited, forceRefreshSessionToken, isSubmitting, isAutoSubmitting, setSubmitting, withTimeout]);
 
     const handleResolveConflict = useCallback(async (resumeHere: boolean) => {
         if (!sessionConflict) return;

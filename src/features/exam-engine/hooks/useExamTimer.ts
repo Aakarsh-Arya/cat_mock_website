@@ -317,32 +317,66 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
 
     // Auto-pause timer on tab hidden / app background / screen lock;
     // resume + sync on focus return.
+    // CRITICAL FIX: Reset startedAt on return to exclude hidden time from delta-time.
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'hidden') {
+                // Snapshot accurate remaining BEFORE stopping the interval so the
+                // store value is authoritative when we resume later.
+                const st = useExamStore.getState();
+                const section = currentSectionRef.current;
+                const timer = st.sectionTimers[section];
+                if (timer && timer.startedAt > 0 && !timer.isExpired) {
+                    const remaining = calculateRemainingSeconds(timer);
+                    updateSectionTimer(section, remaining);
+                }
                 // Pause the interval immediately so no ticks fire in the background.
-                // This prevents "time jumps" when the browser throttles intervals.
                 stopTimer();
             } else {
-                // Tab/app came back: recalculate remaining time (delta-time is
-                // authoritative) and restart the tick interval.
+                // Tab/app came back.
+                // CRITICAL FIX: The delta-time approach uses Date.now() - startedAt.
+                // While the tab was hidden, real time passed but the exam should NOT
+                // count it (the server pauses the exam).  We must reset startedAt so
+                // the delta-time calculation resumes from the STORED remainingSeconds,
+                // excluding all hidden time.
                 if (!isManuallyPausedRef.current) {
                     const st = useExamStore.getState();
                     if (st.isInitialized && !st.isSubmitting && !st.isAutoSubmitting) {
+                        const section = currentSectionRef.current;
+                        const timer = st.sectionTimers[section];
+                        if (timer && !timer.isExpired && timer.remainingSeconds > 0) {
+                            // setSectionTimerOverride resets startedAt = Date.now() with
+                            // durationSeconds = remainingSeconds, so delta-time picks up
+                            // exactly where the timer was frozen.
+                            st.setSectionTimerOverride(section, timer.remainingSeconds);
+                        }
                         startTimer(); // starts interval + runs immediate tick()
                     }
                 }
             }
         };
 
-        // Handle offline: stop timer to avoid phantom counting while disconnected
-        const handleOffline = () => stopTimer();
+        // Handle offline: snapshot + stop to avoid phantom counting while disconnected
+        const handleOffline = () => {
+            const st = useExamStore.getState();
+            const section = currentSectionRef.current;
+            const timer = st.sectionTimers[section];
+            if (timer && timer.startedAt > 0 && !timer.isExpired) {
+                updateSectionTimer(section, calculateRemainingSeconds(timer));
+            }
+            stopTimer();
+        };
 
-        // Handle online: resume timer
+        // Handle online: restore timer with stored remaining (same fix as visibility)
         const handleOnline = () => {
             if (!isManuallyPausedRef.current) {
                 const st = useExamStore.getState();
                 if (st.isInitialized && !st.isSubmitting && !st.isAutoSubmitting) {
+                    const section = currentSectionRef.current;
+                    const timer = st.sectionTimers[section];
+                    if (timer && !timer.isExpired && timer.remainingSeconds > 0) {
+                        st.setSectionTimerOverride(section, timer.remainingSeconds);
+                    }
                     startTimer();
                 }
             }
@@ -356,7 +390,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
             window.removeEventListener('offline', handleOffline);
             window.removeEventListener('online', handleOnline);
         };
-    }, [tick, stopTimer, startTimer]);
+    }, [tick, stopTimer, startTimer, updateSectionTimer]);
 
     const timerData: TimerDisplayData = (() => {
         const remaining = calculateRemainingSeconds(currentTimer);

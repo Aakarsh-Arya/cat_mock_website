@@ -51,6 +51,8 @@ interface ResponseRow {
     is_visited?: boolean | null;
     is_marked_for_review?: boolean;
     answer_history?: unknown;
+    time_per_visit?: number[] | null;
+    user_note?: string | null;
 }
 
 type QuestionReasonMap = Record<string, PerformanceReason>;
@@ -100,6 +102,8 @@ export interface SchemaExportItem {
         is_marked_for_review: boolean | null;
         answer_history: unknown;
         performance_reason: PerformanceReason | null;
+        time_per_visit: number[] | null;
+        user_note: string | null;
     };
     derived: {
         attempt_state: 'correct' | 'incorrect' | 'unanswered';
@@ -190,6 +194,8 @@ export interface CompositeContextPacket {
         notes: string | null;
         ai_customization_prompt: string | null;
         performance_reason: string | null;
+        ai_request_count: number;
+        ai_request_history: unknown[] | null;
     };
     paper: Record<string, unknown>;
     attempt: {
@@ -588,6 +594,8 @@ export async function generateCompositeContextPacket(
                     is_marked_for_review: resp?.is_marked_for_review ?? null,
                     answer_history: Array.isArray(resp?.answer_history) ? resp.answer_history : null,
                     performance_reason: questionReasonMap[q.id] ?? null,
+                    time_per_visit: Array.isArray(resp?.time_per_visit) ? resp.time_per_visit : null,
+                    user_note: resp?.user_note ?? null,
                 },
                 derived: {
                     attempt_state: attemptState,
@@ -822,6 +830,9 @@ export async function generateCompositeContextPacket(
                 : null,
             ai_customization_prompt: attempt.ai_analysis_user_prompt ?? null,
             performance_reason: attempt.ai_analysis_user_prompt ?? null,
+            ai_request_count: (attempt as Record<string, unknown>).ai_analysis_request_count as number ?? 0,
+            ai_request_history: Array.isArray((attempt as Record<string, unknown>).ai_analysis_request_history)
+                ? (attempt as Record<string, unknown>).ai_analysis_request_history as unknown[] : null,
         },
         paper: {
             id: paper.id,
@@ -860,7 +871,11 @@ export async function generateCompositeContextPacket(
             },
             telemetry: {
                 telemetry_log: attempt.telemetry_log ?? null,
-            },
+            } as { telemetry_log: unknown; visit_order?: unknown },
+            // Attach visit_order if present on the attempt row
+            ...((attempt as Record<string, unknown>).visit_order
+                ? { visit_order: (attempt as Record<string, unknown>).visit_order }
+                : {}),
             performance_metrics: performanceMetrics,
         },
         user_progress: userProgress,

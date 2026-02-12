@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     const res = NextResponse.next();
 
     try {
-        const { attemptId, timeRemaining, currentSection, currentQuestion, sessionToken, force_resume } = await req.json();
+        const { attemptId, timeRemaining, currentSection, currentQuestion, sessionToken, force_resume, visitOrder } = await req.json();
 
         if (!isNonEmptyString(attemptId)) {
             return addVersionHeader(NextResponse.json({ error: 'attemptId is required' }, { status: 400 }));
@@ -159,6 +159,7 @@ export async function POST(req: NextRequest) {
             timeRemaining,
             currentSection: currentSection as import('@/types/exam').SectionName,
             currentQuestion,
+            visitOrder,
         });
 
         if (!result.success) {

@@ -105,6 +105,11 @@ const initialState: Omit<ExamStore, keyof import('@/types/exam').ExamEngineActio
         };
     })(),
 
+    // Visit order per section (ordered log of question IDs, may repeat)
+    sectionVisitOrder: { VARC: [], DILR: [], QA: [] },
+    // Entry timestamp for per-visit time tracking
+    currentQuestionEnteredAt: 0,
+
     // Question tracking
     visitedQuestions: new Set<string>(),
     markedQuestions: new Set<string>(),
@@ -259,6 +264,16 @@ export const createExamStore = (attemptId?: string) => {
                                     localResponse.status === 'answered' ||
                                     localResponse.status === 'answered_marked';
 
+                                // Merge new tracking fields
+                                const rAny = r as unknown as Record<string, unknown>;
+                                const serverTimePerVisit = Array.isArray(rAny.time_per_visit)
+                                    ? (rAny.time_per_visit as number[]) : [];
+                                const mergedTimePerVisit = localResponse.timePerVisit.length >= serverTimePerVisit.length
+                                    ? localResponse.timePerVisit : serverTimePerVisit;
+                                const serverUserNote = typeof rAny.user_note === 'string'
+                                    ? (rAny.user_note as string) : '';
+                                const mergedUserNote = localResponse.userNote || serverUserNote;
+
                                 if (serverIsAnswered && !localIsAnswered) {
                                     // Server has answer and local doesn't - use server data
                                     mergedResponses[r.question_id] = {
@@ -267,6 +282,8 @@ export const createExamStore = (attemptId?: string) => {
                                         isMarkedForReview: r.is_marked_for_review ?? false,
                                         timeSpentSeconds: Math.max(localResponse.timeSpentSeconds, r.time_spent_seconds ?? 0),
                                         visitCount: Math.max(localResponse.visitCount, r.visit_count ?? 0),
+                                        timePerVisit: mergedTimePerVisit,
+                                        userNote: mergedUserNote,
                                     };
                                 } else if (localIsAnswered) {
                                     // Local has answer but server doesn't - keep local (might be unsaved)
@@ -275,6 +292,8 @@ export const createExamStore = (attemptId?: string) => {
                                         ...localResponse,
                                         timeSpentSeconds: Math.max(localResponse.timeSpentSeconds, r.time_spent_seconds ?? 0),
                                         visitCount: Math.max(localResponse.visitCount, r.visit_count ?? 0),
+                                        timePerVisit: mergedTimePerVisit,
+                                        userNote: mergedUserNote,
                                     };
                                 } else {
                                     // Neither has answer - merge metadata
@@ -284,6 +303,8 @@ export const createExamStore = (attemptId?: string) => {
                                         isMarkedForReview: localResponse.isMarkedForReview || r.is_marked_for_review,
                                         timeSpentSeconds: Math.max(localResponse.timeSpentSeconds, r.time_spent_seconds ?? 0),
                                         visitCount: Math.max(localResponse.visitCount, r.visit_count ?? 0),
+                                        timePerVisit: mergedTimePerVisit,
+                                        userNote: mergedUserNote,
                                     };
                                 }
                             });
@@ -319,6 +340,8 @@ export const createExamStore = (attemptId?: string) => {
                             isMarkedForReview: false,
                             timeSpentSeconds: 0,
                             visitCount: 0,
+                            timePerVisit: [],
+                            userNote: '',
                         };
                     });
 
@@ -332,6 +355,12 @@ export const createExamStore = (attemptId?: string) => {
                                 isMarkedForReview: r.is_marked_for_review ?? false,
                                 timeSpentSeconds: r.time_spent_seconds ?? 0,
                                 visitCount: r.visit_count ?? 0,
+                                timePerVisit: Array.isArray((r as unknown as Record<string, unknown>).time_per_visit)
+                                    ? ((r as unknown as Record<string, unknown>).time_per_visit as number[])
+                                    : [],
+                                userNote: typeof (r as unknown as Record<string, unknown>).user_note === 'string'
+                                    ? ((r as unknown as Record<string, unknown>).user_note as string)
+                                    : '',
                             };
                         });
                     }
@@ -459,6 +488,8 @@ export const createExamStore = (attemptId?: string) => {
                         lockedSections,
                         responses,
                         sectionTimers,
+                        sectionVisitOrder: { VARC: [], DILR: [], QA: [] },
+                        currentQuestionEnteredAt: Date.now(),
                         visitedQuestions,
                         markedQuestions,
                         isSubmitting: false,
@@ -483,6 +514,7 @@ export const createExamStore = (attemptId?: string) => {
 
                 goToQuestion: (questionId: string, sectionIndex: number, questionIndex: number) => {
                     const state = get();
+                    const now = Date.now();
 
                     if (sectionIndex !== state.currentSectionIndex) {
                         logger.warn('Section locked. Navigation restricted to current section', {
@@ -493,44 +525,55 @@ export const createExamStore = (attemptId?: string) => {
                         return;
                     }
 
+                    // --- Per-visit time tracking: close the previous visit ---
+                    // Use section visit order to find current question
+                    const sectionName = getSectionByIndex(sectionIndex);
+                    const visitOrder = state.sectionVisitOrder[sectionName];
+                    const prevQId = visitOrder.length > 0 ? visitOrder[visitOrder.length - 1] : null;
+
+                    const updatedResponses = { ...state.responses };
+
+                    // Close previous visit timing if we have a valid previous question and entry time
+                    if (prevQId && state.currentQuestionEnteredAt > 0 && updatedResponses[prevQId]) {
+                        const visitDuration = Math.max(0, Math.floor((now - state.currentQuestionEnteredAt) / 1000));
+                        const prevResp = updatedResponses[prevQId];
+                        updatedResponses[prevQId] = {
+                            ...prevResp,
+                            timePerVisit: [...prevResp.timePerVisit, visitDuration],
+                        };
+                    }
+
+                    // --- Update visit order for new question ---
+                    const newVisitOrder = {
+                        ...state.sectionVisitOrder,
+                        [sectionName]: [...visitOrder, questionId],
+                    };
+
                     const newVisitedQuestions = new Set(state.visitedQuestions);
                     newVisitedQuestions.add(questionId);
 
-                    const response = state.responses[questionId];
+                    const response = updatedResponses[questionId];
                     if (response && response.status === 'not_visited') {
-                        set({
-                            currentSectionIndex: sectionIndex,
-                            currentQuestionIndex: questionIndex,
-                            visitedQuestions: newVisitedQuestions,
-                            responses: {
-                                ...state.responses,
-                                [questionId]: {
-                                    ...response,
-                                    status: 'visited',
-                                    visitCount: response.visitCount + 1,
-                                },
-                            },
-                        });
+                        updatedResponses[questionId] = {
+                            ...response,
+                            status: 'visited',
+                            visitCount: response.visitCount + 1,
+                        };
                     } else if (response) {
-                        set({
-                            currentSectionIndex: sectionIndex,
-                            currentQuestionIndex: questionIndex,
-                            visitedQuestions: newVisitedQuestions,
-                            responses: {
-                                ...state.responses,
-                                [questionId]: {
-                                    ...response,
-                                    visitCount: response.visitCount + 1,
-                                },
-                            },
-                        });
-                    } else {
-                        set({
-                            currentSectionIndex: sectionIndex,
-                            currentQuestionIndex: questionIndex,
-                            visitedQuestions: newVisitedQuestions,
-                        });
+                        updatedResponses[questionId] = {
+                            ...response,
+                            visitCount: response.visitCount + 1,
+                        };
                     }
+
+                    set({
+                        currentSectionIndex: sectionIndex,
+                        currentQuestionIndex: questionIndex,
+                        visitedQuestions: newVisitedQuestions,
+                        responses: updatedResponses,
+                        sectionVisitOrder: newVisitOrder,
+                        currentQuestionEnteredAt: now,
+                    });
                 },
 
                 goToNextQuestion: () => {
@@ -846,6 +889,28 @@ export const createExamStore = (attemptId?: string) => {
                     });
                 },
 
+                setUserNote: (questionId: string, note: string) => {
+                    const state = get();
+                    const response = state.responses[questionId];
+                    if (!response) return;
+
+                    // Enforce 50-word limit
+                    const words = note.trim().split(/\s+/).filter(Boolean);
+                    const clampedNote = words.length > 50
+                        ? words.slice(0, 50).join(' ')
+                        : note;
+
+                    set({
+                        responses: {
+                            ...state.responses,
+                            [questionId]: {
+                                ...response,
+                                userNote: clampedNote,
+                            },
+                        },
+                    });
+                },
+
                 // =====================================================================
                 // SECTION MANAGEMENT
                 // =====================================================================
@@ -974,6 +1039,8 @@ export const createExamStore = (attemptId?: string) => {
                     pendingSyncResponses: state.pendingSyncResponses,
                     lastSyncTimestamp: state.lastSyncTimestamp,
                     sectionTimers: state.sectionTimers,
+                    sectionVisitOrder: state.sectionVisitOrder,
+                    currentQuestionEnteredAt: state.currentQuestionEnteredAt,
                     visitedQuestions: Array.from(state.visitedQuestions),
                     markedQuestions: Array.from(state.markedQuestions),
                 }),

@@ -375,6 +375,8 @@ export async function POST(req: NextRequest) {
         if (typeof isVisited === 'boolean') upsertPayload.is_visited = isVisited;
         if (typeof timeSpentSeconds === 'number') upsertPayload.time_spent_seconds = timeSpentSeconds;
         if (typeof visitCount === 'number') upsertPayload.visit_count = visitCount;
+        if (Array.isArray(body?.timePerVisit)) upsertPayload.time_per_visit = body.timePerVisit;
+        if (typeof body?.userNote === 'string' && body.userNote.length > 0) upsertPayload.user_note = body.userNote;
 
         const { data, error } = await supabase
             .from('responses')
