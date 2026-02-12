@@ -289,7 +289,7 @@ function ContextPane({ question, sectionLabel }: ContextPaneProps) {
                             />
                         </div>
                     )}
-                    <div className="text-[15px] leading-exam text-exam-text-body whitespace-pre-wrap mb-5">
+                    <div className="text-[15px] leading-exam text-exam-text-body mb-5">
                         <MathText text={context.content} />
                     </div>
                 </div>

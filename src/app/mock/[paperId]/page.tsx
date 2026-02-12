@@ -8,6 +8,7 @@ import { getServiceRoleClient } from '@/lib/supabase/service-role';
 import { ensureActiveAccess } from '@/lib/access-control';
 import { checkRateLimit, RATE_LIMITS, userRateLimitKey } from '@/lib/rate-limit';
 import { incrementMetric } from '@/lib/telemetry';
+import { AttemptStateAutoRefresh } from '@/components/AttemptStateAutoRefresh';
 
 export const metadata: Metadata = {
     title: "Mock Details",
@@ -67,12 +68,18 @@ export default async function MockDetailPage({
     }
 
     const { data: { user } } = await supabase.auth.getUser();
-    let previousAttempts: { id: string; status: string; total_score: number | null; created_at: string }[] = [];
+    let previousAttempts: {
+        id: string;
+        status: string;
+        total_score: number | null;
+        created_at: string;
+        time_remaining?: Record<string, unknown> | null;
+    }[] = [];
 
     if (user && paper) {
         const { data: attempts } = await supabase
             .from('attempts')
-            .select('id, status, total_score, created_at')
+            .select('id, status, total_score, created_at, time_remaining')
             .eq('paper_id', paper.id)
             .eq('user_id', user.id)
             .order('created_at', { ascending: false });
@@ -83,6 +90,9 @@ export default async function MockDetailPage({
     const activeAttemptsCount = previousAttempts.filter((a) => attemptLimitStatuses.has(a.status)).length;
     const attemptLimit = paper?.attempt_limit ?? null;
     const canAttempt = attemptLimit === null || attemptLimit <= 0 || activeAttemptsCount < attemptLimit;
+    const activeAttempt = previousAttempts.find(
+        (a) => a.status === 'in_progress' || a.status === 'paused'
+    ) ?? null;
 
     async function startExam() {
         'use server';
@@ -240,6 +250,7 @@ export default async function MockDetailPage({
 
     return (
         <main className="page-shell py-6 sm:py-8">
+            <AttemptStateAutoRefresh pollIntervalMs={10000} />
             {queryError === 'rate_limited' && (
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     Too many start attempts. Please wait a minute and try again.
@@ -314,7 +325,7 @@ export default async function MockDetailPage({
                                         <Link href={`/result/${attempt.id}`} className="touch-target inline-flex items-center text-blue-600 hover:text-blue-800">
                                             View Result
                                         </Link>
-                                    ) : attempt.status === 'in_progress' ? (
+                                    ) : attempt.status === 'in_progress' || attempt.status === 'paused' ? (
                                         <Link href={`/exam/${attempt.id}`} className="touch-target inline-flex items-center text-amber-700 hover:text-amber-800">
                                             Continue
                                         </Link>
@@ -331,6 +342,13 @@ export default async function MockDetailPage({
             <div className="text-center">
                 {!paper.published ? (
                     <p className="text-slate-600">This paper is not yet available.</p>
+                ) : activeAttempt ? (
+                    <Link
+                        href={`/exam/${activeAttempt.id}`}
+                        className="touch-target inline-flex w-full items-center justify-center rounded-lg bg-amber-500 px-6 py-3 text-base font-semibold text-white hover:bg-amber-600 sm:w-auto sm:px-10"
+                    >
+                        Continue Mock
+                    </Link>
                 ) : !canAttempt ? (
                     <p className="text-red-700">You have reached the maximum number of attempts for this paper.</p>
                 ) : (

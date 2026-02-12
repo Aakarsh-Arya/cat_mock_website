@@ -262,7 +262,13 @@ export function MathText({ text, className }: MathTextProps) {
     // Format para jumble questions with numbered sentences
     const formattedText = formatParaJumbleText(String(text));
 
-    const normalizedText = formattedText
+    const compactedText = formattedText
+        // Prevent accidental large visual gaps from excessive blank lines in content payloads.
+        .replace(/\n{3,}/g, '\n\n')
+        // Collapse blank lines immediately before Markdown tables so they render tight.
+        .replace(/\n{2,}(?=\|)/g, '\n');
+
+    const normalizedText = compactedText
         .replace(/\\\[((?:.|\n)+?)\\\]/g, (_match, math) => `$$${math}$$`)
         .replace(/\\\(((?:.|\n)+?)\\\)/g, (_match, math) => `$${math}$`);
 
@@ -308,8 +314,12 @@ export function MathText({ text, className }: MathTextProps) {
                                     {children}
                                 </div>
                             ),
-                            table: ({ children }) => <table className="table-auto border-collapse">{children}</table>,
-                            th: ({ children }) => <th className="border px-2 py-1">{children}</th>,
+                            table: ({ children }) => (
+                                <div className="mobile-table-scroll mt-1 mb-2 overflow-x-auto not-prose">
+                                    <table className="min-w-max border-collapse text-left text-sm">{children}</table>
+                                </div>
+                            ),
+                            th: ({ children }) => <th className="border px-2 py-1 font-semibold">{children}</th>,
                             td: ({ children }) => <td className="border px-2 py-1">{children}</td>,
                             code: (props) => {
                                 const { className, children } = props;

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { sbSSR } from '@/lib/supabase/server';
+import { AttemptStateAutoRefresh } from '@/components/AttemptStateAutoRefresh';
 
 type Paper = {
     id: string;
@@ -104,6 +105,7 @@ export default async function MocksPage() {
 
     return (
         <main className="page-shell py-6 sm:py-8">
+            <AttemptStateAutoRefresh pollIntervalMs={10000} />
             <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">NEXAMS Mock Tests</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600 sm:text-base">
                 Practice with full-length CAT mock tests designed to simulate the actual exam experience.

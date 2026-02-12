@@ -36,7 +36,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Attempt is not active' }, { status: 400 });
         }
 
-        if (typeof attempt.session_token === 'string' && attempt.session_token.length > 0) {
+        // Important: paused attempts must run initializeExamSession so they resume to in_progress
+        // and get an updated session token before client save/pause APIs are called.
+        if (
+            attempt.status === 'in_progress' &&
+            typeof attempt.session_token === 'string' &&
+            attempt.session_token.length > 0
+        ) {
             return NextResponse.json({ success: true, data: { sessionToken: attempt.session_token } });
         }
 

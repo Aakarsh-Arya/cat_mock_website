@@ -61,6 +61,12 @@ type SubmissionProgress = {
     steps: Array<{ label: string; status: 'pending' | 'active' | 'done' }>;
 };
 
+type PauseSnapshot = {
+    timeRemaining: TimeRemaining;
+    currentSection: SectionName;
+    currentQuestion: number;
+};
+
 const SUBMISSION_STEP_LABELS: Record<Exclude<SubmissionStage, 'idle'>, string> = {
     validating: 'Validating session',
     saving: 'Saving responses',
@@ -136,6 +142,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const isSubmitting = useExamStore((s) => s.isSubmitting);
     const isAutoSubmitting = useExamStore((s) => s.isAutoSubmitting);
     const sessionToken = useExamStore((s) => s.sessionToken);
+    const mockReturnPath = `/mock/${paper.slug || paper.id}`;
     const submissionIdRef = useRef<string>(
         typeof crypto !== 'undefined' && crypto.randomUUID
             ? crypto.randomUUID()
@@ -248,8 +255,9 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     }, [attempt.id, setSessionToken]);
 
     const flushInProgressRef = useRef(false);
-    const popstateGuardRef = useRef(false);
     const popstateInFlightRef = useRef(false);
+    const pauseInFlightRef = useRef(false);
+    const backTrapArmedRef = useRef(false);
     // Prevent race conditions when saving the same question multiple times
     const savingQuestionsRef = useRef<Set<string>>(new Set());
     const hasAnswer = useCallback((answer: string | null) => typeof answer === 'string' && answer.trim() !== '', []);
@@ -313,6 +321,191 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const forceRefreshSessionToken = useCallback(async (): Promise<string | null> => {
         return ensureSessionToken({ force: true, reason: 'forceRefreshSessionToken' });
     }, [ensureSessionToken]);
+
+    const notifyAttemptStateUpdated = useCallback(() => {
+        if (typeof window === 'undefined') return;
+        const stamp = Date.now().toString();
+        try {
+            window.localStorage.setItem('nexams:attempt-state-updated', stamp);
+        } catch {
+            // best effort
+        }
+        window.dispatchEvent(new Event('nexams:attempt-state-updated'));
+    }, []);
+
+    const capturePauseSnapshot = useCallback((): PauseSnapshot => {
+        const timers = sectionTimersRef.current;
+        return {
+            timeRemaining: {
+                VARC: Math.max(0, Math.floor(timers.VARC?.remainingSeconds ?? 0)),
+                DILR: Math.max(0, Math.floor(timers.DILR?.remainingSeconds ?? 0)),
+                QA: Math.max(0, Math.floor(timers.QA?.remainingSeconds ?? 0)),
+            },
+            currentSection: getSectionByIndex(currentSectionIndexRef.current),
+            currentQuestion: currentQuestionIndexRef.current + 1,
+        };
+    }, []);
+
+    const fetchAttemptStatus = useCallback(async (attemptIdValue: string): Promise<string | null> => {
+        try {
+            const response = await fetch('/api/attempt-status', {
+                method: 'POST',
+                credentials: 'include',
+                cache: 'no-store',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ attemptId: attemptIdValue }),
+            });
+            if (!response.ok) return null;
+
+            const payload = (await response.json().catch(() => null)) as
+                | { data?: { status?: unknown } }
+                | null;
+            return typeof payload?.data?.status === 'string' ? payload.data.status : null;
+        } catch {
+            return null;
+        }
+    }, []);
+
+    const persistSnapshotBeforePause = useCallback(
+        async (attemptIdValue: string, snapshot: PauseSnapshot, token: string | null) => {
+            const snapshotResponses = responsesRef.current;
+            const batch = Object.entries(snapshotResponses)
+                .filter(([, response]) => hasAnswer(response.answer) || response.status !== 'not_visited')
+                .map(([questionId, response]) => {
+                    const persistedAnswer = getPersistedAnswer(response.status, response.answer);
+                    return {
+                        questionId,
+                        answer: persistedAnswer,
+                        status: response.status,
+                        isMarkedForReview: response.isMarkedForReview,
+                        isVisited: getIsVisited(response.status, persistedAnswer),
+                        timeSpentSeconds: response.timeSpentSeconds,
+                        visitCount: response.visitCount,
+                    };
+                });
+
+            if (batch.length > 0 && token) {
+                try {
+                    await withTimeout(
+                        saveResponsesBatch({
+                            attemptId: attemptIdValue,
+                            sessionToken: token,
+                            force_resume: true,
+                            responses: batch,
+                        }),
+                        8000,
+                        'saveResponsesBatch(pause)'
+                    );
+                } catch (error) {
+                    logger.warn('Pause pre-save batch failed', { attemptId: attemptIdValue, error });
+                }
+            }
+
+            try {
+                const progressResult = await withTimeout(
+                    updateAttemptProgress({
+                        attemptId: attemptIdValue,
+                        timeRemaining: snapshot.timeRemaining,
+                        currentSection: snapshot.currentSection,
+                        currentQuestion: snapshot.currentQuestion,
+                        sessionToken: token ?? undefined,
+                        force_resume: true,
+                    }),
+                    8000,
+                    'updateAttemptProgress(pause)'
+                );
+                if (!progressResult.success && progressResult.error !== 'Attempt is not in progress') {
+                    logger.warn('Pause pre-save progress failed', progressResult.error, { attemptId: attemptIdValue });
+                }
+            } catch (error) {
+                logger.warn('Pause pre-save progress failed', { attemptId: attemptIdValue, error });
+            }
+        },
+        [getPersistedAnswer, getIsVisited, hasAnswer, withTimeout]
+    );
+
+    const pauseAndExit = useCallback(
+        async (snapshot: PauseSnapshot, reason: 'manual' | 'browser-back'): Promise<boolean> => {
+            const aId = attemptIdRef.current;
+            if (!aId || !isInitialized || isSubmitting || isAutoSubmitting) return false;
+            if (attemptFinalizedRef.current) return true;
+            if (pauseInFlightRef.current) return false;
+
+            pauseInFlightRef.current = true;
+            setUiError(null);
+
+            try {
+                const token = await ensureSessionToken({
+                    force: true,
+                    reason: reason === 'manual' ? 'pause-button' : 'popstate-pause',
+                });
+
+                await persistSnapshotBeforePause(aId, snapshot, token);
+
+                const pauseResult = await withTimeout(
+                    pauseExam({
+                        attemptId: aId,
+                        timeRemaining: snapshot.timeRemaining,
+                        currentSection: snapshot.currentSection,
+                        currentQuestion: snapshot.currentQuestion,
+                        sessionToken: token ?? undefined,
+                    }),
+                    8000,
+                    'pauseExam'
+                );
+
+                let pauseSucceeded = pauseResult.success;
+                if (!pauseResult.success && pauseResult.error === 'Attempt is not in progress') {
+                    const status = await fetchAttemptStatus(aId);
+                    if (status === 'paused') {
+                        pauseSucceeded = true;
+                    } else if (status === 'submitted' || status === 'completed') {
+                        attemptFinalizedRef.current = true;
+                        clearAllExamState();
+                        notifyAttemptStateUpdated();
+                        router.replace(`/result/${aId}`);
+                        return true;
+                    }
+                }
+
+                if (!pauseSucceeded) {
+                    examLogger.examPaused(aId, false, pauseResult.error);
+                    if (pauseResult.error?.includes('not allowed')) {
+                        setUiError('Pausing is not allowed for this exam.');
+                    } else {
+                        setUiError('Failed to pause exam. Please try again.');
+                    }
+                    return false;
+                }
+
+                examLogger.examPaused(aId, true);
+                attemptFinalizedRef.current = true;
+                clearAllExamState();
+                notifyAttemptStateUpdated();
+                router.replace(mockReturnPath);
+                return true;
+            } catch (error) {
+                examLogger.examPaused(aId, false, 'PAUSE_EXCEPTION');
+                logger.warn('Pause flow failed', error, { attemptId: aId, reason });
+                setUiError('Failed to pause exam. Please try again.');
+                return false;
+            } finally {
+                pauseInFlightRef.current = false;
+            }
+        },
+        [
+            ensureSessionToken,
+            fetchAttemptStatus,
+            isAutoSubmitting,
+            isInitialized,
+            isSubmitting,
+            mockReturnPath,
+            notifyAttemptStateUpdated,
+            persistSnapshotBeforePause,
+            router,
+            withTimeout,
+        ]
+    );
 
     const flushNow = useCallback(async () => {
         if (!attemptId) return;
@@ -603,16 +796,56 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             }
         };
 
+        const sendBestEffortPause = () => {
+            const aId = attemptIdRef.current;
+            if (!aId || !isInitialized || isSubmitting || isAutoSubmitting) return;
+            if (attemptFinalizedRef.current) return;
+
+            const timers = sectionTimersRef.current;
+            const payload = JSON.stringify({
+                attemptId: aId,
+                timeRemaining: {
+                    VARC: Math.max(0, Math.floor(timers.VARC?.remainingSeconds ?? 0)),
+                    DILR: Math.max(0, Math.floor(timers.DILR?.remainingSeconds ?? 0)),
+                    QA: Math.max(0, Math.floor(timers.QA?.remainingSeconds ?? 0)),
+                },
+                currentSection: getSectionByIndex(currentSectionIndexRef.current),
+                currentQuestion: currentQuestionIndexRef.current + 1,
+                sessionToken: sessionTokenRef.current ?? undefined,
+            });
+
+            if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+                const sent = navigator.sendBeacon('/api/pause', new Blob([payload], { type: 'application/json' }));
+                if (sent) return;
+            }
+
+            try {
+                void fetch('/api/pause', {
+                    method: 'POST',
+                    credentials: 'include',
+                    cache: 'no-store',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload,
+                    keepalive: true,
+                });
+            } catch {
+                // best effort
+            }
+        };
+
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'hidden') {
+                // Auto-pause: save + send best-effort pause when user leaves tab / backgrounds app / locks screen
                 sendBeaconBatchSave();
                 sendBeaconProgress();
+                sendBestEffortPause();
             }
         };
 
         const handlePageHide = () => {
             sendBeaconBatchSave();
             sendBeaconProgress();
+            sendBestEffortPause();
         };
 
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -620,29 +853,65 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             if (attemptFinalizedRef.current) return;
             sendBeaconBatchSave();
             sendBeaconProgress();
+            sendBestEffortPause();
             event.preventDefault();
             event.returnValue = '';
+        };
+
+        // Handle network connectivity loss – pause timer immediately
+        const handleOffline = () => {
+            if (!attemptIdRef.current || !isInitialized || isSubmitting || isAutoSubmitting) return;
+            if (attemptFinalizedRef.current) return;
+            // Save whatever we can before pausing
+            sendBeaconBatchSave();
+            sendBeaconProgress();
+            sendBestEffortPause();
         };
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('pagehide', handlePageHide);
         window.addEventListener('beforeunload', handleBeforeUnload);
+        window.addEventListener('offline', handleOffline);
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);
             window.removeEventListener('pagehide', handlePageHide);
             window.removeEventListener('beforeunload', handleBeforeUnload);
+            window.removeEventListener('offline', handleOffline);
         };
     }, [flushNow, getPersistedAnswer, getIsVisited, hasAnswer, isSubmitting, isAutoSubmitting, updateAttemptProgress, isInitialized]);
 
-    // Warn + save on browser back (popstate)
+    // Trap browser back so we can pause first, then navigate away.
     useEffect(() => {
+        const armBackTrap = () => {
+            if (backTrapArmedRef.current) return;
+            try {
+                window.history.pushState(
+                    {
+                        __nexamsBackTrap: true,
+                        attemptId: attemptIdRef.current,
+                        ts: Date.now(),
+                    },
+                    '',
+                    window.location.href
+                );
+                backTrapArmedRef.current = true;
+            } catch {
+                // best effort
+            }
+        };
+
+        armBackTrap();
+
         const handlePopState = () => {
             const aId = attemptIdRef.current;
             if (!aId || !isInitialized || isSubmitting || isAutoSubmitting) return;
             if (attemptFinalizedRef.current) return;
-            if (popstateGuardRef.current) {
-                popstateGuardRef.current = false;
+            backTrapArmedRef.current = false;
+
+            // While pause/save is in flight, keep the user on this route.
+            if (popstateInFlightRef.current || pauseInFlightRef.current) {
+                armBackTrap();
                 return;
             }
 
@@ -650,63 +919,32 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 'You have an active attempt. Leaving will pause your attempt and save progress. Do you want to continue?'
             );
             if (!shouldLeave) {
-                popstateGuardRef.current = true;
-                window.history.forward();
+                armBackTrap();
                 return;
             }
 
-            if (popstateInFlightRef.current) return;
             popstateInFlightRef.current = true;
-
-            // Stay on the exam page while we save + pause, then navigate back.
-            popstateGuardRef.current = true;
-            window.history.forward();
+            armBackTrap();
+            // Capture timer/progress at actual leave confirmation time.
+            const pauseSnapshot = capturePauseSnapshot();
 
             void (async () => {
                 try {
-                    await withTimeout(flushNow(), 8000, 'flushNow');
-                } catch {
-                    // best-effort
-                }
-
-                const timers = sectionTimersRef.current;
-                const timeRemaining: TimeRemaining = {
-                    VARC: Math.max(0, Math.floor(timers.VARC?.remainingSeconds ?? 0)),
-                    DILR: Math.max(0, Math.floor(timers.DILR?.remainingSeconds ?? 0)),
-                    QA: Math.max(0, Math.floor(timers.QA?.remainingSeconds ?? 0)),
-                };
-                const currentSection = getSectionByIndex(currentSectionIndexRef.current);
-                const currentQuestion = currentQuestionIndexRef.current + 1;
-
-                const token = await ensureSessionToken({ force: true, reason: 'popstate-pause' });
-                try {
-                    const pauseResult = await withTimeout(
-                        pauseExam({
-                            attemptId: aId,
-                            timeRemaining,
-                            currentSection,
-                            currentQuestion,
-                            sessionToken: token ?? undefined,
-                        }),
-                        8000,
-                        'pauseExam'
-                    );
-                    if (!pauseResult.success) {
-                        logger.warn('Pause on back navigation failed', pauseResult.error, { attemptId: aId });
+                    const pauseSucceeded = await pauseAndExit(pauseSnapshot, 'browser-back');
+                    if (!pauseSucceeded) {
+                        armBackTrap();
                     }
-                } catch (error) {
-                    logger.warn('Pause on back navigation failed', error, { attemptId: aId });
                 } finally {
                     popstateInFlightRef.current = false;
-                    popstateGuardRef.current = true;
-                    window.history.back();
                 }
             })();
         };
 
         window.addEventListener('popstate', handlePopState);
-        return () => window.removeEventListener('popstate', handlePopState);
-    }, [isInitialized, isSubmitting, isAutoSubmitting, flushNow, withTimeout, ensureSessionToken]);
+        return () => {
+            window.removeEventListener('popstate', handlePopState);
+        };
+    }, [isInitialized, isSubmitting, isAutoSubmitting, capturePauseSnapshot, pauseAndExit]);
 
     // Ensure progress is flushed when navigating away (SPA route change unmount)
     // FIX: Skip flush if submit is in progress - submit handles final save
@@ -1238,7 +1476,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     // Handle pause exam
     const handlePauseExam = useCallback(async () => {
         if (!attemptId) return;
-        setUiError(null);
+        if (pauseInFlightRef.current) return;
 
         const confirmed = window.confirm(
             'Are you sure you want to pause the exam? You can resume it later from the dashboard.'
@@ -1246,62 +1484,10 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
         if (!confirmed) return;
 
-        // Get fresh session token before pausing
-        const activeSessionToken = sessionToken || await forceRefreshSessionToken();
-
-        // Save all current responses with session token
-        await Promise.all(
-            Object.entries(responses).map(async ([questionId, response]) => {
-                const persistedAnswer = getPersistedAnswer(response.status, response.answer);
-                if (persistedAnswer !== null || response.status !== 'not_visited') {
-                    await saveResponse({
-                        attemptId: attemptId!,
-                        questionId,
-                        answer: persistedAnswer,
-                        status: response.status,
-                        isMarkedForReview: response.isMarkedForReview,
-                        isVisited: getIsVisited(response.status, persistedAnswer),
-                        timeSpentSeconds: response.timeSpentSeconds,
-                        visitCount: response.visitCount,
-                        sessionToken: activeSessionToken,
-                    });
-                }
-            })
-        );
-
-        // Build time remaining from current section timers
-        const timeRemaining: TimeRemaining = {
-            VARC: sectionTimers.VARC.remainingSeconds,
-            DILR: sectionTimers.DILR.remainingSeconds,
-            QA: sectionTimers.QA.remainingSeconds,
-        };
-
-        const currentSection = getSectionByIndex(currentSectionIndex);
-
-        // Pause the exam with session token
-        const result = await pauseExam({
-            attemptId,
-            timeRemaining,
-            currentSection,
-            currentQuestion: currentQuestionIndex + 1,
-            sessionToken: activeSessionToken,
-        });
-
-        if (result.success) {
-            // Clear local storage
-            clearAllExamState();
-
-            // Redirect to dashboard
-            router.push('/dashboard');
-        } else {
-            examLogger.examPaused(attemptId, false, result.error);
-            // Show more helpful error message for pause-not-allowed
-            const errorMessage = result.error?.includes('not allowed')
-                ? 'Pausing is not allowed for this exam.'
-                : 'Failed to pause exam. Please try again.';
-            setUiError(errorMessage);
-        }
-    }, [attemptId, responses, sectionTimers, currentSectionIndex, currentQuestionIndex, router, sessionToken, getPersistedAnswer, getIsVisited, forceRefreshSessionToken, setUiError]);
+        // Capture timer/progress at actual leave confirmation time.
+        const pauseSnapshot = capturePauseSnapshot();
+        void pauseAndExit(pauseSnapshot, 'manual');
+    }, [attemptId, capturePauseSnapshot, pauseAndExit]);
 
     // Show loading while initializing
     if (!hasHydrated || !isInitialized) {

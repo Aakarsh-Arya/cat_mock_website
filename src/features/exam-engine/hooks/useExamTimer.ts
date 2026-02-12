@@ -315,15 +315,48 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
         void handleSectionExpiry(currentSection);
     }, [currentSection, currentTimer.isExpired, handleSectionExpiry, isInitialized, isSubmitting, isAutoSubmitting]);
 
-    // Sync on tab focus
+    // Auto-pause timer on tab hidden / app background / screen lock;
+    // resume + sync on focus return.
     useEffect(() => {
         const handleVisibilityChange = () => {
-            if (!document.hidden) tick();
+            if (document.visibilityState === 'hidden') {
+                // Pause the interval immediately so no ticks fire in the background.
+                // This prevents "time jumps" when the browser throttles intervals.
+                stopTimer();
+            } else {
+                // Tab/app came back: recalculate remaining time (delta-time is
+                // authoritative) and restart the tick interval.
+                if (!isManuallyPausedRef.current) {
+                    const st = useExamStore.getState();
+                    if (st.isInitialized && !st.isSubmitting && !st.isAutoSubmitting) {
+                        startTimer(); // starts interval + runs immediate tick()
+                    }
+                }
+            }
+        };
+
+        // Handle offline: stop timer to avoid phantom counting while disconnected
+        const handleOffline = () => stopTimer();
+
+        // Handle online: resume timer
+        const handleOnline = () => {
+            if (!isManuallyPausedRef.current) {
+                const st = useExamStore.getState();
+                if (st.isInitialized && !st.isSubmitting && !st.isAutoSubmitting) {
+                    startTimer();
+                }
+            }
         };
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
-        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-    }, [tick]);
+        window.addEventListener('offline', handleOffline);
+        window.addEventListener('online', handleOnline);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('offline', handleOffline);
+            window.removeEventListener('online', handleOnline);
+        };
+    }, [tick, stopTimer, startTimer]);
 
     const timerData: TimerDisplayData = (() => {
         const remaining = calculateRemainingSeconds(currentTimer);
