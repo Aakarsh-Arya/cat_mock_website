@@ -129,17 +129,39 @@ export async function POST(req: NextRequest) {
         let effectiveAttemptId = attemptId;
         let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, started_at, paper_id')
+            .select('id, user_id, status, started_at, paper_id, attempt_mode, sectional_section')
             .eq('id', attemptId)
             .maybeSingle();
+
+        if (attemptError?.code === '42703') {
+            const retry = await adminClient
+                .from('attempts')
+                .select('id, user_id, status, started_at, paper_id')
+                .eq('id', attemptId)
+                .maybeSingle();
+            attempt = retry.data
+                ? { ...retry.data, attempt_mode: 'full', sectional_section: null }
+                : attempt;
+            attemptError = retry.error ?? null;
+        }
 
         if ((!attempt || attemptError) && refererAttemptId && refererAttemptId !== attemptId) {
             const { data: refererAttempt, error: refererError } = await adminClient
                 .from('attempts')
-                .select('id, user_id, status, started_at, paper_id')
+                .select('id, user_id, status, started_at, paper_id, attempt_mode, sectional_section')
                 .eq('id', refererAttemptId)
                 .maybeSingle();
-            if (refererAttempt && !refererError) {
+            if (refererError?.code === '42703') {
+                const retry = await adminClient
+                    .from('attempts')
+                    .select('id, user_id, status, started_at, paper_id')
+                    .eq('id', refererAttemptId)
+                    .maybeSingle();
+                if (retry.data && !retry.error) {
+                    attempt = { ...retry.data, attempt_mode: 'full', sectional_section: null };
+                    effectiveAttemptId = refererAttemptId;
+                }
+            } else if (refererAttempt && !refererError) {
                 attempt = refererAttempt;
                 effectiveAttemptId = refererAttemptId;
             }
@@ -203,6 +225,20 @@ export async function POST(req: NextRequest) {
                 errorMessage: 'Attempt is not in progress',
             });
             return NextResponse.json({ error: 'Attempt is not in progress' }, { status: 400 });
+        }
+
+        let questionScopeQuery = supabase
+            .from('questions_exam')
+            .select('id')
+            .eq('id', questionId)
+            .eq('paper_id', attempt.paper_id)
+            .eq('is_active', true);
+        if (attempt.attempt_mode === 'sectional' && attempt.sectional_section) {
+            questionScopeQuery = questionScopeQuery.eq('section', attempt.sectional_section);
+        }
+        const { data: scopedQuestion, error: scopedQuestionError } = await questionScopeQuery.maybeSingle();
+        if (scopedQuestionError || !scopedQuestion) {
+            return NextResponse.json({ error: 'Invalid question for this attempt' }, { status: 400 });
         }
 
         if (!sessionToken) {

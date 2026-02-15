@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
-import { redirect } from 'next/navigation';
 import { sbSSR } from '@/lib/supabase/server';
 import { logger } from '@/lib/logger';
 import Link from 'next/link';
-import { getSectionDurationSecondsMap, type SectionName, type SectionConfig } from '@/types/exam';
-import { getServiceRoleClient } from '@/lib/supabase/service-role';
-import { ensureActiveAccess } from '@/lib/access-control';
-import { checkRateLimit, RATE_LIMITS, userRateLimitKey } from '@/lib/rate-limit';
-import { incrementMetric } from '@/lib/telemetry';
+import { type SectionName, type SectionConfig } from '@/types/exam';
 import { AttemptStateAutoRefresh } from '@/components/AttemptStateAutoRefresh';
 
 export const metadata: Metadata = {
@@ -28,6 +23,38 @@ interface Paper {
     difficulty_level: string | null;
     is_free: boolean;
     attempt_limit: number | null;
+    allow_sectional_attempts?: boolean | null;
+    sectional_allowed_sections?: SectionName[] | null;
+}
+
+type AttemptMode = 'full' | 'sectional';
+
+function normalizeSectionalAllowedSections(
+    raw: unknown,
+    fallbackSections: readonly SectionConfig[]
+): SectionName[] {
+    const availableSections = new Set<SectionName>(
+        fallbackSections
+            .map((section) => section?.name)
+            .filter((name): name is SectionName => name === 'VARC' || name === 'DILR' || name === 'QA')
+    );
+
+    if (availableSections.size === 0) {
+        availableSections.add('VARC');
+        availableSections.add('DILR');
+        availableSections.add('QA');
+    }
+
+    if (!Array.isArray(raw)) {
+        return Array.from(availableSections);
+    }
+
+    const normalized = raw
+        .map((entry) => (typeof entry === 'string' ? entry.toUpperCase().trim() : ''))
+        .filter((entry): entry is SectionName => entry === 'VARC' || entry === 'DILR' || entry === 'QA')
+        .filter((entry) => availableSections.has(entry));
+
+    return normalized.length > 0 ? normalized : Array.from(availableSections);
 }
 
 export default async function MockDetailPage({
@@ -35,9 +62,12 @@ export default async function MockDetailPage({
     searchParams,
 }: {
     params: Promise<Record<string, unknown>>;
-    searchParams?: { error?: string; limit_reached?: string };
+    searchParams?:
+    | Promise<{ error?: string; limit_reached?: string }>
+    | { error?: string; limit_reached?: string };
 }) {
     const { paperId } = (await params) as { paperId: string };
+    const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
     const supabase = await sbSSR();
 
@@ -50,21 +80,53 @@ export default async function MockDetailPage({
     if (isUUID) {
         const result = await supabase
             .from('papers')
-            .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
+            .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit, allow_sectional_attempts, sectional_allowed_sections')
             .eq('id', paperId)
             .maybeSingle();
-        paper = result.data as Paper | null;
-        paperError = result.error;
+        if (result.error?.code === '42703') {
+            const fallback = await supabase
+                .from('papers')
+                .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
+                .eq('id', paperId)
+                .maybeSingle();
+            paper = fallback.data
+                ? {
+                    ...fallback.data,
+                    allow_sectional_attempts: false,
+                    sectional_allowed_sections: ['VARC', 'DILR', 'QA'],
+                }
+                : null;
+            paperError = fallback.error;
+        } else {
+            paper = result.data as Paper | null;
+            paperError = result.error;
+        }
     }
 
     if (!paper && !paperError) {
         const result = await supabase
             .from('papers')
-            .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
+            .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit, allow_sectional_attempts, sectional_allowed_sections')
             .eq('slug', paperId)
             .maybeSingle();
-        paper = result.data as Paper | null;
-        paperError = result.error;
+        if (result.error?.code === '42703') {
+            const fallback = await supabase
+                .from('papers')
+                .select('id, slug, title, description, year, total_questions, total_marks, duration_minutes, sections, published, difficulty_level, is_free, attempt_limit')
+                .eq('slug', paperId)
+                .maybeSingle();
+            paper = fallback.data
+                ? {
+                    ...fallback.data,
+                    allow_sectional_attempts: false,
+                    sectional_allowed_sections: ['VARC', 'DILR', 'QA'],
+                }
+                : null;
+            paperError = fallback.error;
+        } else {
+            paper = result.data as Paper | null;
+            paperError = result.error;
+        }
     }
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -74,149 +136,62 @@ export default async function MockDetailPage({
         total_score: number | null;
         created_at: string;
         time_remaining?: Record<string, unknown> | null;
+        attempt_mode?: AttemptMode | null;
+        sectional_section?: SectionName | null;
     }[] = [];
 
     if (user && paper) {
-        const { data: attempts } = await supabase
+        const attemptsResult = await supabase
             .from('attempts')
-            .select('id, status, total_score, created_at, time_remaining')
+            .select('id, status, total_score, created_at, time_remaining, attempt_mode, sectional_section')
             .eq('paper_id', paper.id)
             .eq('user_id', user.id)
             .order('created_at', { ascending: false });
-        previousAttempts = attempts || [];
+        if (attemptsResult.error?.code === '42703') {
+            const fallback = await supabase
+                .from('attempts')
+                .select('id, status, total_score, created_at, time_remaining')
+                .eq('paper_id', paper.id)
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+            previousAttempts = (fallback.data ?? []).map((attempt) => ({
+                ...attempt,
+                attempt_mode: 'full' as AttemptMode,
+                sectional_section: null,
+            }));
+        } else {
+            previousAttempts = (attemptsResult.data ?? []).map((attempt) => ({
+                ...attempt,
+                attempt_mode: (attempt.attempt_mode as AttemptMode | null | undefined) ?? 'full',
+                sectional_section: (attempt.sectional_section as SectionName | null | undefined) ?? null,
+            }));
+        }
     }
 
     const attemptLimitStatuses = new Set(['completed', 'submitted']);
-    const activeAttemptsCount = previousAttempts.filter((a) => attemptLimitStatuses.has(a.status)).length;
+    const activeStatuses = new Set(['in_progress', 'paused']);
     const attemptLimit = paper?.attempt_limit ?? null;
-    const canAttempt = attemptLimit === null || attemptLimit <= 0 || activeAttemptsCount < attemptLimit;
-    const activeAttempt = previousAttempts.find(
-        (a) => a.status === 'in_progress' || a.status === 'paused'
+
+    const activeFullAttempt = previousAttempts.find(
+        (attempt) =>
+            activeStatuses.has(attempt.status) &&
+            ((attempt.attempt_mode ?? 'full') === 'full')
+    ) ?? null;
+    const latestFullAnalysisAttempt = previousAttempts.find(
+        (attempt) =>
+            attemptLimitStatuses.has(attempt.status) &&
+            ((attempt.attempt_mode ?? 'full') === 'full')
     ) ?? null;
 
-    async function startExam() {
-        'use server';
-        const s = await sbSSR();
-        const { data: { user: currentUser } } = await s.auth.getUser();
-
-        if (!currentUser) {
-            redirect(`/auth/sign-in?redirect_to=${encodeURIComponent(`/mock/${paperId}`)}`);
-        }
-
-        const access = await ensureActiveAccess(s, currentUser.id, currentUser);
-        if (!access.allowed) {
-            redirect(`/coming-soon?redirect_to=${encodeURIComponent(`/mock/${paperId}`)}`);
-        }
-
-        const rateKey = userRateLimitKey('start_mock', currentUser.id);
-        const rateResult = checkRateLimit(rateKey, RATE_LIMITS.START_MOCK);
-        if (!rateResult.allowed) {
-            redirect(`/mock/${paperId}?error=rate_limited`);
-        }
-
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paperId);
-
-        type PaperData = { id: string; published: boolean; sections: SectionConfig[]; duration_minutes: number; attempt_limit: number | null };
-        let p: PaperData | null = null;
-
-        if (isUUID) {
-            const { data } = await s
-                .from('papers')
-                .select('id, published, sections, duration_minutes, attempt_limit')
-                .eq('id', paperId)
-                .maybeSingle();
-            p = data as PaperData | null;
-        }
-
-        if (!p) {
-            const { data } = await s
-                .from('papers')
-                .select('id, published, sections, duration_minutes, attempt_limit')
-                .eq('slug', paperId)
-                .maybeSingle();
-            p = data as PaperData | null;
-        }
-
-        if (!p || p.published !== true) {
-            throw new Error('Paper not available');
-        }
-
-        const sections = (p.sections as SectionConfig[]) || [];
-        const sectionDurations = getSectionDurationSecondsMap(sections);
-
-        try {
-            const adminClient = getServiceRoleClient();
-            const { data: existingAttempt } = await adminClient
-                .from('attempts')
-                .select('id, status')
-                .eq('paper_id', p.id)
-                .eq('user_id', currentUser.id)
-                .in('status', ['in_progress', 'paused'])
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-            if (existingAttempt) {
-                await adminClient
-                    .from('attempts')
-                    .update({
-                        status: 'abandoned',
-                        completed_at: new Date().toISOString(),
-                    })
-                    .eq('id', existingAttempt.id)
-                    .eq('user_id', currentUser.id)
-                    .in('status', ['in_progress', 'paused']);
-            }
-        } catch (error) {
-            logger.warn('Failed to abandon existing attempt for new mock', error, {
-                paperId: p.id,
-                userId: currentUser.id,
-            });
-        }
-
-        const attemptLimitServer = p.attempt_limit ?? null;
-        if (attemptLimitServer !== null && attemptLimitServer > 0) {
-            const { count: attemptCount } = await s
-                .from('attempts')
-                .select('id', { count: 'exact', head: true })
-                .eq('paper_id', p.id)
-                .eq('user_id', currentUser.id)
-                .in('status', ['completed', 'submitted']);
-
-            if ((attemptCount ?? 0) >= attemptLimitServer) {
-                redirect(`/mock/${paperId}?limit_reached=1`);
-            }
-        }
-
-        const timeRemaining: Record<SectionName, number> = {
-            VARC: sectionDurations.VARC,
-            DILR: sectionDurations.DILR,
-            QA: sectionDurations.QA,
-        };
-
-        const { data: attempt, error: insertErr } = await s
-            .from('attempts')
-            .insert({
-                paper_id: p.id,
-                user_id: currentUser.id,
-                status: 'in_progress',
-                current_section: 'VARC',
-                current_question: 1,
-                time_remaining: timeRemaining
-            })
-            .select('id')
-            .single();
-
-        if (insertErr || !attempt) {
-            logger.error('Failed to create attempt', insertErr, { paperId: p.id, userId: currentUser.id });
-            throw new Error('Failed to create attempt');
-        }
-
-        incrementMetric('attempt_created');
-        redirect(`/exam/${attempt.id}`);
-    }
+    const completedFullCount = previousAttempts.filter(
+        (attempt) =>
+            attemptLimitStatuses.has(attempt.status) &&
+            ((attempt.attempt_mode ?? 'full') === 'full')
+    ).length;
+    const canStartFull = attemptLimit === null || attemptLimit <= 0 || completedFullCount < attemptLimit;
 
     if (paperError) {
+        logger.error('Failed to load paper in mock detail page', paperError, { paperId });
         return (
             <main className="page-shell py-6 sm:py-8">
                 <h1 className="text-2xl font-bold text-slate-900">Error Loading Paper</h1>
@@ -240,13 +215,58 @@ export default async function MockDetailPage({
         );
     }
 
-    const queryError = searchParams?.error ?? null;
-    const limitReached = searchParams?.limit_reached === '1';
+    const queryError = resolvedSearchParams?.error ?? null;
+    const limitReached = resolvedSearchParams?.limit_reached === '1';
     const difficultyClass = paper.difficulty_level === 'hard'
         ? 'bg-rose-100 text-rose-700'
         : paper.difficulty_level === 'medium'
             ? 'bg-amber-100 text-amber-700'
             : 'bg-emerald-100 text-emerald-700';
+    const allowedSectionalSections = normalizeSectionalAllowedSections(
+        paper.sectional_allowed_sections,
+        paper.sections
+    );
+    const canStartSectional = Boolean(paper.allow_sectional_attempts) && allowedSectionalSections.length > 0;
+    const startActionPath = `/mock/${paperId}/start`;
+    const sectionLabel = (section: SectionName) => (section === 'DILR' ? 'LRDI' : section);
+
+    const activeSectionalAttemptBySection = new Map<SectionName, (typeof previousAttempts)[number]>();
+    const latestSectionalAnalysisBySection = new Map<SectionName, (typeof previousAttempts)[number]>();
+
+    previousAttempts.forEach((attempt) => {
+        if ((attempt.attempt_mode ?? 'full') !== 'sectional') return;
+        const section = attempt.sectional_section;
+        if (section !== 'VARC' && section !== 'DILR' && section !== 'QA') return;
+
+        if (activeStatuses.has(attempt.status) && !activeSectionalAttemptBySection.has(section)) {
+            activeSectionalAttemptBySection.set(section, attempt);
+            return;
+        }
+
+        if (attemptLimitStatuses.has(attempt.status) && !latestSectionalAnalysisBySection.has(section)) {
+            latestSectionalAnalysisBySection.set(section, attempt);
+        }
+    });
+
+    const canStartSectionalBySection = new Map<SectionName, boolean>();
+    allowedSectionalSections.forEach((section) => {
+        const completedForSection = previousAttempts.filter(
+            (attempt) =>
+                attemptLimitStatuses.has(attempt.status) &&
+                (attempt.attempt_mode ?? 'full') === 'sectional' &&
+                attempt.sectional_section === section
+        ).length;
+        canStartSectionalBySection.set(
+            section,
+            attemptLimit === null || attemptLimit <= 0 || completedForSection < attemptLimit
+        );
+    });
+
+    const showSectionalControl = canStartSectional || allowedSectionalSections.some((section) => {
+        const active = activeSectionalAttemptBySection.get(section);
+        const analysis = latestSectionalAnalysisBySection.get(section);
+        return Boolean(active || analysis);
+    });
 
     return (
         <main className="page-shell py-6 sm:py-8">
@@ -254,6 +274,31 @@ export default async function MockDetailPage({
             {queryError === 'rate_limited' && (
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     Too many start attempts. Please wait a minute and try again.
+                </div>
+            )}
+            {queryError === 'paper_unavailable' && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    This mock is currently unavailable. Please select another mock.
+                </div>
+            )}
+            {queryError === 'start_failed' && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    Could not start the mock right now. Please try again in a moment.
+                </div>
+            )}
+            {queryError === 'sectional_not_allowed' && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    Sectional attempts are not enabled for this mock.
+                </div>
+            )}
+            {queryError === 'invalid_sectional' && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    The selected sectional option is invalid for this mock.
+                </div>
+            )}
+            {queryError === 'active_attempt_conflict' && (
+                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    Another active attempt is blocking this start. Complete migration `042_sectional_mode_constraints.sql` and try again.
                 </div>
             )}
             {limitReached && (
@@ -268,7 +313,7 @@ export default async function MockDetailPage({
                     {paper.is_free && (
                         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">FREE</span>
                     )}
-                    {paper.difficulty_level && (
+                    {typeof paper.difficulty_level === 'string' && paper.difficulty_level.trim() !== '' && (
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${difficultyClass}`}>
                             {paper.difficulty_level.toUpperCase()}
                         </span>
@@ -316,6 +361,11 @@ export default async function MockDetailPage({
                                 </div>
                                 <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                                     <span>{new Date(attempt.created_at).toLocaleDateString()}</span>
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                        {attempt.attempt_mode === 'sectional'
+                                            ? `Sectional${attempt.sectional_section ? ` ${attempt.sectional_section}` : ''}`
+                                            : 'Full Mock'}
+                                    </span>
                                     <span className="font-semibold text-slate-900">
                                         {attempt.total_score !== null ? `${attempt.total_score} marks` : '-'}
                                     </span>
@@ -342,24 +392,116 @@ export default async function MockDetailPage({
             <div className="text-center">
                 {!paper.published ? (
                     <p className="text-slate-600">This paper is not yet available.</p>
-                ) : activeAttempt ? (
-                    <Link
-                        href={`/exam/${activeAttempt.id}`}
-                        className="touch-target inline-flex w-full items-center justify-center rounded-lg bg-amber-500 px-6 py-3 text-base font-semibold text-white hover:bg-amber-600 sm:w-auto sm:px-10"
-                    >
-                        Continue Mock
-                    </Link>
-                ) : !canAttempt ? (
-                    <p className="text-red-700">You have reached the maximum number of attempts for this paper.</p>
                 ) : (
-                    <form action={startExam}>
-                        <button
-                            type="submit"
-                            className="touch-target inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-base font-semibold text-white hover:bg-blue-700 sm:w-auto sm:px-10"
-                        >
-                            {previousAttempts.length > 0 ? 'Start New Attempt' : 'Start Exam'}
-                        </button>
-                    </form>
+                    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:gap-4">
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-left">
+                            <p className="text-sm font-semibold text-blue-900">Full Mock</p>
+                            <p className="mt-1 text-xs text-blue-700">
+                                Full-length test with all sections and complete exam flow.
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                {activeFullAttempt ? (
+                                    <Link
+                                        href={`/exam/${activeFullAttempt.id}`}
+                                        className="touch-target inline-flex items-center justify-center rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-600"
+                                    >
+                                        Continue Full Mock
+                                    </Link>
+                                ) : canStartFull ? (
+                                    <form method="post" action={startActionPath}>
+                                        <input type="hidden" name="mode" value="full" />
+                                        <button
+                                            type="submit"
+                                            className="touch-target inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                                        >
+                                            {previousAttempts.some((attempt) => (attempt.attempt_mode ?? 'full') === 'full')
+                                                ? 'Start Full Mock (New Attempt)'
+                                                : 'Start Full Mock'}
+                                        </button>
+                                    </form>
+                                ) : (
+                                    <span className="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                                        Full mock attempt limit reached
+                                    </span>
+                                )}
+
+                                {latestFullAnalysisAttempt && (
+                                    <Link
+                                        href={`/result/${latestFullAnalysisAttempt.id}`}
+                                        className="touch-target inline-flex items-center justify-center rounded-lg border border-blue-300 bg-white px-5 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                                    >
+                                        View Full Analysis
+                                    </Link>
+                                )}
+                            </div>
+                        </div>
+
+                        {showSectionalControl && (
+                            <details className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-left">
+                                <summary className="cursor-pointer text-sm font-semibold text-blue-900">
+                                    {canStartSectional ? 'Start Sectional' : 'Sectional Attempts'}
+                                </summary>
+                                <p className="mt-2 text-xs text-blue-700">
+                                    Choose a section. Each sectional has separate progress, timer, and analysis.
+                                </p>
+                                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                    {allowedSectionalSections.map((section) => {
+                                        const activeSectionAttempt = activeSectionalAttemptBySection.get(section) ?? null;
+                                        const sectionalAnalysisAttempt = latestSectionalAnalysisBySection.get(section) ?? null;
+                                        const canStartThisSection = Boolean(canStartSectionalBySection.get(section)) && canStartSectional;
+
+                                        if (activeSectionAttempt) {
+                                            return (
+                                                <Link
+                                                    key={section}
+                                                    href={`/exam/${activeSectionAttempt.id}`}
+                                                    className="touch-target inline-flex items-center justify-center rounded-md bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600"
+                                                >
+                                                    Continue {sectionLabel(section)}
+                                                </Link>
+                                            );
+                                        }
+
+                                        if (sectionalAnalysisAttempt) {
+                                            return (
+                                                <Link
+                                                    key={section}
+                                                    href={`/result/${sectionalAnalysisAttempt.id}`}
+                                                    className="touch-target inline-flex items-center justify-center rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                                                >
+                                                    View {sectionLabel(section)} Analysis
+                                                </Link>
+                                            );
+                                        }
+
+                                        if (!canStartThisSection) {
+                                            return (
+                                                <span
+                                                    key={section}
+                                                    className="inline-flex items-center justify-center rounded-md border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700"
+                                                >
+                                                    {sectionLabel(section)} limit reached
+                                                </span>
+                                            );
+                                        }
+
+                                        return (
+                                            <form key={section} method="post" action={startActionPath}>
+                                                <input type="hidden" name="mode" value="sectional" />
+                                                <input type="hidden" name="section" value={section} />
+                                                <button
+                                                    type="submit"
+                                                    className="touch-target inline-flex w-full items-center justify-center rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+                                                >
+                                                    Start {sectionLabel(section)}
+                                                </button>
+                                            </form>
+                                        );
+                                    })}
+                                </div>
+                            </details>
+                        )}
+                    </div>
                 )}
             </div>
 

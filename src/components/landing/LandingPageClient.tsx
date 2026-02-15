@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Space_Grotesk, Plus_Jakarta_Sans } from 'next/font/google';
 import { sb } from '@/lib/supabase/client';
 import { useLandingAssets } from '@/lib/useLandingAssets';
@@ -420,6 +421,7 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
     const [carouselPaused, setCarouselPaused] = useState(false);
     const [authLoading, setAuthLoading] = useState(false);
     const [showBackToTop, setShowBackToTop] = useState(false);
+    const [nexaiExpanded, setNexaiExpanded] = useState(false);
     const canHover = useCanHover();
     const heroRef = useRef<HTMLElement | null>(null);
     const carouselRef = useRef<HTMLDivElement | null>(null);
@@ -738,15 +740,40 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                     <section id="ai-insights-marketing" className="mx-auto w-full max-w-6xl py-10 sm:py-16">
                         <div className="space-y-4">
                             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Demo NexAI insights</p>
-                            <details className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                                <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-slate-900">
-                                    <span>Open NexAI insights demo</span>
-                                    <span className="text-slate-400 transition group-open:rotate-45">+</span>
-                                </summary>
-                                <div className="mt-4">
-                                    <AIInsightsAdCard heading="NexAI Insights" markdown={nexaiDemoMarkdown} />
+                            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                                <div className="p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-sm font-semibold text-slate-900">See what NexAI insights look like</h3>
+                                        <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-semibold text-cyan-700">SAMPLE</span>
+                                    </div>
+                                    <div className="relative">
+                                        <div
+                                            className={`transition-all duration-300 ease-in-out ${nexaiExpanded ? 'max-h-none' : 'max-h-64 overflow-hidden'}`}
+                                        >
+                                            <AIInsightsAdCard heading="NexAI Insights" markdown={nexaiDemoMarkdown} />
+                                        </div>
+                                        {!nexaiExpanded && (
+                                            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white via-white/90 to-transparent pointer-events-none" />
+                                        )}
+                                    </div>
+                                    <div className="mt-4 text-center">
+                                        <button
+                                            onClick={() => setNexaiExpanded(!nexaiExpanded)}
+                                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+                                        >
+                                            <span>{nexaiExpanded ? 'Collapse' : 'Expand full insights'}</span>
+                                            <svg
+                                                className={`h-4 w-4 transition-transform ${nexaiExpanded ? 'rotate-180' : ''}`}
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </div>
-                            </details>
+                            </div>
                         </div>
                     </section>
 
@@ -907,6 +934,12 @@ export default function LandingPageClient({ nexaiDemoMarkdown }: LandingPageClie
                             <a className="hover:text-slate-900" href="#features">Features</a>
                             <a className="hover:text-slate-900" href="#mentor">Mentor</a>
                             <a className="hover:text-slate-900" href="#roadmap">Roadmap</a>
+                            <Link className="hover:text-slate-900" href="/privacy">
+                                Privacy Policy
+                            </Link>
+                            <Link className="hover:text-slate-900" href="/terms">
+                                Terms of Service
+                            </Link>
                             <button
                                 type="button"
                                 onClick={() => setIsAuthOpen(true)}

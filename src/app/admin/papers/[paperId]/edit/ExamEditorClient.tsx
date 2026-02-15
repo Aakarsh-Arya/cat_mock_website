@@ -20,6 +20,7 @@ import {
     updatePaper,
     updateQuestionSet,
     createQuestionSet,
+    bulkRenameQuestionTaxonomy,
 } from './actions';
 
 interface ExamEditorClientProps {
@@ -57,6 +58,43 @@ const parseNavigation = (params: URLSearchParams): EditorNavigationState => {
         q: typeof q === 'number' && Number.isFinite(q) && q > 0 ? q : undefined,
     };
 };
+
+const resolveNavigationFromBrowser = (storageKey: string): EditorNavigationState => {
+    if (typeof window === 'undefined') {
+        return { section: 'VARC', q: 1 };
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromUrl = parseNavigation(urlParams);
+    const hasUrl = Boolean(fromUrl.section || fromUrl.qid || fromUrl.setId || fromUrl.q);
+    if (hasUrl) {
+        return fromUrl;
+    }
+
+    const storedRaw = window.localStorage.getItem(storageKey);
+    if (storedRaw) {
+        try {
+            const stored = JSON.parse(storedRaw) as EditorNavigationState;
+            return {
+                section: parseSection(stored.section ?? null),
+                qid: stored.qid ?? undefined,
+                setId: stored.setId ?? undefined,
+                q: typeof stored.q === 'number' && Number.isFinite(stored.q) && stored.q > 0 ? stored.q : undefined,
+            };
+        } catch {
+            window.localStorage.removeItem(storageKey);
+        }
+    }
+
+    return { section: 'VARC', q: 1 };
+};
+
+const isSameNavigation = (a: EditorNavigationState | null, b: EditorNavigationState): boolean => (
+    (a?.section ?? undefined) === (b.section ?? undefined) &&
+    (a?.qid ?? undefined) === (b.qid ?? undefined) &&
+    (a?.setId ?? undefined) === (b.setId ?? undefined) &&
+    (a?.q ?? undefined) === (b.q ?? undefined)
+);
 
 const normalizeQuestions = (items: QuestionWithAnswer[]) => {
     const questionsById: Record<string, QuestionWithAnswer> = {};
@@ -124,7 +162,9 @@ export function ExamEditorClient({
     const [saveError, setSaveError] = useState<string | null>(null);
     const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
     const [retryAction, setRetryAction] = useState<(() => void) | null>(null);
-    const [externalNavigation, setExternalNavigation] = useState<EditorNavigationState | null>(null);
+    const [externalNavigation, setExternalNavigation] = useState<EditorNavigationState>(() =>
+        resolveNavigationFromBrowser(`paper:${paper.id}:editorNav`)
+    );
 
     const STORAGE_KEY = `paper:${paper.id}:editorNav`;
 
@@ -134,32 +174,8 @@ export function ExamEditorClient({
         }
 
         const resolveNavigation = () => {
-            const urlParams = new URLSearchParams(window.location.search);
-            const fromUrl = parseNavigation(urlParams);
-            const hasUrl = Boolean(fromUrl.section || fromUrl.qid || fromUrl.setId || fromUrl.q);
-
-            if (hasUrl) {
-                setExternalNavigation(fromUrl);
-                return;
-            }
-
-            const storedRaw = window.localStorage.getItem(STORAGE_KEY);
-            if (storedRaw) {
-                try {
-                    const stored = JSON.parse(storedRaw) as EditorNavigationState;
-                    setExternalNavigation({
-                        section: parseSection(stored.section ?? null),
-                        qid: stored.qid ?? undefined,
-                        setId: stored.setId ?? undefined,
-                        q: typeof stored.q === 'number' && Number.isFinite(stored.q) && stored.q > 0 ? stored.q : undefined,
-                    });
-                    return;
-                } catch {
-                    window.localStorage.removeItem(STORAGE_KEY);
-                }
-            }
-
-            setExternalNavigation({ section: 'VARC', q: 1 });
+            const next = resolveNavigationFromBrowser(STORAGE_KEY);
+            setExternalNavigation((prev) => (isSameNavigation(prev, next) ? prev : next));
         };
 
         resolveNavigation();
@@ -333,6 +349,7 @@ export function ExamEditorClient({
                     positive_marks: questionData.positive_marks ?? 3,
                     negative_marks: questionData.negative_marks ?? 1,
                     solution_text: questionData.solution_text ?? undefined,
+                    toppers_approach: questionData.toppers_approach ?? undefined,
                     solution_image_url: questionData.solution_image_url ?? undefined,
                     question_image_url: questionData.question_image_url ?? undefined,
                     difficulty: questionData.difficulty ?? undefined,
@@ -584,6 +601,92 @@ export function ExamEditorClient({
         }
     }, [paperState.id, showNotification]);
 
+    const handleBulkRenameTaxonomy = useCallback(async (input: {
+        section: SectionName;
+        fromTopic?: string | null;
+        toTopic?: string | null;
+        fromSubtopic?: string | null;
+        toSubtopic?: string | null;
+    }) => {
+        const fromTopic = input.fromTopic?.trim() ?? '';
+        const toTopic = input.toTopic?.trim() ?? '';
+        const fromSubtopic = input.fromSubtopic?.trim() ?? '';
+        const toSubtopic = input.toSubtopic?.trim() ?? '';
+
+        const shouldRenameTopic = fromTopic.length > 0 && toTopic.length > 0 && fromTopic !== toTopic;
+        const shouldRenameSubtopic = fromSubtopic.length > 0 && toSubtopic.length > 0 && fromSubtopic !== toSubtopic;
+
+        if (!shouldRenameTopic && !shouldRenameSubtopic) {
+            showNotification('error', 'Provide valid source and target values for topic/subtopic.');
+            return;
+        }
+
+        const previousState = {
+            questionsById,
+            questionOrderBySection,
+        };
+        const nowIso = new Date().toISOString();
+
+        const matchingIds = Object.values(questionsById)
+            .filter((q) => {
+                if (!q.is_active) return false;
+                if (q.section !== input.section) return false;
+                if (shouldRenameTopic && (q.topic ?? '') !== fromTopic) return false;
+                if (shouldRenameSubtopic && (q.subtopic ?? '') !== fromSubtopic) return false;
+                return true;
+            })
+            .map((q) => q.id);
+
+        if (matchingIds.length === 0) {
+            showNotification('error', 'No matching questions found for the requested rename.');
+            return;
+        }
+
+        setQuestionState((prev) => {
+            const nextById = { ...prev.questionsById };
+            matchingIds.forEach((id) => {
+                const existing = nextById[id];
+                if (!existing) return;
+                nextById[id] = {
+                    ...existing,
+                    ...(shouldRenameTopic ? { topic: toTopic } : {}),
+                    ...(shouldRenameSubtopic ? { subtopic: toSubtopic } : {}),
+                    updated_at: nowIso,
+                };
+            });
+            return {
+                questionsById: nextById,
+                questionOrderBySection: prev.questionOrderBySection,
+            };
+        });
+
+        try {
+            const result = await bulkRenameQuestionTaxonomy({
+                paperId: paperState.id,
+                section: input.section,
+                fromTopic: shouldRenameTopic ? fromTopic : undefined,
+                toTopic: shouldRenameTopic ? toTopic : undefined,
+                fromSubtopic: shouldRenameSubtopic ? fromSubtopic : undefined,
+                toSubtopic: shouldRenameSubtopic ? toSubtopic : undefined,
+            });
+
+            if (!result.success) {
+                setQuestionState(previousState);
+                showNotification('error', result.error || 'Failed to normalize taxonomy values.');
+                return;
+            }
+
+            showNotification(
+                'success',
+                `Updated ${result.updatedCount ?? matchingIds.length} question${(result.updatedCount ?? matchingIds.length) === 1 ? '' : 's'}.`
+            );
+        } catch (err) {
+            setQuestionState(previousState);
+            const message = err instanceof Error ? err.message : 'Failed to normalize taxonomy values.';
+            showNotification('error', message);
+        }
+    }, [paperState.id, questionOrderBySection, questionsById, showNotification]);
+
     const handleNavigate = useCallback((navigation: { section: SectionName; qid?: string | null; setId?: string | null; q: number }) => {
         if (typeof window === 'undefined') {
             return;
@@ -622,6 +725,13 @@ export function ExamEditorClient({
                 q: navigation.q,
             })
         );
+
+        setExternalNavigation({
+            section: navigation.section,
+            qid: navigation.qid ?? undefined,
+            setId: navigation.setId ?? undefined,
+            q: navigation.q,
+        });
 
         if (!isSame) {
             router.replace(`${pathname}?${params.toString()}`, { scroll: false });
@@ -671,6 +781,7 @@ export function ExamEditorClient({
                 onSaveContext={handleSaveContext}
                 onDeleteContext={handleDeleteContext}
                 onUpdatePaperTitle={handleUpdatePaperTitle}
+                onBulkRenameTaxonomy={handleBulkRenameTaxonomy}
                 initialNavigation={externalNavigation}
                 onNavigate={handleNavigate}
             />

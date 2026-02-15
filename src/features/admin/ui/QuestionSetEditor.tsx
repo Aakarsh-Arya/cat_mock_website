@@ -14,7 +14,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, type ClipboardEvent } from 'react';
 import type {
     QuestionSet,
     QuestionSetType,
@@ -103,6 +103,45 @@ const EMPTY_QUESTION: QuestionDraft = {
     positive_marks: 3,
     negative_marks: 1,
 };
+
+function handlePlainTextPaste(
+    event: ClipboardEvent<HTMLTextAreaElement>,
+    onChange: (next: string) => void
+) {
+    event.preventDefault();
+    const plainText = event.clipboardData.getData('text/plain');
+    const htmlText = event.clipboardData.getData('text/html');
+    let pastedText = plainText;
+
+    const plainHasLineBreaks = /[\r\n]/.test(plainText);
+    const htmlHasStructuredBreaks = /<(br|p|div|li|h[1-6]|tr|blockquote|pre)\b/i.test(htmlText);
+
+    if (!plainHasLineBreaks && htmlHasStructuredBreaks && typeof DOMParser !== 'undefined') {
+        try {
+            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+            doc.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
+            doc.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,tr,blockquote,pre').forEach((node) => {
+                node.append('\n');
+            });
+            pastedText = (doc.body.textContent ?? plainText).replace(/\r\n?/g, '\n');
+        } catch {
+            pastedText = plainText;
+        }
+    }
+
+    const target = event.currentTarget;
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    const nextValue = `${target.value.slice(0, start)}${pastedText}${target.value.slice(end)}`;
+
+    onChange(nextValue);
+
+    const nextCursor = start + pastedText.length;
+    requestAnimationFrame(() => {
+        target.focus();
+        target.setSelectionRange(nextCursor, nextCursor);
+    });
+}
 
 // =============================================================================
 // MAIN COMPONENT
@@ -598,7 +637,7 @@ export function QuestionSetEditor({
                                         }
                                     `}
                                 >
-                                    {idx + 1}
+                                    {questions[idx]?.sequence_order ?? (idx + 1)}
                                 </button>
                             ))}
                         </div>
@@ -618,7 +657,7 @@ export function QuestionSetEditor({
                         <div className="flex-1 overflow-y-auto p-6">
                             <QuestionEditor
                                 question={activeQuestion}
-                                questionNumber={activeQuestionIndex + 1}
+                                questionNumber={activeQuestion.sequence_order ?? (activeQuestionIndex + 1)}
                                 canRemove={questions.length > 1}
                                 onUpdate={(updates) => updateQuestion(activeQuestionIndex, updates)}
                                 onUpdateOption={(optIdx, value) => updateQuestionOption(activeQuestionIndex, optIdx, value)}
@@ -805,6 +844,7 @@ function QuestionEditor({
                 <textarea
                     value={question.solution_text ?? ''}
                     onChange={(e) => onUpdate({ solution_text: e.target.value })}
+                    onPaste={(event) => handlePlainTextPaste(event, (nextValue) => onUpdate({ solution_text: nextValue }))}
                     placeholder="Enter the solution explanation..."
                     rows={4}
                     className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-section-varc outline-none resize-y"

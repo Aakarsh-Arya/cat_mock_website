@@ -15,11 +15,36 @@ interface PageProps {
     params: Promise<{ paperId: string }>;
 }
 
+const SECTION_OPTIONS = ['VARC', 'DILR', 'QA'] as const;
+
 function toDateTimeLocal(value?: string | null): string {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
     return date.toISOString().slice(0, 16);
+}
+
+function parsePaperSectionNames(sections: unknown): string[] {
+    if (!Array.isArray(sections)) return [...SECTION_OPTIONS];
+    const parsed = sections
+        .map((item) => {
+            if (typeof item === 'string') return item.toUpperCase();
+            if (item && typeof item === 'object' && 'name' in item) {
+                const name = (item as { name?: string }).name;
+                return typeof name === 'string' ? name.toUpperCase() : null;
+            }
+            return null;
+        })
+        .filter((value): value is string => Boolean(value) && SECTION_OPTIONS.includes(value as (typeof SECTION_OPTIONS)[number]));
+    return parsed.length > 0 ? parsed : [...SECTION_OPTIONS];
+}
+
+function parseAllowedSectionals(value: unknown, fallback: string[]): string[] {
+    if (!Array.isArray(value)) return fallback;
+    const parsed = value
+        .map((entry) => (typeof entry === 'string' ? entry.toUpperCase().trim() : ''))
+        .filter((entry): entry is string => SECTION_OPTIONS.includes(entry as (typeof SECTION_OPTIONS)[number]));
+    return parsed.length > 0 ? parsed : fallback;
 }
 
 export default async function PaperSettingsPage({ params }: PageProps) {
@@ -66,16 +91,32 @@ export default async function PaperSettingsPage({ params }: PageProps) {
         notFound();
     }
 
+    const paperSectionNames = parsePaperSectionNames(paper.sections);
+    const defaultSectionalAllowedSections = parseAllowedSectionals(
+        paper.sectional_allowed_sections,
+        paperSectionNames
+    );
+
     async function updatePaperSettings(formData: FormData) {
         'use server';
 
         const published = formData.get('published') === 'on';
         const isFree = formData.get('is_free') === 'on';
+        const allowSectionalAttempts = formData.get('allow_sectional_attempts') === 'on';
         const attemptLimitRaw = formData.get('attempt_limit');
         const attemptLimit = attemptLimitRaw ? Number(attemptLimitRaw) : undefined;
         const normalizedAttemptLimit = Number.isFinite(attemptLimit as number) ? attemptLimit : undefined;
         const availableFrom = formData.get('available_from') as string | null;
         const availableUntil = formData.get('available_until') as string | null;
+        const requestedSectionals = formData
+            .getAll('sectional_allowed_sections')
+            .map((entry) => String(entry).toUpperCase().trim())
+            .filter(
+                (entry): entry is (typeof SECTION_OPTIONS)[number] =>
+                    SECTION_OPTIONS.includes(entry as (typeof SECTION_OPTIONS)[number])
+            );
+        const normalizedSectionals: (typeof SECTION_OPTIONS)[number][] =
+            requestedSectionals.length > 0 ? requestedSectionals : [...SECTION_OPTIONS];
 
         const result = await updatePaper(paperId, {
             published,
@@ -83,6 +124,8 @@ export default async function PaperSettingsPage({ params }: PageProps) {
             attempt_limit: normalizedAttemptLimit,
             available_from: availableFrom || undefined,
             available_until: availableUntil || undefined,
+            allow_sectional_attempts: allowSectionalAttempts,
+            sectional_allowed_sections: normalizedSectionals,
         });
 
         if (!result.success) {
@@ -124,6 +167,45 @@ export default async function PaperSettingsPage({ params }: PageProps) {
                 <div className="flex items-center gap-3">
                     <input id="is_free" name="is_free" type="checkbox" defaultChecked={paper.is_free} />
                     <label htmlFor="is_free" className="text-sm text-gray-700">Free access</label>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <input
+                        id="allow_sectional_attempts"
+                        name="allow_sectional_attempts"
+                        type="checkbox"
+                        defaultChecked={Boolean(paper.allow_sectional_attempts)}
+                    />
+                    <label htmlFor="allow_sectional_attempts" className="text-sm text-gray-700">
+                        Allow sectional attempts
+                    </label>
+                </div>
+
+                <div>
+                    <p className="block text-sm text-gray-700 mb-2">Allowed sectional sections</p>
+                    <div className="flex flex-wrap items-center gap-4">
+                        {SECTION_OPTIONS.map((section) => {
+                            const isInPaper = paperSectionNames.includes(section);
+                            return (
+                                <label
+                                    key={section}
+                                    className={`inline-flex items-center gap-2 text-sm ${isInPaper ? 'text-gray-700' : 'text-gray-400'}`}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        name="sectional_allowed_sections"
+                                        value={section}
+                                        defaultChecked={defaultSectionalAllowedSections.includes(section)}
+                                        disabled={!isInPaper}
+                                    />
+                                    <span>{section}</span>
+                                </label>
+                            );
+                        })}
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                        Users can choose among the enabled sections when starting a sectional attempt.
+                    </p>
                 </div>
 
                 <div>

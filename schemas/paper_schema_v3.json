@@ -95,6 +95,21 @@
                     "type": "integer",
                     "minimum": 0,
                     "default": 0
+                },
+                "allow_sectional_attempts": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "sectional_allowed_sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "VARC",
+                            "DILR",
+                            "QA"
+                        ]
+                    }
                 }
             }
         },
@@ -333,6 +348,9 @@
                         "type": "string"
                     },
                     "solution_text": {
+                        "type": "string"
+                    },
+                    "toppers_approach": {
                         "type": "string"
                     },
                     "solution_image_url": {

@@ -67,6 +67,14 @@ type PauseSnapshot = {
     currentQuestion: number;
 };
 
+type SectionTimerSnapshot = Record<SectionName, {
+    sectionName: SectionName;
+    startedAt: number;
+    durationSeconds: number;
+    remainingSeconds: number;
+    isExpired: boolean;
+}>;
+
 const SUBMISSION_STEP_LABELS: Record<Exclude<SubmissionStage, 'idle'>, string> = {
     validating: 'Validating session',
     saving: 'Saving responses',
@@ -295,6 +303,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
     const flushInProgressRef = useRef(false);
     const popstateInFlightRef = useRef(false);
     const pauseInFlightRef = useRef(false);
+    const pauseTimerRestoreRef = useRef<SectionTimerSnapshot | null>(null);
     const backTrapArmedRef = useRef(false);
     // Prevent race conditions when saving the same question multiple times
     const savingQuestionsRef = useRef<Set<string>>(new Set());
@@ -384,6 +393,76 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         };
     }, []);
 
+    const freezeTimersForPause = useCallback((snapshot: PauseSnapshot) => {
+        if (pauseTimerRestoreRef.current) {
+            return;
+        }
+
+        const current = sectionTimersRef.current;
+        const restore: SectionTimerSnapshot = {
+            VARC: { ...current.VARC },
+            DILR: { ...current.DILR },
+            QA: { ...current.QA },
+        };
+        pauseTimerRestoreRef.current = restore;
+
+        const frozen: SectionTimerSnapshot = {
+            VARC: {
+                ...current.VARC,
+                sectionName: 'VARC',
+                startedAt: 0,
+                durationSeconds: Math.max(0, Math.floor(snapshot.timeRemaining.VARC)),
+                remainingSeconds: Math.max(0, Math.floor(snapshot.timeRemaining.VARC)),
+                isExpired: snapshot.timeRemaining.VARC <= 0,
+            },
+            DILR: {
+                ...current.DILR,
+                sectionName: 'DILR',
+                startedAt: 0,
+                durationSeconds: Math.max(0, Math.floor(snapshot.timeRemaining.DILR)),
+                remainingSeconds: Math.max(0, Math.floor(snapshot.timeRemaining.DILR)),
+                isExpired: snapshot.timeRemaining.DILR <= 0,
+            },
+            QA: {
+                ...current.QA,
+                sectionName: 'QA',
+                startedAt: 0,
+                durationSeconds: Math.max(0, Math.floor(snapshot.timeRemaining.QA)),
+                remainingSeconds: Math.max(0, Math.floor(snapshot.timeRemaining.QA)),
+                isExpired: snapshot.timeRemaining.QA <= 0,
+            },
+        };
+
+        useExamStore.setState((state) => ({
+            ...state,
+            sectionTimers: frozen,
+        }));
+        sectionTimersRef.current = frozen;
+    }, []);
+
+    const restoreTimersAfterPauseFailure = useCallback(() => {
+        const restore = pauseTimerRestoreRef.current;
+        if (!restore) {
+            return;
+        }
+
+        pauseTimerRestoreRef.current = null;
+        useExamStore.setState((state) => ({
+            ...state,
+            sectionTimers: {
+                ...state.sectionTimers,
+                VARC: { ...state.sectionTimers.VARC, ...restore.VARC },
+                DILR: { ...state.sectionTimers.DILR, ...restore.DILR },
+                QA: { ...state.sectionTimers.QA, ...restore.QA },
+            },
+        }));
+        sectionTimersRef.current = restore;
+    }, []);
+
+    const clearPauseTimerFreeze = useCallback(() => {
+        pauseTimerRestoreRef.current = null;
+    }, []);
+
     const fetchAttemptStatus = useCallback(async (attemptIdValue: string): Promise<string | null> => {
         try {
             const response = await fetch('/api/attempt-status', {
@@ -449,25 +528,27 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 }
             }
 
-            try {
-                const progressResult = await withTimeout(
-                    updateAttemptProgress({
-                        attemptId: attemptIdValue,
-                        timeRemaining: snapshot.timeRemaining,
-                        currentSection: snapshot.currentSection,
-                        currentQuestion: snapshot.currentQuestion,
-                        sessionToken: token ?? undefined,
-                        force_resume: true,
-                        visitOrder: sectionVisitOrderRef.current,
-                    }),
-                    8000,
-                    'updateAttemptProgress(pause)'
-                );
-                if (!progressResult.success && progressResult.error !== 'Attempt is not in progress') {
-                    logger.warn('Pause pre-save progress failed', progressResult.error, { attemptId: attemptIdValue });
+            if (token) {
+                try {
+                    const progressResult = await withTimeout(
+                        updateAttemptProgress({
+                            attemptId: attemptIdValue,
+                            timeRemaining: snapshot.timeRemaining,
+                            currentSection: snapshot.currentSection,
+                            currentQuestion: snapshot.currentQuestion,
+                            sessionToken: token,
+                            force_resume: true,
+                            visitOrder: sectionVisitOrderRef.current,
+                        }),
+                        8000,
+                        'updateAttemptProgress(pause)'
+                    );
+                    if (!progressResult.success && progressResult.error !== 'Attempt is not in progress') {
+                        logger.warn('Pause pre-save progress failed', progressResult.error, { attemptId: attemptIdValue });
+                    }
+                } catch (error) {
+                    logger.warn('Pause pre-save progress failed', { attemptId: attemptIdValue, error });
                 }
-            } catch (error) {
-                logger.warn('Pause pre-save progress failed', { attemptId: attemptIdValue, error });
             }
         },
         [getPersistedAnswer, getIsVisited, hasAnswer, withTimeout]
@@ -482,6 +563,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
 
             pauseInFlightRef.current = true;
             setUiError(null);
+            freezeTimersForPause(snapshot);
 
             try {
                 const token = await ensureSessionToken({
@@ -509,6 +591,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                     if (status === 'paused') {
                         pauseSucceeded = true;
                     } else if (status === 'submitted' || status === 'completed') {
+                        clearPauseTimerFreeze();
                         attemptFinalizedRef.current = true;
                         clearAllExamState();
                         notifyAttemptStateUpdated();
@@ -518,6 +601,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 }
 
                 if (!pauseSucceeded) {
+                    restoreTimersAfterPauseFailure();
                     examLogger.examPaused(aId, false, pauseResult.error);
                     if (pauseResult.error?.includes('not allowed')) {
                         setUiError('Pausing is not allowed for this exam.');
@@ -528,12 +612,14 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 }
 
                 examLogger.examPaused(aId, true);
+                clearPauseTimerFreeze();
                 attemptFinalizedRef.current = true;
                 clearAllExamState();
                 notifyAttemptStateUpdated();
                 router.replace(mockReturnPath);
                 return true;
             } catch (error) {
+                restoreTimersAfterPauseFailure();
                 examLogger.examPaused(aId, false, 'PAUSE_EXCEPTION');
                 logger.warn('Pause flow failed', error, { attemptId: aId, reason });
                 setUiError('Failed to pause exam. Please try again.');
@@ -548,9 +634,12 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             isAutoSubmitting,
             isInitialized,
             isSubmitting,
+            clearPauseTimerFreeze,
+            freezeTimersForPause,
             mockReturnPath,
             notifyAttemptStateUpdated,
             persistSnapshotBeforePause,
+            restoreTimersAfterPauseFailure,
             router,
             withTimeout,
         ]
@@ -562,10 +651,16 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         if (isSubmitting || isAutoSubmitting) return;
         if (isDevSyncPaused()) return;
         if (attemptFinalizedRef.current) return;
+        if (pauseInFlightRef.current) return;
         if (flushInProgressRef.current) return;
         flushInProgressRef.current = true;
 
         try {
+            const progressSessionToken = await ensureSessionToken({ reason: 'flushNow-progress' });
+            if (!progressSessionToken) {
+                return;
+            }
+
             const timeRemaining: TimeRemaining = {
                 VARC: sectionTimers.VARC.remainingSeconds,
                 DILR: sectionTimers.DILR.remainingSeconds,
@@ -579,6 +674,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 timeRemaining,
                 currentSection,
                 currentQuestion: currentQuestionIndex + 1,
+                sessionToken: progressSessionToken,
                 visitOrder: sectionVisitOrder,
             });
             if (!progressResult.success) {
@@ -681,6 +777,10 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             if (!attemptId) return;
             if (isDevSyncPaused()) return;
             if (attemptFinalizedRef.current) return;
+            if (pauseInFlightRef.current) return;
+
+            const progressSessionToken = await ensureSessionToken({ reason: 'debounced-progress' });
+            if (!progressSessionToken) return;
 
             const timeRemaining: TimeRemaining = {
                 VARC: sectionTimers.VARC.remainingSeconds,
@@ -695,6 +795,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 timeRemaining,
                 currentSection,
                 currentQuestion: currentQuestionIndex + 1,
+                sessionToken: progressSessionToken,
                 visitOrder: sectionVisitOrderRef.current,
             });
             if (!progressResult.success && progressResult.error === 'Attempt is not in progress') {
@@ -720,6 +821,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         if (!attemptId || !isInitialized) return;
         if (isSubmitting || isAutoSubmitting) return;
         if (attemptFinalizedRef.current) return;
+        if (pauseInFlightRef.current) return;
 
         debouncedSaveProgress(sectionTimersRef.current);
     }, [attemptId, isInitialized, isSubmitting, isAutoSubmitting, currentSectionIndex, currentQuestionIndex, debouncedSaveProgress]);
@@ -731,6 +833,9 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             if (!aId || !isInitialized) return;
             if (isSubmitting || isAutoSubmitting) return;
             if (attemptFinalizedRef.current) return;
+            if (pauseInFlightRef.current) return;
+            const token = sessionTokenRef.current;
+            if (!token) return;
 
             const timers = sectionTimersRef.current;
             const timeRemaining: TimeRemaining = {
@@ -742,12 +847,16 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             const currentQuestion = currentQuestionIndexRef.current + 1;
 
             if (typeof navigator === 'undefined' || !navigator.sendBeacon) {
+                if (!sessionTokenRef.current) {
+                    void flushNow();
+                    return;
+                }
                 void updateAttemptProgress({
                     attemptId: aId,
                     timeRemaining,
                     currentSection,
                     currentQuestion,
-                    sessionToken: sessionTokenRef.current ?? undefined,
+                    sessionToken: token,
                     force_resume: true,
                     visitOrder: sectionVisitOrderRef.current,
                 });
@@ -759,7 +868,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 timeRemaining,
                 currentSection,
                 currentQuestion,
-                sessionToken: sessionTokenRef.current ?? undefined,
+                sessionToken: token,
                 force_resume: true,
                 visitOrder: sectionVisitOrderRef.current,
             });
@@ -773,6 +882,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             if (!aId) return;
             if (isSubmitting || isAutoSubmitting) return;
             if (attemptFinalizedRef.current) return;
+            if (pauseInFlightRef.current) return;
 
             const snapshot = responsesRef.current;
             const token = sessionTokenRef.current;
@@ -866,6 +976,9 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
             const aId = attemptIdRef.current;
             if (!aId || !isInitialized || isSubmitting || isAutoSubmitting) return;
             if (attemptFinalizedRef.current) return;
+            if (pauseInFlightRef.current) return;
+            const token = sessionTokenRef.current;
+            if (!token) return;
 
             const timers = sectionTimersRef.current;
             const payload = JSON.stringify({
@@ -877,7 +990,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                 },
                 currentSection: getSectionByIndex(currentSectionIndexRef.current),
                 currentQuestion: currentQuestionIndexRef.current + 1,
-                sessionToken: sessionTokenRef.current ?? undefined,
+                sessionToken: token,
                 visitOrder: sectionVisitOrderRef.current,
             });
 
@@ -1034,6 +1147,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         if (!attemptId) return;
         if (isDevSyncPaused()) return;
         if (attemptFinalizedRef.current) return;
+        if (pauseInFlightRef.current) return;
 
         // Prevent concurrent saves for the same question
         if (savingQuestionsRef.current.has(questionId)) {
@@ -1091,6 +1205,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         if (!attemptId) return { success: false };
         if (isDevSyncPaused()) return { success: false };
         if (attemptFinalizedRef.current) return { success: false };
+        if (pauseInFlightRef.current) return { success: false };
 
         const activeSessionToken = await ensureSessionToken({ reason: 'batch-save' });
         if (!activeSessionToken) return { success: false };
@@ -1153,6 +1268,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
         if (!attemptId) return;
         if (isDevSyncPaused()) return;
         if (attemptFinalizedRef.current) return;
+        if (pauseInFlightRef.current) return;
 
         // FIX: Skip save if submit is already in progress (prevents race condition)
         if (submitLockRef.current) {
@@ -1323,6 +1439,7 @@ export function ExamClient({ paper, questions, attempt, responses: serverRespons
                         },
                         currentSection: getSectionByIndex(currentSectionIndex),
                         currentQuestion: currentQuestionIndex + 1,
+                        sessionToken: activeSessionToken,
                         visitOrder: sectionVisitOrderRef.current,
                     }),
                     5000,

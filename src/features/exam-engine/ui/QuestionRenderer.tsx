@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import type {
     QuestionSet,
     QuestionSetType,
@@ -47,6 +47,7 @@ interface QuestionRendererProps {
     /** Optional: solution content keyed by question id (review mode) */
     solutionMap?: Record<string, {
         solution_text?: string | null;
+        toppers_approach?: string | null;
         solution_image_url?: string | null;
         video_solution_url?: string | null;
     }>;
@@ -177,6 +178,7 @@ interface QuestionPaneProps {
     correctAnswerMap?: Record<string, string>;
     solutionMap?: Record<string, {
         solution_text?: string | null;
+        toppers_approach?: string | null;
         solution_image_url?: string | null;
         video_solution_url?: string | null;
     }>;
@@ -266,6 +268,7 @@ interface SplitPaneLayoutProps {
     correctAnswerMap?: Record<string, string>;
     solutionMap?: Record<string, {
         solution_text?: string | null;
+        toppers_approach?: string | null;
         solution_image_url?: string | null;
         video_solution_url?: string | null;
     }>;
@@ -334,6 +337,7 @@ interface SingleFocusLayoutProps {
     correctAnswerMap?: Record<string, string>;
     solutionMap?: Record<string, {
         solution_text?: string | null;
+        toppers_approach?: string | null;
         solution_image_url?: string | null;
         video_solution_url?: string | null;
     }>;
@@ -424,12 +428,17 @@ interface QuestionContentProps {
     correctAnswerMap?: Record<string, string>;
     solutionMap?: Record<string, {
         solution_text?: string | null;
+        toppers_approach?: string | null;
         solution_image_url?: string | null;
         video_solution_url?: string | null;
     }>;
     showBookmarkToggle?: boolean;
     isBookmarked?: boolean;
     onToggleBookmark?: (questionId: string) => void;
+}
+
+function normalizeSolutionText(value: string | null | undefined): string {
+    return (value ?? '').replace(/\r\n?/g, '\n').trim();
 }
 
 function QuestionContent({
@@ -470,7 +479,31 @@ function QuestionContent({
     const answerOverride = responses?.[question.id] ?? null;
     const correctAnswer = correctAnswerMap?.[question.id];
     const solution = solutionMap?.[question.id];
-    const hasSolution = Boolean(solution?.solution_text || solution?.solution_image_url || solution?.video_solution_url);
+    const normalizedTextbookSolution = normalizeSolutionText(solution?.solution_text ?? null);
+    const normalizedToppersApproach = normalizeSolutionText(solution?.toppers_approach ?? null);
+    const hasTextbookSolution = normalizedTextbookSolution.length > 0;
+    const hasDistinctToppersApproach =
+        normalizedToppersApproach.length > 0 && normalizedToppersApproach !== normalizedTextbookSolution;
+    const [activeSolutionTab, setActiveSolutionTab] = useState<'textbook' | 'toppers'>(
+        hasTextbookSolution ? 'textbook' : 'toppers'
+    );
+
+    useEffect(() => {
+        if (hasTextbookSolution) {
+            setActiveSolutionTab('textbook');
+            return;
+        }
+        if (hasDistinctToppersApproach) {
+            setActiveSolutionTab('toppers');
+        }
+    }, [question.id, hasTextbookSolution, hasDistinctToppersApproach]);
+
+    const hasSolution = Boolean(
+        solution?.solution_text ||
+        hasDistinctToppersApproach ||
+        solution?.solution_image_url ||
+        solution?.video_solution_url
+    );
 
     return (
         <div className="space-y-6">
@@ -547,13 +580,60 @@ function QuestionContent({
             {hasSolution && (
                 <details className="rounded-lg border border-gray-200 bg-white p-3">
                     <summary className="cursor-pointer text-sm font-semibold text-blue-600">
-                        View solution
+                        View solutions
                     </summary>
                     <div className="mt-3 space-y-3 text-sm text-gray-700">
-                        {solution?.solution_text && (
-                            <div className="prose prose-sm max-w-none">
-                                <MathText text={solution.solution_text} />
-                            </div>
+                        {(hasTextbookSolution || hasDistinctToppersApproach) && (
+                            <>
+                                <div className={`grid gap-2 ${hasTextbookSolution && hasDistinctToppersApproach ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                    {hasTextbookSolution && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveSolutionTab('textbook')}
+                                            className={`rounded-lg border px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide transition-colors ${activeSolutionTab === 'textbook'
+                                                ? 'border-blue-300 bg-blue-100 text-blue-800'
+                                                : 'border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                                }`}
+                                        >
+                                            Textbook Solution
+                                        </button>
+                                    )}
+                                    {hasDistinctToppersApproach && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveSolutionTab('toppers')}
+                                            className={`rounded-lg border px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide transition-colors ${activeSolutionTab === 'toppers'
+                                                ? 'border-amber-300 bg-amber-100 text-amber-800'
+                                                : 'border-amber-100 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                                }`}
+                                        >
+                                            Toppers Approach
+                                        </button>
+                                    )}
+                                </div>
+
+                                {activeSolutionTab === 'textbook' && hasTextbookSolution && (
+                                    <div className="rounded-lg bg-blue-50 p-3">
+                                        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                                            Textbook Solution
+                                        </h4>
+                                        <div className="max-w-none">
+                                            <MathText text={solution?.solution_text ?? null} />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeSolutionTab === 'toppers' && hasDistinctToppersApproach && (
+                                    <div className="rounded-lg bg-amber-50 p-3">
+                                        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                            Toppers Approach
+                                        </h4>
+                                        <div className="max-w-none">
+                                            <MathText text={solution?.toppers_approach ?? null} />
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                         {solution?.solution_image_url && (
                             <div className="rounded border border-gray-200 overflow-hidden">

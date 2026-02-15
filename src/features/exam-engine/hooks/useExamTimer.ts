@@ -17,6 +17,7 @@ import type { SectionName, SectionTimerState } from '@/types/exam';
 export interface UseExamTimerOptions {
     onSectionExpire?: (sectionName: SectionName) => void | Promise<void>;
     onExamComplete?: () => void | Promise<void>;
+    finalSection?: SectionName;
     intervalMs?: number;
     warningThresholdSeconds?: number;
     criticalThresholdSeconds?: number;
@@ -77,6 +78,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
     const {
         onSectionExpire,
         onExamComplete,
+        finalSection = 'QA',
         intervalMs = 1000,
         warningThresholdSeconds = 300,
         criticalThresholdSeconds = 60,
@@ -170,8 +172,8 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
                 await onSectionExpireRef.current?.(sectionName);
 
                 // Determine completion based on sectionName (most reliable)
-                if (sectionName === 'QA') {
-                    console.log('[useExamTimer] QA expired - calling onExamComplete');
+                if (sectionName === finalSection) {
+                    console.log('[useExamTimer] Final section expired - calling onExamComplete', { sectionName, finalSection });
                     await onExamCompleteRef.current?.();
                     console.log('[useExamTimer] onExamComplete returned');
                 } else {
@@ -191,7 +193,7 @@ export function useExamTimer(options: UseExamTimerOptions = {}) {
                 }
             }
         },
-        [expireSection, moveToNextSection, setAutoSubmitting, stopTimer]
+        [expireSection, moveToNextSection, setAutoSubmitting, stopTimer, finalSection]
     );
 
     const tick = useCallback(() => {

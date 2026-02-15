@@ -342,6 +342,12 @@ async function importPaperV3(paperData, options = {}) {
         published: paperData.published ?? false,
         allow_pause: paperData.allow_pause ?? true,
         attempt_limit: paperData.attempt_limit ?? 0,
+        allow_sectional_attempts: paperData.allow_sectional_attempts ?? false,
+        sectional_allowed_sections: Array.isArray(paperData.sectional_allowed_sections)
+            ? paperData.sectional_allowed_sections
+                .map(section => String(section).toUpperCase().trim())
+                .filter(section => VALID_SECTIONS.includes(section))
+            : ['VARC', 'DILR', 'QA'],
     };
 
     // Add paper_key if using upsert mode
@@ -539,6 +545,7 @@ async function importQuestionsV3(paperId, questions, setIdMap, options = {}) {
             topic: q.topic || null,
             subtopic: q.subtopic || null,
             solution_text: q.solution_text || null,
+            toppers_approach: q.toppers_approach || null,
             solution_image_url: q.solution_image_url || null,
             video_solution_url: q.video_solution_url || null,
             set_id: setId,
@@ -554,9 +561,21 @@ async function importQuestionsV3(paperId, questions, setIdMap, options = {}) {
 
     for (let i = 0; i < questionsToInsert.length; i += batchSize) {
         const batch = questionsToInsert.slice(i, i + batchSize);
-        const { error } = await supabase
+        let { error } = await supabase
             .from('questions')
             .insert(batch);
+
+        if (error?.code === '42703') {
+            const fallbackBatch = batch.map((question) => {
+                const copy = { ...question };
+                delete copy.toppers_approach;
+                return copy;
+            });
+            const fallback = await supabase
+                .from('questions')
+                .insert(fallbackBatch);
+            error = fallback.error;
+        }
 
         if (error) throw error;
         inserted += batch.length;

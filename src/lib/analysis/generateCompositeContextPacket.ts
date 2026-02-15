@@ -27,6 +27,7 @@ interface QuestionRow {
     options: unknown;
     correct_answer?: string | null;
     solution_text?: string | null;
+    toppers_approach?: string | null;
     solution_image_url?: string | null;
     video_solution_url?: string | null;
     positive_marks: number;
@@ -380,13 +381,29 @@ export async function generateCompositeContextPacket(
     }
 
     // ── 3) Fetch questions with answers (service role bypasses questions_exam) ─
-    const { data: questions, error: questionsError } = await admin
+    const primaryQuestionsResult = await admin
         .from('questions')
-        .select('id, section, question_number, question_type, question_text, options, correct_answer, solution_text, solution_image_url, video_solution_url, positive_marks, negative_marks, topic, subtopic, difficulty, ideal_time_seconds, set_id, context_id, question_image_url')
+        .select('id, section, question_number, question_type, question_text, options, correct_answer, solution_text, toppers_approach, solution_image_url, video_solution_url, positive_marks, negative_marks, topic, subtopic, difficulty, ideal_time_seconds, set_id, context_id, question_image_url')
         .eq('paper_id', attempt.paper_id)
         .eq('is_active', true)
         .order('section')
         .order('question_number');
+
+    let questions = primaryQuestionsResult.data as QuestionRow[] | null;
+    let questionsError = primaryQuestionsResult.error;
+
+    // Backward compatibility when toppers_approach column is not yet deployed.
+    if (questionsError?.code === '42703') {
+        const fallback = await admin
+            .from('questions')
+            .select('id, section, question_number, question_type, question_text, options, correct_answer, solution_text, solution_image_url, video_solution_url, positive_marks, negative_marks, topic, subtopic, difficulty, ideal_time_seconds, set_id, context_id, question_image_url')
+            .eq('paper_id', attempt.paper_id)
+            .eq('is_active', true)
+            .order('section')
+            .order('question_number');
+        questions = fallback.data as QuestionRow[] | null;
+        questionsError = fallback.error;
+    }
 
     if (questionsError) {
         return { data: null, error: questionsError.message };
@@ -570,6 +587,7 @@ export async function generateCompositeContextPacket(
                     options: q.options ?? null,
                     correct_answer: q.correct_answer ?? null,
                     solution_text: q.solution_text ?? null,
+                    toppers_approach: q.toppers_approach ?? null,
                     solution_image_url: q.solution_image_url ?? null,
                     video_solution_url: q.video_solution_url ?? null,
                     marks: q.positive_marks,

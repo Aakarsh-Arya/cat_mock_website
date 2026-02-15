@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef, useId } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, useId, type ClipboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type {
@@ -22,6 +22,7 @@ import { uploadToCloudinary } from '@/lib/cloudinary';
 import { PaletteShell } from '@/features/shared/ui/PaletteShell';
 import { MarkdownToolbar } from './MarkdownToolbar';
 import { getTopicOptions, getSubtopicOptions } from '../config/topicOptions';
+import { MathText } from '@/features/exam-engine/ui/MathText';
 
 // =============================================================================
 // TYPES
@@ -38,6 +39,13 @@ interface EditableExamLayoutProps {
     onSaveContext?: (context: Partial<QuestionContext>) => Promise<void>;
     onDeleteContext?: (contextId: string) => Promise<void>;
     onUpdatePaperTitle?: (title: string) => Promise<{ success: boolean; error?: string }>;
+    onBulkRenameTaxonomy?: (input: {
+        section: SectionName;
+        fromTopic?: string | null;
+        toTopic?: string | null;
+        fromSubtopic?: string | null;
+        toSubtopic?: string | null;
+    }) => Promise<void>;
     initialNavigation?: EditorNavigationState | null;
     onNavigate?: (navigation: EditorNavigationUpdate) => void;
 }
@@ -59,6 +67,73 @@ export interface EditorNavigationUpdate {
 const OPTION_LABELS = ['A', 'B', 'C', 'D'] as const;
 const SECTIONS: SectionName[] = ['VARC', 'DILR', 'QA'];
 const SECTION_TOTALS: Record<SectionName, number> = { VARC: 24, DILR: 20, QA: 22 };
+const SECTION_NUMBER_OFFSETS: Record<SectionName, number> = {
+    VARC: 0,
+    DILR: SECTION_TOTALS.VARC,
+    QA: SECTION_TOTALS.VARC + SECTION_TOTALS.DILR,
+};
+
+function handlePlainTextPaste(
+    event: ClipboardEvent<HTMLTextAreaElement>,
+    setValue: (next: string) => void
+) {
+    event.preventDefault();
+    const plainText = event.clipboardData.getData('text/plain');
+    const htmlText = event.clipboardData.getData('text/html');
+    let pastedText = plainText;
+
+    const plainHasLineBreaks = /[\r\n]/.test(plainText);
+    const htmlHasStructuredBreaks = /<(br|p|div|li|h[1-6]|tr|blockquote|pre)\b/i.test(htmlText);
+
+    if (!plainHasLineBreaks && htmlHasStructuredBreaks && typeof DOMParser !== 'undefined') {
+        try {
+            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+            doc.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
+            doc.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,tr,blockquote,pre').forEach((node) => {
+                node.append('\n');
+            });
+            pastedText = (doc.body.textContent ?? plainText).replace(/\r\n?/g, '\n');
+        } catch {
+            pastedText = plainText;
+        }
+    }
+
+    const target = event.currentTarget;
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    const nextValue = `${target.value.slice(0, start)}${pastedText}${target.value.slice(end)}`;
+
+    setValue(nextValue);
+
+    const nextCursor = start + pastedText.length;
+    requestAnimationFrame(() => {
+        target.focus();
+        target.setSelectionRange(nextCursor, nextCursor);
+    });
+}
+
+function getDisplayQuestionNumber(
+    section: SectionName,
+    rawQuestionNumber: number | null | undefined,
+    sectionIndexFallback: number
+): number {
+    const sectionBase = SECTION_NUMBER_OFFSETS[section];
+    const fallback = sectionBase + sectionIndexFallback + 1;
+    const parsed = Number(rawQuestionNumber);
+
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+
+    const normalized = Math.floor(parsed);
+
+    // Backward compatibility: legacy rows may store section-local numbering (1..section total).
+    if (section !== 'VARC' && normalized <= SECTION_TOTALS[section]) {
+        return sectionBase + normalized;
+    }
+
+    return normalized;
+}
 
 // =============================================================================
 // EDITABLE HEADER (Mirrors ExamHeader)
@@ -69,9 +144,18 @@ interface EditableHeaderProps {
     currentSectionIndex: number;
     onSectionChange: (index: number) => void;
     onUpdatePaperTitle?: (title: string) => Promise<{ success: boolean; error?: string }>;
+    isExpanded: boolean;
+    onToggleExpanded: () => void;
 }
 
-function EditableHeader({ paper, currentSectionIndex, onSectionChange, onUpdatePaperTitle }: EditableHeaderProps) {
+function EditableHeader({
+    paper,
+    currentSectionIndex,
+    onSectionChange,
+    onUpdatePaperTitle,
+    isExpanded,
+    onToggleExpanded,
+}: EditableHeaderProps) {
     const router = useRouter();
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [titleDraft, setTitleDraft] = useState(paper.title);
@@ -125,7 +209,7 @@ function EditableHeader({ paper, currentSectionIndex, onSectionChange, onUpdateP
 
     return (
         <header className="sticky top-0 z-50 bg-gradient-to-r from-exam-header-from to-exam-header-to text-white shadow-md">
-            <div className="max-w-screen-2xl mx-auto px-4 py-3">
+            <div className={isExpanded ? 'px-4 py-3' : 'max-w-screen-2xl mx-auto px-4 py-3'}>
                 <div className="flex items-center justify-between">
                     {/* Left - Back Button + Paper Info */}
                     <div className="flex items-center gap-4">
@@ -254,6 +338,13 @@ function EditableHeader({ paper, currentSectionIndex, onSectionChange, onUpdateP
 
                     {/* Right - Quick Links + Exit Button */}
                     <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={onToggleExpanded}
+                            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-md transition-colors"
+                        >
+                            {isExpanded ? 'Exit Fullscreen' : 'Expand Editor'}
+                        </button>
                         <Link
                             href={`/admin/papers/${paper.id}/questions`}
                             className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold rounded-md transition-colors"
@@ -957,6 +1048,7 @@ function EditableContextPane({
 interface EditableQuestionAreaProps {
     question: Partial<QuestionWithAnswer> | null;
     questionNumber: number;
+    displayQuestionNumber: number;
     totalQuestions: number;
     section: SectionName;
     paperId: string;
@@ -964,11 +1056,13 @@ interface EditableQuestionAreaProps {
     selectedSetId: string | null;
     selectedContextId: string | null;
     isSaving: boolean;
+    onSolutionPreviewChange?: (preview: { textbook: string; toppers: string }) => void;
 }
 
 function EditableQuestionArea({
     question,
     questionNumber,
+    displayQuestionNumber,
     totalQuestions,
     section,
     paperId,
@@ -976,6 +1070,7 @@ function EditableQuestionArea({
     selectedSetId,
     selectedContextId,
     isSaving,
+    onSolutionPreviewChange,
 }: EditableQuestionAreaProps) {
     const [questionText, setQuestionText] = useState(question?.question_text ?? '');
     const [questionType, setQuestionType] = useState<QuestionType>(question?.question_type ?? 'MCQ');
@@ -986,10 +1081,16 @@ function EditableQuestionArea({
     const [positiveMarks, setPositiveMarks] = useState(question?.positive_marks ?? 3);
     const [negativeMarks, setNegativeMarks] = useState(question?.negative_marks ?? 1);
     const [solutionText, setSolutionText] = useState(question?.solution_text ?? '');
+    const [toppersApproach, setToppersApproach] = useState(question?.toppers_approach ?? '');
     const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const questionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
     const solutionTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const toppersTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const topicListId = useId();
+    const subtopicListId = useId();
+    const [isTextbookExpanded, setIsTextbookExpanded] = useState(false);
+    const [isToppersExpanded, setIsToppersExpanded] = useState(false);
     const [topic, setTopic] = useState(question?.topic ?? '');
     const [subtopic, setSubtopic] = useState(question?.subtopic ?? '');
 
@@ -1005,9 +1106,12 @@ function EditableQuestionArea({
             setPositiveMarks(3);
             setNegativeMarks(1);
             setSolutionText('');
+            setToppersApproach('');
             setImageUrl(null);
             setTopic('');
             setSubtopic('');
+            setIsTextbookExpanded(false);
+            setIsToppersExpanded(false);
             return;
         }
 
@@ -1019,8 +1123,11 @@ function EditableQuestionArea({
         setNegativeMarks(question.negative_marks ?? 1);
         setImageUrl(question.question_image_url ?? null);
         setSolutionText(question.solution_text ?? '');
+        setToppersApproach(question.toppers_approach ?? '');
         setTopic(question.topic ?? '');
         setSubtopic(question.subtopic ?? '');
+        setIsTextbookExpanded(false);
+        setIsToppersExpanded(false);
     }, [question?.id]);
 
     useEffect(() => {
@@ -1029,6 +1136,13 @@ function EditableQuestionArea({
         textarea.style.height = 'auto';
         textarea.style.height = `${textarea.scrollHeight}px`;
     }, [questionText]);
+
+    useEffect(() => {
+        onSolutionPreviewChange?.({
+            textbook: solutionText,
+            toppers: toppersApproach,
+        });
+    }, [onSolutionPreviewChange, solutionText, toppersApproach]);
 
     const handleOptionChange = useCallback((index: number, value: string) => {
         setOptions((prev) => {
@@ -1057,7 +1171,7 @@ function EditableQuestionArea({
             id: question?.id,
             paper_id: paperId,
             section,
-            question_number: questionNumber,
+            question_number: displayQuestionNumber,
             question_text: questionText,
             question_type: questionType,
             options: questionType === 'MCQ' ? options : null,
@@ -1065,6 +1179,7 @@ function EditableQuestionArea({
             positive_marks: positiveMarks,
             negative_marks: questionType === 'TITA' ? 0 : negativeMarks,
             solution_text: solutionText || undefined,
+            toppers_approach: toppersApproach || undefined,
             question_image_url: imageUrl || undefined,
             topic: topic || undefined,
             subtopic: subtopic || undefined,
@@ -1078,7 +1193,7 @@ function EditableQuestionArea({
         question,
         paperId,
         section,
-        questionNumber,
+        displayQuestionNumber,
         questionText,
         questionType,
         options,
@@ -1086,6 +1201,7 @@ function EditableQuestionArea({
         positiveMarks,
         negativeMarks,
         solutionText,
+        toppersApproach,
         imageUrl,
         topic,
         subtopic,
@@ -1101,8 +1217,9 @@ function EditableQuestionArea({
                     <div>
                         <span className="text-sm text-gray-500">{section}</span>
                         <h2 className="text-lg font-semibold text-gray-800">
-                            Question {questionNumber} of {totalQuestions}
+                            Question {displayQuestionNumber} of {SECTION_TOTALS.VARC + SECTION_TOTALS.DILR + SECTION_TOTALS.QA}
                         </h2>
+                        <p className="text-xs text-gray-500 mt-1">Section position: {questionNumber} of {totalQuestions}</p>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -1194,10 +1311,19 @@ function EditableQuestionArea({
                     </div>
                 )}
 
-                <details className="mt-6">
+                <details className="mt-6" open={Boolean(solutionText)}>
                     <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-800">
-                        Solution (Optional)
+                        Textbook Solution (Optional)
                     </summary>
+                    <div className="mt-3 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={() => setIsTextbookExpanded((prev) => !prev)}
+                            className="text-xs font-semibold text-blue-600 hover:underline"
+                        >
+                            {isTextbookExpanded ? 'Collapse editor' : 'Expand editor'}
+                        </button>
+                    </div>
                     <MarkdownToolbar
                         textareaRef={solutionTextareaRef}
                         value={solutionText}
@@ -1208,9 +1334,40 @@ function EditableQuestionArea({
                         ref={solutionTextareaRef}
                         value={solutionText}
                         onChange={(e) => setSolutionText(e.target.value)}
-                        placeholder="Enter solution explanation..."
-                        rows={3}
-                        className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                        onPaste={(event) => handlePlainTextPaste(event, setSolutionText)}
+                        placeholder="Enter textbook solution..."
+                        rows={isTextbookExpanded ? 16 : 4}
+                        className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y"
+                    />
+                </details>
+
+                <details className="mt-4" open={Boolean(toppersApproach)}>
+                    <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-gray-800">
+                        Toppers Approach (Optional)
+                    </summary>
+                    <div className="mt-3 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={() => setIsToppersExpanded((prev) => !prev)}
+                            className="text-xs font-semibold text-blue-600 hover:underline"
+                        >
+                            {isToppersExpanded ? 'Collapse editor' : 'Expand editor'}
+                        </button>
+                    </div>
+                    <MarkdownToolbar
+                        textareaRef={toppersTextareaRef}
+                        value={toppersApproach}
+                        onChange={setToppersApproach}
+                        className="mt-3"
+                    />
+                    <textarea
+                        ref={toppersTextareaRef}
+                        value={toppersApproach}
+                        onChange={(e) => setToppersApproach(e.target.value)}
+                        onPaste={(event) => handlePlainTextPaste(event, setToppersApproach)}
+                        placeholder="Enter topper's solving strategy..."
+                        rows={isToppersExpanded ? 16 : 4}
+                        className="mt-3 w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-y"
                     />
                 </details>
 
@@ -1219,7 +1376,9 @@ function EditableQuestionArea({
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             Topic
                         </label>
-                        <select
+                        <input
+                            type="text"
+                            list={topicListId}
                             value={topic}
                             onChange={(e) => {
                                 const nextTopic = e.target.value;
@@ -1228,32 +1387,34 @@ function EditableQuestionArea({
                                     setSubtopic('');
                                 }
                             }}
+                            placeholder="Select or type a topic"
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                        >
-                            <option value="">— Select Topic —</option>
+                        />
+                        <datalist id={topicListId}>
                             {topicOptions.map((option) => (
-                                <option key={option} value={option}>
-                                    {option}
-                                </option>
+                                <option key={option} value={option} />
                             ))}
-                        </select>
+                        </datalist>
+                        <p className="mt-1 text-xs text-gray-500">Choose an existing topic or type a new one.</p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                             Subtopic
                         </label>
-                        <select
+                        <input
+                            type="text"
+                            list={subtopicListId}
                             value={subtopic}
                             onChange={(e) => setSubtopic(e.target.value)}
+                            placeholder="Select or type a subtopic"
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
-                        >
-                            <option value="">— Select Subtopic —</option>
+                        />
+                        <datalist id={subtopicListId}>
                             {subtopicOptions.map((option) => (
-                                <option key={option} value={option}>
-                                    {option}
-                                </option>
+                                <option key={option} value={option} />
                             ))}
-                        </select>
+                        </datalist>
+                        <p className="mt-1 text-xs text-gray-500">Use this to add or fix subtopic spellings.</p>
                     </div>
                 </div>
 
@@ -1315,6 +1476,9 @@ function EditablePalette({ questions, section, currentIndex, onSelect, onAddNew 
                 {Array.from({ length: expectedCount }, (_, i) => {
                     const q = sectionQuestions[i];
                     const hasContent = q && q.question_text?.trim();
+                    const label = q
+                        ? getDisplayQuestionNumber(section, q.question_number, i)
+                        : SECTION_NUMBER_OFFSETS[section] + i + 1;
 
                     return (
                         <button
@@ -1330,7 +1494,7 @@ function EditablePalette({ questions, section, currentIndex, onSelect, onAddNew 
                                 }
                             `}
                         >
-                            {i + 1}
+                            {label}
                         </button>
                     );
                 })}
@@ -1375,14 +1539,27 @@ export function EditableExamLayout({
     onSaveContext,
     onDeleteContext,
     onUpdatePaperTitle,
+    onBulkRenameTaxonomy,
     initialNavigation,
     onNavigate,
 }: EditableExamLayoutProps) {
     const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [isSaving, setIsSaving] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
     const [selectedSetId, setSelectedSetId] = useState<string | null>(null);
     const [selectedContextId, setSelectedContextId] = useState<string | null>(null);
+    const [renameFromTopic, setRenameFromTopic] = useState('');
+    const [renameToTopic, setRenameToTopic] = useState('');
+    const [renameFromSubtopic, setRenameFromSubtopic] = useState('');
+    const [renameToSubtopic, setRenameToSubtopic] = useState('');
+    const [isRenamingTaxonomy, setIsRenamingTaxonomy] = useState(false);
+    const [taxonomyStatus, setTaxonomyStatus] = useState<string | null>(null);
+    const [taxonomyError, setTaxonomyError] = useState<string | null>(null);
+    const [sidebarTextbookPreview, setSidebarTextbookPreview] = useState('');
+    const [sidebarToppersPreview, setSidebarToppersPreview] = useState('');
+    const renameTopicListId = useId();
+    const renameSubtopicListId = useId();
     const appliedNavKeyRef = useRef<string | null>(null);
 
     const currentSection = SECTIONS[currentSectionIndex];
@@ -1391,9 +1568,45 @@ export function EditableExamLayout({
         () => questions.filter((q) => q.section === currentSection),
         [questions, currentSection]
     );
+    const sectionTopics = useMemo(
+        () =>
+            Array.from(
+                new Set(
+                    sectionQuestions
+                        .map((q) => (q.topic ?? '').trim())
+                        .filter((value) => value.length > 0)
+                )
+            ).sort((a, b) => a.localeCompare(b)),
+        [sectionQuestions]
+    );
+    const sectionSubtopics = useMemo(
+        () =>
+            Array.from(
+                new Set(
+                    sectionQuestions
+                        .map((q) => (q.subtopic ?? '').trim())
+                        .filter((value) => value.length > 0)
+                )
+            ).sort((a, b) => a.localeCompare(b)),
+        [sectionQuestions]
+    );
+    const sectionSubtopicsForFromTopic = useMemo(() => {
+        if (!renameFromTopic.trim()) {
+            return sectionSubtopics;
+        }
+        return Array.from(
+            new Set(
+                sectionQuestions
+                    .filter((q) => (q.topic ?? '').trim() === renameFromTopic.trim())
+                    .map((q) => (q.subtopic ?? '').trim())
+                    .filter((value) => value.length > 0)
+            )
+        ).sort((a, b) => a.localeCompare(b));
+    }, [renameFromTopic, sectionQuestions, sectionSubtopics]);
 
     const currentQuestion = sectionQuestions[currentQuestionIndex] ?? null;
     const totalExpected = SECTION_TOTALS[currentSection];
+    const currentDisplayQuestionNumber = SECTION_NUMBER_OFFSETS[currentSection] + currentQuestionIndex + 1;
 
     const currentSet = selectedSetId ? questionSets.find((set) => set.id === selectedSetId) ?? null : null;
     const useSetStimulus = Boolean(currentSet);
@@ -1413,6 +1626,46 @@ export function EditableExamLayout({
         if (currentQuestion?.set_id) setSelectedSetId(currentQuestion.set_id);
         setSelectedContextId(currentQuestion?.context_id ?? null);
     }, [currentQuestion?.id, currentQuestion?.set_id, currentQuestion?.context_id]);
+
+    useEffect(() => {
+        setSidebarTextbookPreview(currentQuestion?.solution_text ?? '');
+        setSidebarToppersPreview(currentQuestion?.toppers_approach ?? '');
+    }, [currentQuestion?.id, currentQuestion?.solution_text, currentQuestion?.toppers_approach]);
+
+    useEffect(() => {
+        setRenameFromTopic('');
+        setRenameToTopic('');
+        setRenameFromSubtopic('');
+        setRenameToSubtopic('');
+        setTaxonomyStatus(null);
+        setTaxonomyError(null);
+    }, [currentSection]);
+
+    useEffect(() => {
+        if (!renameFromTopic) return;
+        if (!sectionTopics.includes(renameFromTopic)) {
+            setRenameFromTopic('');
+        }
+    }, [renameFromTopic, sectionTopics]);
+
+    useEffect(() => {
+        if (!renameFromSubtopic) return;
+        if (!sectionSubtopicsForFromTopic.includes(renameFromSubtopic)) {
+            setRenameFromSubtopic('');
+        }
+    }, [renameFromSubtopic, sectionSubtopicsForFromTopic]);
+
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        if (isExpanded) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+        return () => {
+            document.body.style.overflow = '';
+        };
+    }, [isExpanded]);
 
     useEffect(() => {
         if (!initialNavigation) return;
@@ -1535,6 +1788,55 @@ export function EditableExamLayout({
         [onSaveContext]
     );
 
+    const handleApplyTaxonomyRename = useCallback(async () => {
+        if (!onBulkRenameTaxonomy || isRenamingTaxonomy) return;
+
+        const fromTopic = renameFromTopic.trim();
+        const toTopic = renameToTopic.trim();
+        const fromSubtopic = renameFromSubtopic.trim();
+        const toSubtopic = renameToSubtopic.trim();
+
+        const shouldRenameTopic = fromTopic.length > 0 && toTopic.length > 0 && fromTopic !== toTopic;
+        const shouldRenameSubtopic = fromSubtopic.length > 0 && toSubtopic.length > 0 && fromSubtopic !== toSubtopic;
+
+        if (!shouldRenameTopic && !shouldRenameSubtopic) {
+            setTaxonomyError('Enter valid source and target values for topic and/or subtopic.');
+            setTaxonomyStatus(null);
+            return;
+        }
+
+        setIsRenamingTaxonomy(true);
+        setTaxonomyError(null);
+        setTaxonomyStatus(null);
+
+        try {
+            await onBulkRenameTaxonomy({
+                section: currentSection,
+                fromTopic: shouldRenameTopic ? fromTopic : undefined,
+                toTopic: shouldRenameTopic ? toTopic : undefined,
+                fromSubtopic: shouldRenameSubtopic ? fromSubtopic : undefined,
+                toSubtopic: shouldRenameSubtopic ? toSubtopic : undefined,
+            });
+            setTaxonomyStatus('Taxonomy values updated for this section.');
+            setRenameFromTopic('');
+            setRenameToTopic('');
+            setRenameFromSubtopic('');
+            setRenameToSubtopic('');
+        } catch (error) {
+            setTaxonomyError(error instanceof Error ? error.message : 'Failed to rename taxonomy values.');
+        } finally {
+            setIsRenamingTaxonomy(false);
+        }
+    }, [
+        onBulkRenameTaxonomy,
+        isRenamingTaxonomy,
+        renameFromTopic,
+        renameToTopic,
+        renameFromSubtopic,
+        renameToSubtopic,
+        currentSection,
+    ]);
+
     const handleCreateSet = useCallback(
         async (setType: QuestionSet['set_type']) => {
             const sectionSets = questionSets.filter((set) => set.section === currentSection);
@@ -1582,8 +1884,12 @@ export function EditableExamLayout({
             targetSetId = created.id;
         }
 
-        const nextQuestionNumber =
-            sectionQuestions.reduce((max, q) => Math.max(max, q.question_number ?? 0), 0) + 1;
+        const sectionBase = SECTION_NUMBER_OFFSETS[currentSection];
+        const maxQuestionNumberInSection = sectionQuestions.reduce((max, q, index) => {
+            const displayNumber = getDisplayQuestionNumber(currentSection, q.question_number, index);
+            return Math.max(max, displayNumber);
+        }, sectionBase);
+        const nextQuestionNumber = maxQuestionNumberInSection + 1;
 
         const setQuestions = questions.filter((q) => q.set_id === targetSetId);
         const nextSequence = setQuestions.reduce((max, q) => Math.max(max, q.sequence_order ?? 0), 0) + 1;
@@ -1646,6 +1952,11 @@ export function EditableExamLayout({
         [currentSectionIndex, currentQuestionIndex, emitNavigation]
     );
 
+    const handleSolutionPreviewChange = useCallback((preview: { textbook: string; toppers: string }) => {
+        setSidebarTextbookPreview(preview.textbook);
+        setSidebarToppersPreview(preview.toppers);
+    }, []);
+
     return (
         <div className="min-h-screen bg-[#f5f7fa] flex flex-col">
             <EditableHeader
@@ -1653,10 +1964,12 @@ export function EditableExamLayout({
                 currentSectionIndex={currentSectionIndex}
                 onSectionChange={handleSectionChange}
                 onUpdatePaperTitle={onUpdatePaperTitle}
+                isExpanded={isExpanded}
+                onToggleExpanded={() => setIsExpanded((prev) => !prev)}
             />
 
-            <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 py-6">
-                <div className="grid grid-cols-1 lg:grid-cols-[48%_33%_19%] gap-6 lg:gap-0 min-h-[calc(100vh-220px)]">
+            <main className={`flex-1 w-full ${isExpanded ? 'px-0 py-0' : 'max-w-screen-2xl mx-auto px-4 py-6'}`}>
+                <div className={`grid grid-cols-1 lg:grid-cols-[48%_33%_19%] ${isExpanded ? 'gap-0 min-h-[calc(100vh-72px)]' : 'gap-6 lg:gap-0 min-h-[calc(100vh-220px)]'}`}>
                     {showContextColumn && (
                         <div className="border border-gray-200 bg-gray-50 min-h-0 lg:border-r-0">
                             {useSetStimulus ? (
@@ -1692,6 +2005,7 @@ export function EditableExamLayout({
                         <EditableQuestionArea
                             question={currentQuestion}
                             questionNumber={currentQuestionIndex + 1}
+                            displayQuestionNumber={currentDisplayQuestionNumber}
                             totalQuestions={totalExpected}
                             section={currentSection}
                             paperId={paper.id}
@@ -1699,6 +2013,7 @@ export function EditableExamLayout({
                             selectedContextId={selectedContextId}
                             onSave={handleSave}
                             isSaving={isSaving}
+                            onSolutionPreviewChange={handleSolutionPreviewChange}
                         />
                     </div>
 
@@ -1738,6 +2053,122 @@ export function EditableExamLayout({
                                     })}
                                 </div>
                             </div>
+
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 space-y-3">
+                                <h3 className="font-semibold text-gray-800">Live Solution Preview</h3>
+                                <p className="text-xs text-gray-500">
+                                    Preview updates as you type in the editor.
+                                </p>
+                                {!sidebarTextbookPreview.trim() && !sidebarToppersPreview.trim() ? (
+                                    <p className="text-xs text-gray-400">No solution content yet for this question.</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {sidebarTextbookPreview.trim() && (
+                                            <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+                                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                                                    Textbook Solution
+                                                </p>
+                                                <div className="max-h-56 overflow-y-auto pr-1 prose prose-sm max-w-none text-slate-700">
+                                                    <MathText text={sidebarTextbookPreview} strictText />
+                                                </div>
+                                            </div>
+                                        )}
+                                        {sidebarToppersPreview.trim() && (
+                                            <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3">
+                                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                    Toppers Approach
+                                                </p>
+                                                <div className="max-h-56 overflow-y-auto pr-1 prose prose-sm max-w-none text-slate-700">
+                                                    <MathText text={sidebarToppersPreview} strictText />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {onBulkRenameTaxonomy && (
+                                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 space-y-3">
+                                    <h3 className="font-semibold text-gray-800">Normalize Topics</h3>
+                                    <p className="text-xs text-gray-500">
+                                        Bulk rename topic/subtopic spellings for {currentSection} to keep analytics clean.
+                                    </p>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-600 mb-1">Source Topic</label>
+                                        <select
+                                            value={renameFromTopic}
+                                            onChange={(e) => setRenameFromTopic(e.target.value)}
+                                            className="w-full px-2.5 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                                        >
+                                            <option value="">Select source topic</option>
+                                            {sectionTopics.map((topicOption) => (
+                                                <option key={topicOption} value={topicOption}>
+                                                    {topicOption}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-600 mb-1">Target Topic</label>
+                                        <input
+                                            type="text"
+                                            list={renameTopicListId}
+                                            value={renameToTopic}
+                                            onChange={(e) => setRenameToTopic(e.target.value)}
+                                            placeholder="Type replacement topic"
+                                            className="w-full px-2.5 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                        />
+                                        <datalist id={renameTopicListId}>
+                                            {sectionTopics.map((topicOption) => (
+                                                <option key={topicOption} value={topicOption} />
+                                            ))}
+                                        </datalist>
+                                    </div>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-gray-600 mb-1">Source Subtopic (optional)</label>
+                                            <select
+                                                value={renameFromSubtopic}
+                                                onChange={(e) => setRenameFromSubtopic(e.target.value)}
+                                                className="w-full px-2.5 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+                                            >
+                                                <option value="">Select source subtopic</option>
+                                                {sectionSubtopicsForFromTopic.map((subtopicOption) => (
+                                                    <option key={subtopicOption} value={subtopicOption}>
+                                                        {subtopicOption}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-gray-600 mb-1">Target Subtopic (optional)</label>
+                                            <input
+                                                type="text"
+                                                list={renameSubtopicListId}
+                                                value={renameToSubtopic}
+                                                onChange={(e) => setRenameToSubtopic(e.target.value)}
+                                                placeholder="Type replacement subtopic"
+                                                className="w-full px-2.5 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                            />
+                                            <datalist id={renameSubtopicListId}>
+                                                {sectionSubtopics.map((subtopicOption) => (
+                                                    <option key={subtopicOption} value={subtopicOption} />
+                                                ))}
+                                            </datalist>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleApplyTaxonomyRename}
+                                        disabled={isRenamingTaxonomy}
+                                        className="w-full px-3 py-2 bg-blue-600 text-white text-sm font-semibold rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        {isRenamingTaxonomy ? 'Applying...' : 'Apply Rename'}
+                                    </button>
+                                    {taxonomyStatus && <p className="text-xs text-emerald-700">{taxonomyStatus}</p>}
+                                    {taxonomyError && <p className="text-xs text-rose-700">{taxonomyError}</p>}
+                                </div>
+                            )}
 
                             <EditablePalette
                                 questions={questions}

@@ -8,11 +8,13 @@
 import { BlockMath, InlineMath } from 'react-katex';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import rehypeRaw from 'rehype-raw';
 
 interface MathTextProps {
     text?: string | null;
     className?: string;
+    strictText?: boolean;
 }
 
 const MATH_PATTERN = /(\$\$[\s\S]+?\$\$|\$[^$]+\$)/g;
@@ -254,19 +256,43 @@ function formatParaJumbleText(rawText: string): string {
     return rawText;
 }
 
-export function MathText({ text, className }: MathTextProps) {
+/**
+ * Normalize AI/editor pasted payloads:
+ * - unify CRLF/CR to LF
+ * - decode literal escaped newlines/tabs when the whole payload is likely escaped JSON text
+ */
+function normalizePastedText(rawText: string): string {
+    let normalized = rawText.replace(/\r\n?/g, '\n').replace(/\u200B/g, '');
+    const hasActualNewlines = normalized.includes('\n');
+    const escapedNewlineMatches = normalized.match(/\\n/g) ?? [];
+
+    if (!hasActualNewlines && escapedNewlineMatches.length >= 2) {
+        normalized = normalized
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '    ');
+    }
+
+    return normalized;
+}
+
+export function MathText({ text, className, strictText = false }: MathTextProps) {
     if (text === null || text === undefined || text === '') {
         return null;
     }
 
-    // Format para jumble questions with numbered sentences
-    const formattedText = formatParaJumbleText(String(text));
+    const normalizedInput = normalizePastedText(String(text));
 
-    const compactedText = formattedText
-        // Prevent accidental large visual gaps from excessive blank lines in content payloads.
-        .replace(/\n{3,}/g, '\n\n')
-        // Collapse blank lines immediately before Markdown tables so they render tight.
-        .replace(/\n{2,}(?=\|)/g, '\n');
+    // Keep editor text strict and unmodified when requested.
+    const formattedText = strictText ? normalizedInput : formatParaJumbleText(normalizedInput);
+
+    const compactedText = strictText
+        ? formattedText
+        : formattedText
+            // Prevent accidental large visual gaps from excessive blank lines in content payloads.
+            .replace(/\n{3,}/g, '\n\n')
+            // Collapse blank lines immediately before Markdown tables so they render tight.
+            .replace(/\n{2,}(?=\s*\|)/g, '\n');
 
     const normalizedText = compactedText
         .replace(/\\\[((?:.|\n)+?)\\\]/g, (_match, math) => `$$${math}$$`)
@@ -275,7 +301,7 @@ export function MathText({ text, className }: MathTextProps) {
     const parts = normalizedText.split(MATH_PATTERN).filter(Boolean);
 
     return (
-        <div className={`prose prose-sm max-w-none ${className ?? ''}`}>
+        <div className={`prose prose-sm max-w-none [&_p]:my-1 [&_table]:my-1 ${className ?? ''}`}>
             {parts.map((part, index) => {
                 if ((part.startsWith('$$') && part.endsWith('$$')) || (part.startsWith('$') && part.endsWith('$'))) {
                     return renderMath(part, index);
@@ -284,10 +310,14 @@ export function MathText({ text, className }: MathTextProps) {
                 return (
                     <ReactMarkdown
                         key={index}
-                        remarkPlugins={[remarkGfm]}
+                        remarkPlugins={[remarkGfm, remarkBreaks]}
                         rehypePlugins={[rehypeRaw]}
                         components={{
-                            p: ({ children }) => <div className="whitespace-pre-wrap">{children}</div>,
+                            p: ({ children }) => (
+                                <div className={strictText ? 'leading-relaxed whitespace-pre-wrap' : 'leading-relaxed'}>
+                                    {children}
+                                </div>
+                            ),
                             ol: ({ children, ...props }) => (
                                 <ol
                                     {...props}
@@ -305,7 +335,7 @@ export function MathText({ text, className }: MathTextProps) {
                                 </ul>
                             ),
                             li: ({ children, ...props }) => (
-                                <li {...props} className="leading-relaxed">
+                                <li {...props} className={strictText ? 'leading-relaxed whitespace-pre-wrap' : 'leading-relaxed'}>
                                     {children}
                                 </li>
                             ),

@@ -304,4 +304,3 @@ export function DevToolsPanel({ onTriggerSubmit }: DevToolsPanelProps) {
     );
 }
 
-export default DevToolsPanel;

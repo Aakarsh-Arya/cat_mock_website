@@ -27,10 +27,12 @@ interface QuestionPaletteProps {
     className?: string;
     /** Callback when a question is clicked */
     onQuestionClick?: (questionId: string, index: number) => void;
+    /** Optional global question numbering map */
+    questionNumberById?: Map<string, number>;
 }
 
 interface QuestionButtonProps {
-    index: number;
+    questionNumber: number;
     status: QuestionStatus;
     isCurrent: boolean;
     onClick: () => void;
@@ -112,7 +114,7 @@ function getStatusStyles(status: QuestionStatus, isCurrent: boolean) {
 // QUESTION BUTTON
 // =============================================================================
 
-function QuestionButton({ index, status, isCurrent, onClick, disabled = false, isLocked = false }: QuestionButtonProps) {
+function QuestionButton({ questionNumber, status, isCurrent, onClick, disabled = false, isLocked = false }: QuestionButtonProps) {
     const styles = getStatusStyles(status, isCurrent);
     const isMarkedForReview = status === 'answered_marked' || status === 'marked';
     const isAttemptedAndMarked = status === 'answered_marked';
@@ -126,7 +128,7 @@ function QuestionButton({ index, status, isCurrent, onClick, disabled = false, i
                     : 'Not Visited';
     const markedLabel = isMarkedForReview ? ', Marked for review' : '';
     const lockedLabel = isLocked ? ', Locked' : '';
-    const ariaLabel = `Question ${index + 1}, ${statusLabel}${markedLabel}${isCurrent ? ', current' : ''}${lockedLabel}`;
+    const ariaLabel = `Question ${questionNumber}, ${statusLabel}${markedLabel}${isCurrent ? ', current' : ''}${lockedLabel}`;
 
     return (
         <button
@@ -134,13 +136,13 @@ function QuestionButton({ index, status, isCurrent, onClick, disabled = false, i
             onClick={onClick}
             className={`${styles.className} ${styles.shapeClass} relative ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
             style={styles.clipPath ? { clipPath: styles.clipPath } : undefined}
-            title={`Question ${index + 1}: ${styles.label}`}
+            title={`Question ${questionNumber}: ${styles.label}`}
             aria-label={ariaLabel}
             aria-current={isCurrent ? 'true' : undefined}
             aria-disabled={disabled ? 'true' : undefined}
             disabled={disabled}
         >
-            {index + 1}
+            {questionNumber}
             {isAttemptedAndMarked && (
                 <span className="absolute -bottom-1 -right-1 w-3 h-3 bg-[#2E7D32] rounded-full border border-white flex items-center justify-center">
                     <svg className="w-2 h-2 text-white" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -258,7 +260,8 @@ export function QuestionPalette({
     candidateName = 'Candidate',
     candidatePhotoUrl,
     className = '',
-    onQuestionClick
+    onQuestionClick,
+    questionNumberById,
 }: QuestionPaletteProps) {
     const currentSection = useExamStore(selectCurrentSection);
     const currentQuestionIndex = useExamStore((s) => s.currentQuestionIndex);
@@ -308,7 +311,7 @@ export function QuestionPalette({
                     return (
                         <QuestionButton
                             key={question.id}
-                            index={index}
+                            questionNumber={questionNumberById?.get(question.id) ?? (index + 1)}
                             status={status}
                             isCurrent={isCurrent}
                             disabled={isLocked}

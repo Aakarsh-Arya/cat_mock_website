@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ClipboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { sb } from '@/lib/supabase/client';
 import { adminLogger } from '@/lib/logger';
@@ -21,6 +21,45 @@ interface Context {
     title: string;
     section: string;
     paper_id: string;
+}
+
+function handlePlainTextPaste(
+    event: ClipboardEvent<HTMLTextAreaElement>,
+    onChange: (next: string) => void
+) {
+    event.preventDefault();
+    const plainText = event.clipboardData.getData('text/plain');
+    const htmlText = event.clipboardData.getData('text/html');
+    let pastedText = plainText;
+
+    const plainHasLineBreaks = /[\r\n]/.test(plainText);
+    const htmlHasStructuredBreaks = /<(br|p|div|li|h[1-6]|tr|blockquote|pre)\b/i.test(htmlText);
+
+    if (!plainHasLineBreaks && htmlHasStructuredBreaks && typeof DOMParser !== 'undefined') {
+        try {
+            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+            doc.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
+            doc.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,tr,blockquote,pre').forEach((node) => {
+                node.append('\n');
+            });
+            pastedText = (doc.body.textContent ?? plainText).replace(/\r\n?/g, '\n');
+        } catch {
+            pastedText = plainText;
+        }
+    }
+
+    const target = event.currentTarget;
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    const nextValue = `${target.value.slice(0, start)}${pastedText}${target.value.slice(end)}`;
+
+    onChange(nextValue);
+
+    const nextCursor = start + pastedText.length;
+    requestAnimationFrame(() => {
+        target.focus();
+        target.setSelectionRange(nextCursor, nextCursor);
+    });
 }
 
 export default function NewQuestionPage() {
@@ -399,6 +438,11 @@ export default function NewQuestionPage() {
                         name="solution_text"
                         value={formData.solution_text}
                         onChange={handleChange}
+                        onPaste={(event) =>
+                            handlePlainTextPaste(event, (nextValue) =>
+                                setFormData((prev) => ({ ...prev, solution_text: nextValue }))
+                            )
+                        }
                         rows={4}
                         placeholder="Explain the solution..."
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"

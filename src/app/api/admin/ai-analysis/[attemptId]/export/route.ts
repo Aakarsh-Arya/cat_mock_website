@@ -11,6 +11,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { getServiceRoleClient } from '@/lib/supabase/service-role';
 import { generateCompositeContextPacket } from '@/lib/analysis/generateCompositeContextPacket';
+import { sanitizeAiAnalysisExport } from '@/lib/analysis/sanitizeAiAnalysisExport';
 
 // ─── Auth helpers (mirrored from paper export route) ─────────────────────────
 
@@ -133,6 +134,8 @@ export async function GET(
             console.warn(`[AI Analysis Export] ${validationWarnings.length} schema validation warning(s) for attempt ${attemptId}:`, validationWarnings);
         }
 
+        const sanitizedPacket = sanitizeAiAnalysisExport(packet);
+
         const { data: currentAttempt } = await admin
             .from('attempts')
             .select('*')
@@ -156,10 +159,10 @@ export async function GET(
             .eq('id', attemptId);
 
         // Build filename
-        const slug = (packet.paper as Record<string, unknown>).slug || (packet.paper as Record<string, unknown>).id || packet.meta.paper_id;
+        const slug = (sanitizedPacket.paper as Record<string, unknown>).slug || (sanitizedPacket.paper as Record<string, unknown>).id || sanitizedPacket.meta.paper_id;
         const filename = `analysis_${slug}_${attemptId.slice(0, 8)}.json`;
 
-        const jsonString = JSON.stringify(packet, null, 2);
+        const jsonString = JSON.stringify(sanitizedPacket, null, 2);
 
         return new NextResponse(jsonString, {
             status: 200,

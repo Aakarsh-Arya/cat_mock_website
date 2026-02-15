@@ -10,7 +10,33 @@ import 'server-only';
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import type { QuestionWithAnswer, QuestionContext, Paper, QuestionSet } from '@/types/exam';
+import type { QuestionWithAnswer, QuestionContext, Paper, QuestionSet, SectionName } from '@/types/exam';
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    return value === '' ? null : value;
+}
+
+function normalizeToppersApproach(
+    solutionText: string | null | undefined,
+    toppersApproach: string | null | undefined
+): string | null {
+    const normalizedSolution = normalizeOptionalText(solutionText);
+    const normalizedToppers = normalizeOptionalText(toppersApproach);
+
+    if (!normalizedToppers) {
+        return null;
+    }
+
+    // Guard against duplicated content when the same text is pasted in both fields.
+    if (normalizedSolution && normalizedSolution === normalizedToppers) {
+        return null;
+    }
+
+    return normalizedToppers;
+}
 
 // Create admin client with service role key (bypasses RLS)
 function getAdminClient() {
@@ -106,33 +132,56 @@ export async function updateQuestion(
         await verifyAdmin();
         const adminClient = getAdminClient();
         const resolvedQuestionFormat = questionData.question_format ?? questionData.question_type;
+        const normalizedSolutionText = normalizeOptionalText(questionData.solution_text ?? null);
+        const normalizedToppersApproach = normalizeToppersApproach(
+            questionData.solution_text ?? null,
+            questionData.toppers_approach ?? null
+        );
+        const updatePayload = {
+            question_number: questionData.question_number,
+            question_text: questionData.question_text,
+            question_type: questionData.question_type ?? resolvedQuestionFormat,
+            question_format: resolvedQuestionFormat,
+            taxonomy_type: questionData.taxonomy_type ?? null,
+            topic_tag: questionData.topic_tag ?? null,
+            difficulty_rationale: questionData.difficulty_rationale ?? null,
+            options: questionData.options,
+            correct_answer: questionData.correct_answer,
+            positive_marks: questionData.positive_marks,
+            negative_marks: questionData.negative_marks,
+            solution_text: normalizedSolutionText,
+            toppers_approach: normalizedToppersApproach,
+            question_image_url: questionData.question_image_url ?? null,
+            topic: questionData.topic ?? null,
+            subtopic: questionData.subtopic ?? null,
+            difficulty: questionData.difficulty ?? null,
+            set_id: questionData.set_id ?? null,
+            sequence_order: questionData.sequence_order ?? null,
+            context_id: questionData.context_id ?? null,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+        };
 
-        const { data, error } = await adminClient
+        let { data, error } = await adminClient
             .from('questions')
-            .update({
-                question_text: questionData.question_text,
-                question_type: questionData.question_type ?? resolvedQuestionFormat,
-                question_format: resolvedQuestionFormat,
-                taxonomy_type: questionData.taxonomy_type ?? null,
-                topic_tag: questionData.topic_tag ?? null,
-                difficulty_rationale: questionData.difficulty_rationale ?? null,
-                options: questionData.options,
-                correct_answer: questionData.correct_answer,
-                positive_marks: questionData.positive_marks,
-                negative_marks: questionData.negative_marks,
-                solution_text: questionData.solution_text,
-                question_image_url: questionData.question_image_url,
-                topic: questionData.topic,
-                difficulty: questionData.difficulty,
-                set_id: questionData.set_id ?? null,
-                sequence_order: questionData.sequence_order ?? null,
-                context_id: questionData.context_id,
-                is_active: true,
-                updated_at: new Date().toISOString(),
-            })
+            .update(updatePayload)
             .eq('id', questionId)
             .select()
             .single();
+
+        // Migration compatibility: retry without new column when not yet applied.
+        if (error?.code === '42703') {
+            const fallbackPayload = { ...updatePayload } as Record<string, unknown>;
+            delete fallbackPayload.toppers_approach;
+            const fallback = await adminClient
+                .from('questions')
+                .update(fallbackPayload)
+                .eq('id', questionId)
+                .select()
+                .single();
+            data = fallback.data;
+            error = fallback.error;
+        }
 
         if (error) {
             console.error('Admin updateQuestion error:', error);
@@ -154,34 +203,55 @@ export async function createQuestion(
         await verifyAdmin();
         const adminClient = getAdminClient();
         const resolvedQuestionFormat = questionData.question_format ?? questionData.question_type;
+        const normalizedSolutionText = normalizeOptionalText(questionData.solution_text ?? null);
+        const normalizedToppersApproach = normalizeToppersApproach(
+            questionData.solution_text ?? null,
+            questionData.toppers_approach ?? null
+        );
+        const insertPayload = {
+            paper_id: questionData.paper_id,
+            section: questionData.section,
+            question_number: questionData.question_number,
+            question_text: questionData.question_text,
+            question_type: questionData.question_type ?? resolvedQuestionFormat,
+            question_format: resolvedQuestionFormat,
+            taxonomy_type: questionData.taxonomy_type ?? null,
+            topic_tag: questionData.topic_tag ?? null,
+            difficulty_rationale: questionData.difficulty_rationale ?? null,
+            options: questionData.options,
+            correct_answer: questionData.correct_answer,
+            positive_marks: questionData.positive_marks ?? 3,
+            negative_marks: questionData.negative_marks ?? 1,
+            solution_text: normalizedSolutionText,
+            toppers_approach: normalizedToppersApproach,
+            question_image_url: questionData.question_image_url ?? null,
+            topic: questionData.topic ?? null,
+            subtopic: questionData.subtopic ?? null,
+            difficulty: questionData.difficulty ?? null,
+            set_id: questionData.set_id ?? null,
+            sequence_order: questionData.sequence_order ?? null,
+            context_id: questionData.context_id ?? null,
+            is_active: true,
+        };
 
-        const { data, error } = await adminClient
+        let { data, error } = await adminClient
             .from('questions')
-            .insert({
-                paper_id: questionData.paper_id,
-                section: questionData.section,
-                question_number: questionData.question_number,
-                question_text: questionData.question_text,
-                question_type: questionData.question_type ?? resolvedQuestionFormat,
-                question_format: resolvedQuestionFormat,
-                taxonomy_type: questionData.taxonomy_type ?? null,
-                topic_tag: questionData.topic_tag ?? null,
-                difficulty_rationale: questionData.difficulty_rationale ?? null,
-                options: questionData.options,
-                correct_answer: questionData.correct_answer,
-                positive_marks: questionData.positive_marks ?? 3,
-                negative_marks: questionData.negative_marks ?? 1,
-                solution_text: questionData.solution_text,
-                question_image_url: questionData.question_image_url,
-                topic: questionData.topic,
-                difficulty: questionData.difficulty,
-                set_id: questionData.set_id ?? null,
-                sequence_order: questionData.sequence_order ?? null,
-                context_id: questionData.context_id,
-                is_active: true,
-            })
+            .insert(insertPayload)
             .select()
             .single();
+
+        // Migration compatibility: retry without new column when not yet applied.
+        if (error?.code === '42703') {
+            const fallbackPayload = { ...insertPayload } as Record<string, unknown>;
+            delete fallbackPayload.toppers_approach;
+            const fallback = await adminClient
+                .from('questions')
+                .insert(fallbackPayload)
+                .select()
+                .single();
+            data = fallback.data;
+            error = fallback.error;
+        }
 
         if (error) {
             console.error('Admin createQuestion error:', error);
@@ -380,10 +450,21 @@ export async function updatePaper(
         await verifyAdmin();
         const adminClient = getAdminClient();
 
-        const { error } = await adminClient
+        let { error } = await adminClient
             .from('papers')
             .update(paperData)
             .eq('id', paperId);
+
+        if (error?.code === '42703') {
+            const fallbackPayload = { ...paperData } as Record<string, unknown>;
+            delete fallbackPayload.allow_sectional_attempts;
+            delete fallbackPayload.sectional_allowed_sections;
+            const retry = await adminClient
+                .from('papers')
+                .update(fallbackPayload)
+                .eq('id', paperId);
+            error = retry.error;
+        }
 
         if (error) {
             console.error('Admin updatePaper error:', error);
@@ -394,6 +475,76 @@ export async function updatePaper(
     } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('Admin updatePaper exception:', message);
+        return { success: false, error: message };
+    }
+}
+
+export async function bulkRenameQuestionTaxonomy(input: {
+    paperId: string;
+    section?: SectionName | null;
+    fromTopic?: string | null;
+    toTopic?: string | null;
+    fromSubtopic?: string | null;
+    toSubtopic?: string | null;
+}): Promise<{ success: boolean; updatedCount?: number; error?: string }> {
+    try {
+        await verifyAdmin();
+        const adminClient = getAdminClient();
+
+        const paperId = input.paperId?.trim();
+        if (!paperId) {
+            return { success: false, error: 'Paper id is required.' };
+        }
+
+        const fromTopic = input.fromTopic?.trim() ?? '';
+        const toTopic = input.toTopic?.trim() ?? '';
+        const fromSubtopic = input.fromSubtopic?.trim() ?? '';
+        const toSubtopic = input.toSubtopic?.trim() ?? '';
+
+        const shouldRenameTopic = fromTopic.length > 0 && toTopic.length > 0 && fromTopic !== toTopic;
+        const shouldRenameSubtopic = fromSubtopic.length > 0 && toSubtopic.length > 0 && fromSubtopic !== toSubtopic;
+
+        if (!shouldRenameTopic && !shouldRenameSubtopic) {
+            return {
+                success: false,
+                error: 'Provide valid source and target values for topic and/or subtopic.',
+            };
+        }
+
+        const updatePayload: Record<string, unknown> = {
+            updated_at: new Date().toISOString(),
+        };
+        if (shouldRenameTopic) {
+            updatePayload.topic = toTopic;
+        }
+        if (shouldRenameSubtopic) {
+            updatePayload.subtopic = toSubtopic;
+        }
+
+        let query = adminClient
+            .from('questions')
+            .update(updatePayload)
+            .eq('paper_id', paperId)
+            .eq('is_active', true);
+
+        if (input.section) {
+            query = query.eq('section', input.section);
+        }
+        if (shouldRenameTopic) {
+            query = query.eq('topic', fromTopic);
+        }
+        if (shouldRenameSubtopic) {
+            query = query.eq('subtopic', fromSubtopic);
+        }
+
+        const { data, error } = await query.select('id');
+        if (error) {
+            return { success: false, error: error.message || 'Failed to rename taxonomy values' };
+        }
+
+        return { success: true, updatedCount: Array.isArray(data) ? data.length : 0 };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
         return { success: false, error: message };
     }
 }

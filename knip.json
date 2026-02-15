@@ -4,7 +4,6 @@
         "tsconfig.json"
     ],
     "entry": [
-        "middleware.ts",
         "src/app/**/*.{ts,tsx}",
         "src/features/**/*.{ts,tsx}",
         "src/lib/**/*.ts",
@@ -17,8 +16,5 @@
         ".next/**",
         "dist/**",
         "build/**"
-    ],
-    "ignoreDependencies": [
-        "@types/*"
     ]
 }
