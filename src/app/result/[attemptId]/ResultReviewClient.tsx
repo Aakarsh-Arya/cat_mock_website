@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
+import { useMemo, useCallback, useState, useEffect } from 'react';
 import type { QuestionSetComplete, SectionName, PerformanceReason } from '@/types/exam';
 import { assemblePaper } from '@/features/exam-engine/lib/assemblePaper';
 import { QuestionRenderer } from '@/features/exam-engine/ui/QuestionRenderer';
@@ -27,10 +27,72 @@ const REASON_OPTIONS: Array<{ value: PerformanceReason; label: string }> = [
     { value: 'guess', label: 'Guess/unsure' },
 ];
 
+const MAX_NOTE_WORDS = 50;
+
+function getNoteWords(note: string): string[] {
+    return note.match(/\S+/g) ?? [];
+}
+
+function clampNoteWords(note: string): string {
+    const chunks = note.match(/\S+\s*/g);
+    if (!chunks || chunks.length === 0) return '';
+    if (chunks.length <= MAX_NOTE_WORDS) return note;
+    return chunks.slice(0, MAX_NOTE_WORDS).join('').trimEnd();
+}
+
+function getWordCount(note: string): number {
+    return getNoteWords(note).length;
+}
+
+function hasExceededWordLimit(note: string): boolean {
+    return getWordCount(note) > MAX_NOTE_WORDS;
+}
+
 interface ReviewNavState {
     section: SectionName;
     setIndex: number;
     questionIndex: number;
+}
+
+function resolveInitialReviewNav(storageKey: string, availableSections: SectionName[]): ReviewNavState {
+    const fallbackSection = availableSections[0] ?? 'VARC';
+    const isAvailableSection = (value: SectionName | undefined): value is SectionName =>
+        Boolean(value) && availableSections.includes(value as SectionName);
+
+    if (typeof window === 'undefined') {
+        return { section: fallbackSection, setIndex: 0, questionIndex: 0 };
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlSection = parseSection(urlParams.get('section'));
+    const urlSetIndex = Number(urlParams.get('set'));
+    const urlQIndex = Number(urlParams.get('q'));
+
+    if (isAvailableSection(urlSection)) {
+        return {
+            section: urlSection,
+            setIndex: Number.isFinite(urlSetIndex) && urlSetIndex >= 0 ? urlSetIndex : 0,
+            questionIndex: Number.isFinite(urlQIndex) && urlQIndex >= 0 ? urlQIndex : 0,
+        };
+    }
+
+    const storedRaw = window.localStorage.getItem(storageKey);
+    if (storedRaw) {
+        try {
+            const stored = JSON.parse(storedRaw) as ReviewNavState;
+            if (stored.section && isAvailableSection(stored.section)) {
+                return {
+                    section: stored.section,
+                    setIndex: Number.isFinite(stored.setIndex) && stored.setIndex >= 0 ? stored.setIndex : 0,
+                    questionIndex: Number.isFinite(stored.questionIndex) && stored.questionIndex >= 0 ? stored.questionIndex : 0,
+                };
+            }
+        } catch {
+            window.localStorage.removeItem(storageKey);
+        }
+    }
+
+    return { section: fallbackSection, setIndex: 0, questionIndex: 0 };
 }
 
 interface ResultReviewClientProps {
@@ -40,6 +102,7 @@ interface ResultReviewClientProps {
     correctAnswerMap: Record<string, string>;
     solutionMap?: Record<string, {
         solution_text?: string | null;
+        toppers_approach?: string | null;
         solution_image_url?: string | null;
         video_solution_url?: string | null;
     }>;
@@ -49,6 +112,7 @@ interface ResultReviewClientProps {
         updated_at?: string | null;
     }>;
     responseStatusMap?: Record<string, string | null | undefined>;
+    responseNoteMap?: Record<string, string | null | undefined>;
     attemptId?: string | null;
 }
 
@@ -69,24 +133,37 @@ export function ResultReviewClient({
     solutionMap,
     responseMetaMap = {},
     responseStatusMap = {},
+    responseNoteMap = {},
     attemptId,
 }: ResultReviewClientProps) {
     const assembled = useMemo(() => assemblePaper(questionSets), [questionSets]);
+    const availableSections = useMemo<SectionName[]>(() => {
+        const present = new Set<SectionName>(assembled.questionSets.map((set) => set.section));
+        const ordered = SECTION_ORDER.filter((section) => present.has(section));
+        return ordered.length > 0 ? ordered : ['VARC'];
+    }, [assembled.questionSets]);
     const [isExpanded, setIsExpanded] = useState(false);
-    const hasInitializedRef = useRef(false);
     const storageKey = `attempt:${attemptId ?? 'unknown'}:reviewNav`;
+    const [isNavHydrated, setIsNavHydrated] = useState(false);
 
     const analysisStore = getAnalysisStore(attemptId ?? 'result-review');
     const analysisReasons = analysisStore((s) => s.reasons);
-    const bookmarkedQuestions = analysisStore((s) => s.bookmarks);
     const setAnalysisReason = analysisStore((s) => s.setReason);
-    const toggleBookmark = analysisStore((s) => s.toggleBookmark);
 
-    const [navState, setNavState] = useState<ReviewNavState>({
-        section: 'VARC',
-        setIndex: 0,
-        questionIndex: 0,
-    });
+    const [navState, setNavState] = useState<ReviewNavState>(() => resolveInitialReviewNav(storageKey, availableSections));
+    const [noteByQuestion, setNoteByQuestion] = useState<Record<string, string>>(() =>
+        Object.fromEntries(
+            Object.entries(responseNoteMap).map(([questionId, note]) => [
+                questionId,
+                clampNoteWords(typeof note === 'string' ? note : ''),
+            ])
+        )
+    );
+    const [savingNoteQuestionId, setSavingNoteQuestionId] = useState<string | null>(null);
+    const [noteSaveError, setNoteSaveError] = useState<string | null>(null);
+    const [lastSavedNoteQuestionId, setLastSavedNoteQuestionId] = useState<string | null>(null);
+    const [expandedNoteByQuestion, setExpandedNoteByQuestion] = useState<Record<string, boolean>>({});
+    const [noteLimitReachedByQuestion, setNoteLimitReachedByQuestion] = useState<Record<string, boolean>>({});
 
     const updateNavState = useCallback((updates: Partial<ReviewNavState>) => {
         setNavState((prev) => ({ ...prev, ...updates }));
@@ -133,8 +210,9 @@ export function ResultReviewClient({
     }, [assembled.questionSets]);
 
     const handleSectionChange = useCallback((section: SectionName) => {
+        if (!availableSections.includes(section)) return;
         updateNavState({ section, setIndex: 0, questionIndex: 0 });
-    }, [updateNavState]);
+    }, [availableSections, updateNavState]);
 
     const handleQuestionChange = useCallback((index: number) => {
         updateNavState({ questionIndex: index });
@@ -220,7 +298,78 @@ export function ResultReviewClient({
     const currentIsIncorrect = currentIsCorrect === false;
     const currentIsSkipped = !hasCurrentAnswer;
     const selectedReason = currentQuestion ? analysisReasons[currentQuestion.id] ?? null : null;
-    const isBookmarked = currentQuestion ? Boolean(bookmarkedQuestions[currentQuestion.id]) : false;
+    const currentQuestionId = currentQuestion?.id ?? null;
+    const currentNote = currentQuestionId ? (noteByQuestion[currentQuestionId] ?? '') : '';
+    const currentNoteWordCount = getWordCount(currentNote);
+    const isCurrentNoteExpanded = currentQuestionId ? Boolean(expandedNoteByQuestion[currentQuestionId]) : false;
+    const currentNoteLimitReached = currentQuestionId ? Boolean(noteLimitReachedByQuestion[currentQuestionId]) : false;
+
+    const handleCurrentNoteChange = useCallback((nextValue: string) => {
+        if (!currentQuestionId) return;
+        setNoteSaveError(null);
+        setLastSavedNoteQuestionId(null);
+        setNoteLimitReachedByQuestion((prev) => ({ ...prev, [currentQuestionId]: hasExceededWordLimit(nextValue) }));
+        const clamped = clampNoteWords(nextValue);
+        setNoteByQuestion((prev) => ({ ...prev, [currentQuestionId]: clamped }));
+    }, [currentQuestionId]);
+
+    const toggleCurrentNoteExpansion = useCallback(() => {
+        if (!currentQuestionId) return;
+        setExpandedNoteByQuestion((prev) => ({
+            ...prev,
+            [currentQuestionId]: !prev[currentQuestionId],
+        }));
+    }, [currentQuestionId]);
+
+    const handleSaveCurrentNote = useCallback(async () => {
+        if (!attemptId || !currentQuestionId) return;
+        setSavingNoteQuestionId(currentQuestionId);
+        setNoteSaveError(null);
+        setLastSavedNoteQuestionId(null);
+        const sanitizedNote = clampNoteWords(noteByQuestion[currentQuestionId] ?? '');
+        try {
+            const response = await fetch('/api/result-note', {
+                method: 'POST',
+                credentials: 'include',
+                cache: 'no-store',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    attemptId,
+                    questionId: currentQuestionId,
+                    userNote: sanitizedNote,
+                }),
+            });
+
+            const payload = (await response.json().catch(() => null)) as
+                | { data?: { userNote?: unknown }; error?: unknown }
+                | null;
+            if (!response.ok) {
+                setNoteSaveError(typeof payload?.error === 'string' ? payload.error : 'Failed to save note');
+                return;
+            }
+
+            const savedNote = clampNoteWords(typeof payload?.data?.userNote === 'string' ? payload.data.userNote : '');
+            setNoteByQuestion((prev) => ({ ...prev, [currentQuestionId]: savedNote }));
+            setNoteLimitReachedByQuestion((prev) => ({ ...prev, [currentQuestionId]: false }));
+            setLastSavedNoteQuestionId(currentQuestionId);
+        } catch {
+            setNoteSaveError('Failed to save note');
+        } finally {
+            setSavingNoteQuestionId(null);
+        }
+    }, [attemptId, currentQuestionId, noteByQuestion]);
+
+    useEffect(() => {
+        setNoteByQuestion(
+            Object.fromEntries(
+                Object.entries(responseNoteMap).map(([questionId, note]) => [
+                    questionId,
+                    clampNoteWords(typeof note === 'string' ? note : ''),
+                ])
+            )
+        );
+        setNoteLimitReachedByQuestion({});
+    }, [responseNoteMap]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -231,6 +380,7 @@ export function ResultReviewClient({
             const urlSetIndex = urlParams.get('set') ? Number(urlParams.get('set')) : undefined;
             const urlQIndex = urlParams.get('q') ? Number(urlParams.get('q')) : undefined;
             const urlQid = urlParams.get('qid');
+            const fallbackSection = availableSections[0] ?? 'VARC';
 
             if (urlQid) {
                 const pos = questionPositionMapGlobal.get(urlQid);
@@ -240,18 +390,18 @@ export function ResultReviewClient({
                         setIndex: pos.setIndex,
                         questionIndex: pos.questionIndex,
                     });
-                    hasInitializedRef.current = true;
+                    setIsNavHydrated(true);
                     return;
                 }
             }
 
-            if (urlSection !== undefined) {
+            if (urlSection !== undefined && availableSections.includes(urlSection)) {
                 setNavState({
                     section: urlSection,
                     setIndex: Number.isFinite(urlSetIndex) && urlSetIndex! >= 0 ? urlSetIndex! : 0,
                     questionIndex: Number.isFinite(urlQIndex) && urlQIndex! >= 0 ? urlQIndex! : 0,
                 });
-                hasInitializedRef.current = true;
+                setIsNavHydrated(true);
                 return;
             }
 
@@ -267,18 +417,18 @@ export function ResultReviewClient({
                                 setIndex: pos.setIndex,
                                 questionIndex: pos.questionIndex,
                             });
-                            hasInitializedRef.current = true;
+                            setIsNavHydrated(true);
                             return;
                         }
                     }
 
-                    if (stored.section && SECTION_ORDER.includes(stored.section)) {
+                    if (stored.section && availableSections.includes(stored.section)) {
                         setNavState({
                             section: stored.section,
                             setIndex: Number.isFinite(stored.setIndex) && stored.setIndex >= 0 ? stored.setIndex : 0,
                             questionIndex: Number.isFinite(stored.questionIndex) && stored.questionIndex >= 0 ? stored.questionIndex : 0,
                         });
-                        hasInitializedRef.current = true;
+                        setIsNavHydrated(true);
                         return;
                     }
                 } catch {
@@ -286,8 +436,8 @@ export function ResultReviewClient({
                 }
             }
 
-            setNavState({ section: 'VARC', setIndex: 0, questionIndex: 0 });
-            hasInitializedRef.current = true;
+            setNavState({ section: fallbackSection, setIndex: 0, questionIndex: 0 });
+            setIsNavHydrated(true);
         };
 
         resolveNavigation();
@@ -295,11 +445,11 @@ export function ResultReviewClient({
         const handlePopState = () => resolveNavigation();
         window.addEventListener('popstate', handlePopState);
         return () => window.removeEventListener('popstate', handlePopState);
-    }, [questionPositionMapGlobal, storageKey]);
+    }, [availableSections, questionPositionMapGlobal, storageKey]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
-        if (!hasInitializedRef.current) return;
+        if (!isNavHydrated) return;
 
         const qid = currentSet?.questions?.[navState.questionIndex]?.id ?? null;
 
@@ -316,7 +466,7 @@ export function ResultReviewClient({
         else url.searchParams.delete('qid');
 
         window.history.replaceState({}, '', url.toString());
-    }, [navState, storageKey, currentSet]);
+    }, [isNavHydrated, navState, storageKey, currentSet]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -324,6 +474,13 @@ export function ResultReviewClient({
             setIsExpanded(true);
         }
     }, []);
+
+    useEffect(() => {
+        const fallbackSection = availableSections[0] ?? 'VARC';
+        if (!availableSections.includes(navState.section)) {
+            setNavState({ section: fallbackSection, setIndex: 0, questionIndex: 0 });
+        }
+    }, [availableSections, navState.section]);
 
     useEffect(() => {
         if (typeof document === 'undefined') return;
@@ -364,7 +521,7 @@ export function ResultReviewClient({
 
             <div className="mobile-table-scroll border-b border-exam-bg-border bg-white">
                 <div className="flex min-w-max">
-                    {SECTION_ORDER.map((section) => {
+                    {availableSections.map((section) => {
                         const isActive = navState.section === section;
                         const label = section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section;
                         return (
@@ -458,35 +615,7 @@ export function ResultReviewClient({
                             </div>
 
                             <div className="mt-5 rounded border border-gray-200 bg-white p-3 text-xs text-gray-600 space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <div className="font-semibold text-gray-700">Question Metadata</div>
-                                    {currentQuestion && (
-                                        <button
-                                            type="button"
-                                            onClick={() => toggleBookmark(currentQuestion.id)}
-                                            className={`touch-target inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold transition-colors ${isBookmarked
-                                                ? 'border-amber-300 bg-amber-50 text-amber-600'
-                                                : 'border-gray-200 text-gray-500 hover:bg-gray-50'
-                                                }`}
-                                            aria-pressed={isBookmarked}
-                                        >
-                                            <svg
-                                                className="h-3.5 w-3.5"
-                                                viewBox="0 0 24 24"
-                                                fill={isBookmarked ? 'currentColor' : 'none'}
-                                                stroke="currentColor"
-                                                strokeWidth={2}
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    d="M5 4a2 2 0 012-2h10a2 2 0 012 2v18l-7-4-7 4V4z"
-                                                />
-                                            </svg>
-                                            {isBookmarked ? 'Bookmarked' : 'Bookmark'}
-                                        </button>
-                                    )}
-                                </div>
+                                <div className="font-semibold text-gray-700">Question Metadata</div>
                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                                     <div>
                                         <span className="text-gray-400 block">Time Spent</span>
@@ -548,6 +677,57 @@ export function ResultReviewClient({
                                         </div>
                                     </div>
                                 )}
+                                {currentQuestion && (
+                                    <div className="mt-2 rounded-md border border-blue-100 bg-blue-50/70 p-2">
+                                        <div className="flex items-center justify-between text-[11px] font-semibold text-blue-700">
+                                            <span>Add Notes</span>
+                                            <div className="flex items-center gap-2">
+                                                {currentNoteWordCount > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={toggleCurrentNoteExpansion}
+                                                        className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-700 transition-colors hover:bg-blue-50"
+                                                        aria-expanded={isCurrentNoteExpanded}
+                                                    >
+                                                        {isCurrentNoteExpanded ? 'Collapse note' : 'Expand note'}
+                                                    </button>
+                                                )}
+                                                <span className="text-[10px] text-blue-600">{currentNoteWordCount}/{MAX_NOTE_WORDS} words</span>
+                                            </div>
+                                        </div>
+                                        <textarea
+                                            value={currentNote}
+                                            onChange={(event) => handleCurrentNoteChange(event.target.value)}
+                                            placeholder="Add your personal note for this question..."
+                                            rows={isCurrentNoteExpanded ? 8 : 4}
+                                            className={`mt-2 w-full rounded-md border border-blue-200 bg-white px-2.5 py-2 text-xs text-slate-700 outline-none ring-0 placeholder:text-slate-400 focus:border-blue-400 ${isCurrentNoteExpanded ? 'min-h-40' : 'min-h-20'}`}
+                                        />
+                                        {currentNoteLimitReached && (
+                                            <p className="mt-1 text-[11px] text-amber-700">
+                                                50-word limit reached. Extra words were removed.
+                                            </p>
+                                        )}
+                                        <div className="mt-2 flex items-center justify-between gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={handleSaveCurrentNote}
+                                                disabled={savingNoteQuestionId === currentQuestion.id}
+                                                className={`touch-target rounded-md px-3 py-1.5 text-[11px] font-semibold text-white ${savingNoteQuestionId === currentQuestion.id
+                                                    ? 'bg-blue-300'
+                                                    : 'bg-blue-600 hover:bg-blue-700'
+                                                    }`}
+                                            >
+                                                {savingNoteQuestionId === currentQuestion.id ? 'Saving...' : 'Save Note'}
+                                            </button>
+                                            {lastSavedNoteQuestionId === currentQuestion.id && !noteSaveError && (
+                                                <span className="text-[11px] text-emerald-600">Saved</span>
+                                            )}
+                                        </div>
+                                        {noteSaveError && (
+                                            <p className="mt-1 text-[11px] text-rose-600">{noteSaveError}</p>
+                                        )}
+                                    </div>
+                                )}
                                 <p className="text-[11px] text-gray-400">Order reflects your attempt sequence.</p>
                             </div>
                         </div>
@@ -557,4 +737,3 @@ export function ResultReviewClient({
         </section>
     );
 }
-

@@ -15,6 +15,7 @@ interface SectionScore {
 
 interface SectionalPerformanceProps {
     sectionScores: Record<string, SectionScore>;
+    sections?: SectionName[];
     sectionConfig?: {
         [key: string]: {
             maxMarks: number;
@@ -47,8 +48,11 @@ const DEFAULT_SECTION_CONFIG: Record<SectionName, { maxMarks: number; totalQuest
     QA: { maxMarks: 66, totalQuestions: 22 },
 };
 
-export function SectionalPerformance({ sectionScores, sectionConfig }: SectionalPerformanceProps) {
-    const sections: SectionName[] = ['VARC', 'DILR', 'QA'];
+export function SectionalPerformance({ sectionScores, sections, sectionConfig }: SectionalPerformanceProps) {
+    const sectionOrder: SectionName[] =
+        Array.isArray(sections) && sections.length > 0
+            ? sections
+            : ['VARC', 'DILR', 'QA'];
     const config = sectionConfig || DEFAULT_SECTION_CONFIG;
 
     return (
@@ -58,7 +62,7 @@ export function SectionalPerformance({ sectionScores, sectionConfig }: Sectional
             </h2>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                {sections.map((sectionName) => {
+                {sectionOrder.map((sectionName) => {
                     const scores = sectionScores[sectionName];
                     const sectionDisplay = SECTION_DISPLAY[sectionName];
                     const sectionCfg = config[sectionName] || { maxMarks: 0, totalQuestions: 0 };

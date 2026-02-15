@@ -21,7 +21,7 @@ import { getQuestionsForSection } from '@/types/exam';
 // CONSTANTS
 // =============================================================================
 
-const SECTIONS = ['VARC', 'DILR', 'QA'] as const;
+const GLOBAL_SECTIONS = ['VARC', 'DILR', 'QA'] as const;
 
 // =============================================================================
 // TYPES
@@ -71,6 +71,7 @@ interface ExamHeaderProps {
     paper: Paper;
     candidateName?: string;
     candidatePhotoUrl?: string;
+    availableSections: SectionName[];
     onSectionSelect: (section: SectionName) => void;
     onToggleCalculator: () => void;
     isCalculatorVisible: boolean;
@@ -82,10 +83,12 @@ interface ExamHeaderProps {
 function ExamTimerController({
     onSectionExpire,
     onExamComplete,
-}: Pick<ExamLayoutProps, 'onSectionExpire' | 'onExamComplete'>) {
+    finalSection,
+}: Pick<ExamLayoutProps, 'onSectionExpire' | 'onExamComplete'> & { finalSection: SectionName }) {
     useExamTimer({
         onSectionExpire,
         onExamComplete,
+        finalSection,
     });
     return null;
 }
@@ -100,6 +103,7 @@ function ExamHeader({
     paper,
     candidateName = 'Candidate',
     candidatePhotoUrl,
+    availableSections,
     onSectionSelect,
     onToggleCalculator,
     isCalculatorVisible,
@@ -125,7 +129,8 @@ function ExamHeader({
         <header className="h-16 flex items-center justify-between px-5 bg-gradient-to-r from-exam-header-from to-exam-header-to border-b-2 border-exam-header-border">
             {/* Left: Section Tabs (CAT sections are LOCKED; keep tabs for UI, disable navigation) */}
             <div className="flex items-center gap-1 pl-36" role="tablist" aria-label="Exam sections">
-                {SECTIONS.map((section, index) => {
+                {availableSections.map((section) => {
+                    const index = GLOBAL_SECTIONS.indexOf(section);
                     const isActive = index === currentSectionIndex;
                     const displayName = section === 'DILR' ? 'LRDI' : section === 'QA' ? 'Quant' : section;
 
@@ -335,6 +340,21 @@ export function ExamLayout({
     const isInitialized = useExamStore((s) => s.isInitialized);
     const isSubmitting = useExamStore((s) => s.isSubmitting);
     const isAutoSubmitting = useExamStore((s) => s.isAutoSubmitting);
+
+    const availableSections = useMemo<SectionName[]>(() => {
+        const fromPaper = Array.isArray(paper.sections)
+            ? paper.sections
+                .map((section) => section?.name)
+                .filter((name): name is SectionName => name === 'VARC' || name === 'DILR' || name === 'QA')
+            : [];
+        const fromQuestions = Array.from(new Set(questions.map((question) => question.section)))
+            .filter((name): name is SectionName => name === 'VARC' || name === 'DILR' || name === 'QA');
+
+        const chosen = fromQuestions.length > 0 ? fromQuestions : fromPaper;
+        const deduped = GLOBAL_SECTIONS.filter((section) => chosen.includes(section));
+        return deduped.length > 0 ? deduped : [...GLOBAL_SECTIONS];
+    }, [paper.sections, questions]);
+    const finalSection = availableSections[availableSections.length - 1] ?? 'QA';
 
     // Persist sidebar visibility to localStorage (prevents “lost sidebar” after refresh)
     const [isSidebarVisible, setIsSidebarVisible] = useState(() => {
@@ -571,6 +591,19 @@ export function ExamLayout({
 
     const sectionQuestions = useMemo(() => getQuestionsForSection(questions, currentSection), [questions, currentSection]);
     const currentQuestion = sectionQuestions[currentQuestionIndex];
+    const questionNumberById = useMemo(() => {
+        const map = new Map<string, number>();
+        let serial = 1;
+        for (const section of GLOBAL_SECTIONS) {
+            const sectionQs = getQuestionsForSection(questions, section);
+            for (const q of sectionQs) {
+                map.set(q.id, serial);
+                serial += 1;
+            }
+        }
+        return map;
+    }, [questions]);
+    const currentGlobalQuestionNumber = currentQuestion ? questionNumberById.get(currentQuestion.id) ?? (currentQuestionIndex + 1) : 0;
 
     // Track per-question time spent while the exam is active
     useEffect(() => {
@@ -597,7 +630,7 @@ export function ExamLayout({
     // Tabs are disabled, but keep handler in case you later allow same-section jumps.
     const handleSectionSelect = useCallback(
         (section: SectionName) => {
-            const sectionIndex = SECTIONS.indexOf(section);
+            const sectionIndex = GLOBAL_SECTIONS.indexOf(section);
             const sectionQs = getQuestionsForSection(questions, section);
             const firstQuestion = sectionQs[0];
 
@@ -803,7 +836,7 @@ export function ExamLayout({
         );
     }
 
-    const isLastSection = currentSectionIndex === 2;
+    const isLastSection = currentSection === finalSection;
 
     const hasContext = Boolean(
         currentQuestion.context &&
@@ -827,10 +860,15 @@ export function ExamLayout({
 
     return (
         <div className="relative h-screen w-screen overflow-hidden flex flex-col min-h-0 min-w-0 font-exam text-sm leading-normal bg-exam-bg-page">
-            <ExamTimerController onSectionExpire={handleSectionExpire} onExamComplete={handleAutoSubmitExam} />
+            <ExamTimerController
+                onSectionExpire={handleSectionExpire}
+                onExamComplete={handleAutoSubmitExam}
+                finalSection={finalSection}
+            />
 
             <ExamHeaderContainer
                 paper={paper}
+                availableSections={availableSections}
                 onSectionSelect={handleSectionSelect}
                 onToggleCalculator={() => setIsCalculatorVisible((prev) => !prev)}
                 isCalculatorVisible={isCalculatorVisible}
@@ -858,7 +896,7 @@ export function ExamLayout({
                     )}
 
                     <div className={`relative flex flex-col bg-exam-bg-white min-h-0 min-w-0 ${questionPaneColSpan}`}>
-                        <QuestionMetadataBar question={currentQuestion} questionNumber={currentQuestionIndex + 1} />
+                        <QuestionMetadataBar question={currentQuestion} questionNumber={currentGlobalQuestionNumber} />
 
                         <div className="flex-1 overflow-y-auto min-h-0">
                             <QuestionPane question={currentQuestion} />
@@ -879,6 +917,7 @@ export function ExamLayout({
                         <aside className="border-l border-exam-bg-border-light flex flex-col bg-slate-50 overflow-y-auto min-h-0 min-w-0">
                             <QuestionPalette
                                 questions={questions}
+                                questionNumberById={questionNumberById}
                                 className="h-full rounded-none shadow-none border-0 bg-transparent sticky top-0"
                             />
                         </aside>

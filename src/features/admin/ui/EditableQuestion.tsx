@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo, type ClipboardEvent } from 'react';
 import type { QuestionWithAnswer, SectionName, QuestionType } from '@/types/exam';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 import { MathText } from '@/features/exam-engine/ui/MathText';
@@ -49,6 +49,45 @@ interface EditableOptionProps {
 // =============================================================================
 
 const OPTION_LABELS = ['A', 'B', 'C', 'D'] as const;
+
+function handlePlainTextPaste(
+    event: ClipboardEvent<HTMLTextAreaElement>,
+    setValue: (next: string) => void
+) {
+    event.preventDefault();
+    const plainText = event.clipboardData.getData('text/plain');
+    const htmlText = event.clipboardData.getData('text/html');
+    let pastedText = plainText;
+
+    const plainHasLineBreaks = /[\r\n]/.test(plainText);
+    const htmlHasStructuredBreaks = /<(br|p|div|li|h[1-6]|tr|blockquote|pre)\b/i.test(htmlText);
+
+    if (!plainHasLineBreaks && htmlHasStructuredBreaks && typeof DOMParser !== 'undefined') {
+        try {
+            const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+            doc.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
+            doc.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,tr,blockquote,pre').forEach((node) => {
+                node.append('\n');
+            });
+            pastedText = (doc.body.textContent ?? plainText).replace(/\r\n?/g, '\n');
+        } catch {
+            pastedText = plainText;
+        }
+    }
+
+    const target = event.currentTarget;
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    const nextValue = `${target.value.slice(0, start)}${pastedText}${target.value.slice(end)}`;
+
+    setValue(nextValue);
+
+    const nextCursor = start + pastedText.length;
+    requestAnimationFrame(() => {
+        target.focus();
+        target.setSelectionRange(nextCursor, nextCursor);
+    });
+}
 
 // =============================================================================
 // EDITABLE OPTION COMPONENT
@@ -462,7 +501,7 @@ export function EditableQuestion({
                     <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-4">
                         <div className="text-sm font-medium text-gray-600">Preview</div>
                         <div className="prose prose-sm max-w-none text-gray-800">
-                            <MathText text={questionText} />
+                            <MathText text={questionText} strictText />
                         </div>
                         {questionFormat === 'MCQ' && (
                             <div className="space-y-2">
@@ -474,7 +513,7 @@ export function EditableQuestion({
                                                 {label}
                                             </span>
                                             <div className="text-sm text-gray-700">
-                                                <MathText text={optionText} />
+                                                <MathText text={optionText} strictText />
                                             </div>
                                         </div>
                                     );
@@ -485,7 +524,7 @@ export function EditableQuestion({
                             <div className="rounded-md bg-white border border-gray-200 p-3">
                                 <div className="text-xs font-medium text-gray-500 mb-2">Solution Preview</div>
                                 <div className="prose prose-sm max-w-none text-gray-700">
-                                    <MathText text={solutionText} />
+                                    <MathText text={solutionText} strictText />
                                 </div>
                             </div>
                         )}
@@ -547,6 +586,7 @@ export function EditableQuestion({
                     ref={solutionTextareaRef}
                     value={solutionText}
                     onChange={(e) => setSolutionText(e.target.value)}
+                    onPaste={(event) => handlePlainTextPaste(event, setSolutionText)}
                     placeholder="Explain the solution... (Supports Markdown and LaTeX)"
                     rows={3}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y"

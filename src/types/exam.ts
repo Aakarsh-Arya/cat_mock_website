@@ -183,6 +183,7 @@ export interface QuestionInSet {
 export interface QuestionInSetWithAnswer extends QuestionInSet {
     readonly correct_answer: string;
     readonly solution_text?: string;
+    readonly toppers_approach?: string;
     readonly solution_image_url?: string;
     readonly video_solution_url?: string;
 }
@@ -247,6 +248,7 @@ export interface Question extends BaseEntity, Activable {
 
     // Solution
     readonly solution_text?: string;
+    readonly toppers_approach?: string;
     readonly solution_image_url?: string;
     readonly video_solution_url?: string;
     readonly question_image_url?: string;
@@ -304,6 +306,8 @@ export interface Paper extends BaseEntity {
     readonly is_free: boolean;
     readonly attempt_limit?: number;
     readonly allow_pause?: boolean;
+    readonly allow_sectional_attempts?: boolean;
+    readonly sectional_allowed_sections?: readonly SectionName[];
 }
 
 // =============================================================================
@@ -357,6 +361,7 @@ export interface ResponseInput {
 // =============================================================================
 
 export type AttemptStatus = 'in_progress' | 'paused' | 'submitted' | 'completed' | 'abandoned' | 'expired';
+export type AttemptMode = 'full' | 'sectional';
 
 /** AI analysis lifecycle states (matches ai_analysis_status_type enum in DB) */
 export type AIAnalysisStatus = 'none' | 'requested' | 'exported' | 'processed' | 'failed';
@@ -392,6 +397,8 @@ export interface Attempt extends BaseEntity, TimeTracked {
 
     // Status
     readonly status: AttemptStatus;
+    readonly attempt_mode?: AttemptMode;
+    readonly sectional_section?: SectionName | null;
     readonly current_section?: SectionName;
     readonly current_question: number;
     readonly time_remaining?: TimeRemaining;

@@ -234,18 +234,37 @@ export async function fetchPaperForExam(
                 QA: durations.QA,
             };
 
-            const { data: newAttempt, error: attemptError } = await supabase
+            let { data: newAttempt, error: attemptError } = await supabase
                 .from('attempts')
                 .insert({
                     user_id: user.id,
                     paper_id: paperId,
                     status: 'in_progress',
+                    attempt_mode: 'full',
+                    sectional_section: null,
                     current_section: 'VARC',
                     current_question: 1,
                     time_remaining: initialTimeRemaining,
                 })
                 .select()
                 .single();
+
+            if (attemptError?.code === '42703') {
+                const retry = await supabase
+                    .from('attempts')
+                    .insert({
+                        user_id: user.id,
+                        paper_id: paperId,
+                        status: 'in_progress',
+                        current_section: 'VARC',
+                        current_question: 1,
+                        time_remaining: initialTimeRemaining,
+                    })
+                    .select()
+                    .single();
+                newAttempt = retry.data ?? newAttempt;
+                attemptError = retry.error ?? null;
+            }
 
             if (attemptError || !newAttempt) return { success: false, error: 'Failed to create attempt' };
 
@@ -354,11 +373,23 @@ export async function saveResponse(data: {
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
 
-        const { data: attempt, error: attemptError } = await supabase
+        let { data: attempt, error: attemptError } = await supabase
             .from('attempts')
-            .select('user_id, status, paper_id')
+            .select('user_id, status, paper_id, attempt_mode, sectional_section')
             .eq('id', data.attemptId)
             .single();
+
+        if (attemptError?.code === '42703') {
+            const retry = await supabase
+                .from('attempts')
+                .select('user_id, status, paper_id')
+                .eq('id', data.attemptId)
+                .single();
+            attempt = retry.data
+                ? { ...retry.data, attempt_mode: 'full', sectional_section: null }
+                : attempt;
+            attemptError = retry.error ?? null;
+        }
 
         if (attemptError || !attempt) return { success: false, error: 'Attempt not found' };
         if (attempt.user_id !== user.id) return { success: false, error: 'Unauthorized' };
@@ -405,13 +436,16 @@ export async function saveResponse(data: {
         }
 
         // Integrity check: questionId must belong to attempt's paper (safe view)
-        const { data: question, error: questionError } = await supabase
+        let questionQuery = supabase
             .from('questions_exam')
             .select('id, paper_id')
             .eq('id', data.questionId)
             .eq('paper_id', attempt.paper_id)
-            .eq('is_active', true)
-            .maybeSingle();
+            .eq('is_active', true);
+        if (attempt.attempt_mode === 'sectional' && attempt.sectional_section) {
+            questionQuery = questionQuery.eq('section', attempt.sectional_section);
+        }
+        const { data: question, error: questionError } = await questionQuery.maybeSingle();
 
         if (questionError || !question) {
             examLogger.validationError('Invalid questionId for attempt', {
@@ -477,6 +511,49 @@ export async function updateAttemptProgress(data: {
             error: authError,
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
+
+        // Guardrail: never write progress once attempt is no longer in_progress.
+        // This prevents late progress writes from mutating paused/submitted attempts.
+        let { data: attemptState, error: stateError } = await supabase
+            .from('attempts')
+            .select('status, attempt_mode, sectional_section')
+            .eq('id', data.attemptId)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+        if (stateError?.code === '42703') {
+            const retry = await supabase
+                .from('attempts')
+                .select('status')
+                .eq('id', data.attemptId)
+                .eq('user_id', user.id)
+                .maybeSingle();
+            attemptState = retry.data
+                ? { ...retry.data, attempt_mode: 'full', sectional_section: null }
+                : attemptState;
+            stateError = retry.error ?? null;
+        }
+
+        if (stateError) {
+            logger.error('updateAttemptProgress status check failed', stateError, { attemptId: data.attemptId });
+            return { success: false, error: 'Failed to update progress' };
+        }
+
+        if (!attemptState) {
+            return { success: false, error: 'Attempt not found' };
+        }
+
+        if (attemptState.status !== 'in_progress') {
+            return { success: false, error: 'Attempt is not in progress' };
+        }
+
+        if (
+            attemptState.attempt_mode === 'sectional' &&
+            attemptState.sectional_section &&
+            data.currentSection !== attemptState.sectional_section
+        ) {
+            return { success: false, error: 'Invalid sectional progress update' };
+        }
 
         const { error: rpcError } = await supabase.rpc('save_attempt_state', {
             p_attempt_id: data.attemptId,
@@ -586,7 +663,7 @@ export async function submitExam(
         // CRITICAL: Select 'id' so we can promote fallback attempt ID
         let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, paper_id, started_at, paused_at, total_paused_seconds, time_remaining')
+            .select('id, user_id, status, paper_id, started_at, paused_at, total_paused_seconds, time_remaining, attempt_mode, sectional_section')
             .eq('id', normalizedAttemptId)
             .maybeSingle();
 
@@ -597,7 +674,14 @@ export async function submitExam(
                 .eq('id', normalizedAttemptId)
                 .maybeSingle();
             attempt = retry.data
-                ? { ...retry.data, paused_at: null, total_paused_seconds: 0, time_remaining: retry.data.time_remaining ?? null }
+                ? {
+                    ...retry.data,
+                    paused_at: null,
+                    total_paused_seconds: 0,
+                    time_remaining: retry.data.time_remaining ?? null,
+                    attempt_mode: 'full',
+                    sectional_section: null,
+                }
                 : attempt;
             attemptError = retry.error ?? null;
         }
@@ -647,6 +731,13 @@ export async function submitExam(
             return { success: false, error: 'Attempt is not in progress' };
         }
         if (!options?.sessionToken) return { success: false, error: 'Missing session token' };
+
+        const attemptMode = attempt.attempt_mode === 'sectional' ? 'sectional' : 'full';
+        const sectionalSection: SectionName | null =
+            attemptMode === 'sectional' &&
+            (attempt.sectional_section === 'VARC' || attempt.sectional_section === 'DILR' || attempt.sectional_section === 'QA')
+                ? attempt.sectional_section
+                : null;
 
         // NOTE: Auto-force-resume is always enabled for submissions to prevent stuck states
 
@@ -749,11 +840,15 @@ export async function submitExam(
                 // total_score, correct_count, etc. as null → UI showed -1 or 0.
                 const lateNow = new Date().toISOString();
                 try {
-                    const { data: lateQuestions } = await adminClient
+                    let lateQuestionsQuery = adminClient
                         .from('questions')
                         .select('*')
                         .eq('paper_id', attempt.paper_id)
                         .eq('is_active', true);
+                    if (sectionalSection) {
+                        lateQuestionsQuery = lateQuestionsQuery.eq('section', sectionalSection);
+                    }
+                    const { data: lateQuestions } = await lateQuestionsQuery;
                     const { data: lateResponses } = await supabase
                         .from('responses')
                         .select('question_id, answer, time_spent_seconds')
@@ -910,13 +1005,17 @@ export async function submitExam(
         }
 
         // Fetch all questions WITH correct_answer (server-side only)
-        const { data: questions, error: questionsError } = await adminClient
+        let questionsQuery = adminClient
             .from('questions')
             .select('*')
             .eq('paper_id', attempt.paper_id)
             .eq('is_active', true)
             .order('section')
             .order('question_number');
+        if (sectionalSection) {
+            questionsQuery = questionsQuery.eq('section', sectionalSection);
+        }
+        const { data: questions, error: questionsError } = await questionsQuery;
 
         if (questionsError || !questions) {
             logger.error('Failed to fetch questions for scoring', questionsError, {
@@ -1054,6 +1153,7 @@ export async function fetchExamResults(
             time_spent_seconds?: number | null;
             visit_count?: number | null;
             updated_at?: string | null;
+            user_note?: string | null;
         }>;
     }>
 > {
@@ -1075,13 +1175,23 @@ export async function fetchExamResults(
             return { success: false, error: 'Attempt not yet completed' };
         }
 
-        const { data: questions, error: questionsError } = await supabase
+        const sectionalSection: SectionName | null =
+            attempt.attempt_mode === 'sectional' &&
+            (attempt.sectional_section === 'VARC' || attempt.sectional_section === 'DILR' || attempt.sectional_section === 'QA')
+                ? attempt.sectional_section
+                : null;
+
+        let questionsQuery = supabase
             .from('questions_exam')
             .select('*')
             .eq('paper_id', attempt.paper_id)
             .eq('is_active', true)
             .order('section')
             .order('question_number');
+        if (sectionalSection) {
+            questionsQuery = questionsQuery.eq('section', sectionalSection);
+        }
+        const { data: questions, error: questionsError } = await questionsQuery;
 
         if (questionsError) return { success: false, error: 'Failed to fetch questions' };
 
@@ -1099,6 +1209,7 @@ export async function fetchExamResults(
                     question_id: string;
                     correct_answer: string;
                     solution_text: string | null;
+                    toppers_approach?: string | null;
                     solution_image_url: string | null;
                     video_solution_url: string | null;
                 }) => [s.question_id, s]
@@ -1111,11 +1222,13 @@ export async function fetchExamResults(
                 ...q,
                 correct_answer: solution?.correct_answer ?? '',
                 solution_text: solution?.solution_text ?? null,
+                toppers_approach: solution?.toppers_approach ?? null,
                 solution_image_url: solution?.solution_image_url ?? null,
                 video_solution_url: solution?.video_solution_url ?? null,
             } as Question & {
                 correct_answer: string;
                 solution_text: string | null;
+                toppers_approach?: string | null;
                 solution_image_url: string | null;
                 video_solution_url: string | null;
             };
@@ -1123,7 +1236,7 @@ export async function fetchExamResults(
 
         const { data: responses, error: responsesError } = await supabase
             .from('responses')
-            .select('question_id, answer, status, is_correct, marks_obtained, time_spent_seconds, visit_count, updated_at')
+            .select('question_id, answer, status, is_correct, marks_obtained, time_spent_seconds, visit_count, updated_at, user_note')
             .eq('attempt_id', attemptId);
 
         if (responsesError) return { success: false, error: 'Failed to fetch responses' };
@@ -1142,6 +1255,7 @@ export async function fetchExamResults(
                     time_spent_seconds?: number | null;
                     visit_count?: number | null;
                     updated_at?: string | null;
+                    user_note?: string | null;
                 }>,
             },
         };
@@ -1170,6 +1284,42 @@ export async function pauseExam(data: {
             error: authError,
         } = await supabase.auth.getUser();
         if (authError || !user) return { success: false, error: 'Authentication required' };
+
+        let { data: attempt, error: attemptError } = await supabase
+            .from('attempts')
+            .select('id, user_id, attempt_mode, sectional_section')
+            .eq('id', data.attemptId)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+        if (attemptError?.code === '42703') {
+            const retry = await supabase
+                .from('attempts')
+                .select('id, user_id')
+                .eq('id', data.attemptId)
+                .eq('user_id', user.id)
+                .maybeSingle();
+            attempt = retry.data
+                ? { ...retry.data, attempt_mode: 'full', sectional_section: null }
+                : attempt;
+            attemptError = retry.error ?? null;
+        }
+
+        if (attemptError) {
+            logger.error('pauseExam attempt lookup failed', attemptError, { attemptId: data.attemptId });
+            return { success: false, error: 'Attempt not found' };
+        }
+        if (!attempt) {
+            return { success: false, error: 'Attempt not found' };
+        }
+
+        if (
+            attempt.attempt_mode === 'sectional' &&
+            attempt.sectional_section &&
+            data.currentSection !== attempt.sectional_section
+        ) {
+            return { success: false, error: 'Invalid sectional pause state' };
+        }
 
         // Pass client timeRemaining to the RPC so it's saved atomically with
         // the status transition.  This prevents data loss from race conditions

@@ -11,6 +11,7 @@ import { type SectionName, type QuestionType, type PerformanceReason } from '@/t
 import { getAnalysisStore } from '@/features/exam-engine/model/useExamStore';
 import { compareAnswers } from '@/features/exam-engine/lib/scoring';
 import { MathText } from './MathText';
+import { fetchBookmarkedQuestionIds, toggleUserBookmark } from '@/lib/bookmarks-client';
 
 interface QuestionData {
     id: string;
@@ -21,6 +22,7 @@ interface QuestionData {
     options: string[] | null;
     correct_answer: string;
     solution_text?: string | null;
+    toppers_approach?: string | null;
     question_image_url?: string | null;
     topic?: string | null;
     subtopic?: string | null;
@@ -39,6 +41,7 @@ interface ResponseData {
     time_spent_seconds?: number | null;
     visit_count?: number | null;
     updated_at?: string | null;
+    user_note?: string | null;
 }
 
 /** Peer statistics for a paper - aggregated response counts */
@@ -57,6 +60,7 @@ interface QuestionAnalysisProps {
     attemptId?: string | null;
     showDetailedList?: boolean;
     showHeader?: boolean;
+    responseNoteMap?: Record<string, string | null | undefined>;
 }
 
 type FilterType = 'all' | 'correct' | 'incorrect' | 'unanswered';
@@ -73,6 +77,10 @@ function resolveIsCorrect(question: QuestionData, response?: ResponseData): bool
     const correct = question.correct_answer;
     if (!correct || correct.trim() === '') return null;
     return compareAnswers(answer, correct, question.question_type);
+}
+
+function normalizeSolutionText(value: string | null | undefined): string {
+    return (value ?? '').replace(/\r\n?/g, '\n').trim();
 }
 
 /** Get status styling - ONLY used when answer is revealed */
@@ -140,6 +148,27 @@ const REASON_OPTIONS: Array<{ value: PerformanceReason; label: string }> = [
     { value: 'guess', label: 'Guess/unsure' },
 ];
 
+const MAX_NOTE_WORDS = 50;
+
+function getNoteWords(note: string): string[] {
+    return note.match(/\S+/g) ?? [];
+}
+
+function clampNoteWords(note: string): string {
+    const chunks = note.match(/\S+\s*/g);
+    if (!chunks || chunks.length === 0) return '';
+    if (chunks.length <= MAX_NOTE_WORDS) return note;
+    return chunks.slice(0, MAX_NOTE_WORDS).join('').trimEnd();
+}
+
+function getWordCount(note: string): number {
+    return getNoteWords(note).length;
+}
+
+function hasExceededWordLimit(note: string): boolean {
+    return getWordCount(note) > MAX_NOTE_WORDS;
+}
+
 export function QuestionAnalysis({
     questions,
     responses,
@@ -148,6 +177,7 @@ export function QuestionAnalysis({
     attemptId,
     showDetailedList = true,
     showHeader = true,
+    responseNoteMap = {},
 }: QuestionAnalysisProps) {
     const [filter, setFilter] = useState<FilterType>('all');
     const [expandedQuestions, setExpandedQuestions] = useState<Set<string>>(new Set());
@@ -156,11 +186,56 @@ export function QuestionAnalysis({
     const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
     const [activeSection, setActiveSection] = useState<SectionName | 'all'>('all');
     const [activeTopic, setActiveTopic] = useState<string>('all');
+    const [noteByQuestion, setNoteByQuestion] = useState<Record<string, string>>(() =>
+        Object.fromEntries(
+            responses.map((response) => [
+                response.question_id,
+                clampNoteWords(typeof response.user_note === 'string' ? response.user_note : ''),
+            ])
+        )
+    );
+    const [savingNoteByQuestion, setSavingNoteByQuestion] = useState<Record<string, boolean>>({});
+    const [noteErrorByQuestion, setNoteErrorByQuestion] = useState<Record<string, string | null>>({});
+    const [savedNoteByQuestion, setSavedNoteByQuestion] = useState<Record<string, boolean>>({});
+    const [expandedNoteByQuestion, setExpandedNoteByQuestion] = useState<Record<string, boolean>>({});
+    const [noteLimitReachedByQuestion, setNoteLimitReachedByQuestion] = useState<Record<string, boolean>>({});
     const analysisStore = getAnalysisStore(attemptId ?? 'temp');
     const analysisReasons = analysisStore((s) => s.reasons);
     const bookmarkedQuestions = analysisStore((s) => s.bookmarks);
     const setAnalysisReason = analysisStore((s) => s.setReason);
-    const toggleBookmark = analysisStore((s) => s.toggleBookmark);
+    const setBookmarks = analysisStore((s) => s.setBookmarks);
+    const setBookmark = analysisStore((s) => s.setBookmark);
+
+    useEffect(() => {
+        let isCancelled = false;
+        const scopedQuestionIds = new Set(questions.map((question) => question.id));
+        const loadBookmarks = async () => {
+            const ids = await fetchBookmarkedQuestionIds();
+            if (isCancelled) return;
+            const scoped = Array.from(ids).filter((id) => scopedQuestionIds.has(id));
+            setBookmarks(scoped);
+        };
+        void loadBookmarks();
+        return () => {
+            isCancelled = true;
+        };
+    }, [questions, setBookmarks]);
+
+    // Wrapper that syncs bookmark to database for persistence
+    const toggleBookmark = useCallback(async (questionId: string) => {
+        const currentlyBookmarked = Boolean(analysisStore.getState().bookmarks[questionId]);
+        setBookmark(questionId, !currentlyBookmarked);
+
+        const result = await toggleUserBookmark(questionId);
+        if (!result.success) {
+            setBookmark(questionId, currentlyBookmarked);
+            return;
+        }
+
+        if (result.isBookmarked !== !currentlyBookmarked) {
+            setBookmark(questionId, result.isBookmarked);
+        }
+    }, [analysisStore, setBookmark]);
 
     const isAnswered = useCallback((response?: ResponseData) => {
         if (!response) return false;
@@ -208,6 +283,75 @@ export function QuestionAnalysis({
             setActiveTopic('all');
         }
     }, [activeTopic, topics]);
+
+    useEffect(() => {
+        const merged = new Map<string, string>();
+        responses.forEach((response) => {
+            merged.set(response.question_id, clampNoteWords(typeof response.user_note === 'string' ? response.user_note : ''));
+        });
+        Object.entries(responseNoteMap).forEach(([questionId, note]) => {
+            if (typeof note === 'string') {
+                merged.set(questionId, clampNoteWords(note));
+            }
+        });
+        setNoteByQuestion(Object.fromEntries(merged.entries()));
+        setNoteLimitReachedByQuestion({});
+    }, [responses, responseNoteMap]);
+
+    const updateQuestionNote = useCallback((questionId: string, nextValue: string) => {
+        setSavedNoteByQuestion((prev) => ({ ...prev, [questionId]: false }));
+        setNoteErrorByQuestion((prev) => ({ ...prev, [questionId]: null }));
+        setNoteLimitReachedByQuestion((prev) => ({ ...prev, [questionId]: hasExceededWordLimit(nextValue) }));
+        setNoteByQuestion((prev) => ({ ...prev, [questionId]: clampNoteWords(nextValue) }));
+    }, []);
+
+    const toggleNoteExpansion = useCallback((questionId: string) => {
+        setExpandedNoteByQuestion((prev) => ({
+            ...prev,
+            [questionId]: !prev[questionId],
+        }));
+    }, []);
+
+    const saveQuestionNote = useCallback(async (questionId: string) => {
+        if (!attemptId) return;
+        const note = clampNoteWords(noteByQuestion[questionId] ?? '');
+        setSavingNoteByQuestion((prev) => ({ ...prev, [questionId]: true }));
+        setNoteErrorByQuestion((prev) => ({ ...prev, [questionId]: null }));
+        setSavedNoteByQuestion((prev) => ({ ...prev, [questionId]: false }));
+        try {
+            const response = await fetch('/api/result-note', {
+                method: 'POST',
+                credentials: 'include',
+                cache: 'no-store',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    attemptId,
+                    questionId,
+                    userNote: note,
+                }),
+            });
+
+            const payload = (await response.json().catch(() => null)) as
+                | { data?: { userNote?: unknown }; error?: unknown }
+                | null;
+            if (!response.ok) {
+                setNoteErrorByQuestion((prev) => ({
+                    ...prev,
+                    [questionId]: typeof payload?.error === 'string' ? payload.error : 'Failed to save note',
+                }));
+                return;
+            }
+
+            const savedNote = clampNoteWords(typeof payload?.data?.userNote === 'string' ? payload.data.userNote : '');
+            setNoteByQuestion((prev) => ({ ...prev, [questionId]: savedNote }));
+            setNoteLimitReachedByQuestion((prev) => ({ ...prev, [questionId]: false }));
+            setSavedNoteByQuestion((prev) => ({ ...prev, [questionId]: true }));
+        } catch {
+            setNoteErrorByQuestion((prev) => ({ ...prev, [questionId]: 'Failed to save note' }));
+        } finally {
+            setSavingNoteByQuestion((prev) => ({ ...prev, [questionId]: false }));
+        }
+    }, [attemptId, noteByQuestion]);
 
     const filteredQuestions = activeTopic === 'all'
         ? baseFilteredQuestions
@@ -295,61 +439,61 @@ export function QuestionAnalysis({
                 <div className="flex flex-wrap gap-3">
                     {/* Section Filter */}
                     <div className="mobile-table-scroll rounded-lg bg-slate-100 p-1">
-                    <div className="flex min-w-max gap-1">
-                    {(['all', 'VARC', 'DILR', 'QA'] as const).map((section) => (
-                        <button
-                            key={section}
-                            onClick={() => setActiveSection(section)}
-                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${activeSection === section
-                                ? 'bg-white shadow-sm text-[#2563EB] font-medium'
-                                : 'text-slate-600 hover:bg-slate-50'
-                                }`}
-                        >
-                            {section === 'all' ? 'All' : section}
-                        </button>
-                    ))}
-                    </div>
+                        <div className="flex min-w-max gap-1">
+                            {(['all', 'VARC', 'DILR', 'QA'] as const).map((section) => (
+                                <button
+                                    key={section}
+                                    onClick={() => setActiveSection(section)}
+                                    className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${activeSection === section
+                                        ? 'bg-white shadow-sm text-[#2563EB] font-medium'
+                                        : 'text-slate-600 hover:bg-slate-50'
+                                        }`}
+                                >
+                                    {section === 'all' ? 'All' : section}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     {/* Status Filter */}
                     <div className="mobile-table-scroll rounded-lg bg-slate-100 p-1">
                         <div className="flex min-w-max gap-1">
-                        <button
-                            onClick={() => setFilter('all')}
-                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'all'
-                            ? 'bg-white shadow-sm text-slate-800 font-medium'
-                            : 'text-slate-600 hover:bg-slate-50'
-                            }`}
-                        >
-                            All ({questions.length})
-                        </button>
-                        <button
-                            onClick={() => setFilter('correct')}
-                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'correct'
-                            ? 'bg-emerald-100 text-emerald-700 font-medium'
-                            : 'text-slate-600 hover:bg-slate-50'
-                            }`}
-                        >
-                            Correct ({stats.correct})
-                        </button>
-                        <button
-                            onClick={() => setFilter('incorrect')}
-                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'incorrect'
-                            ? 'bg-red-100 text-red-700 font-medium'
-                            : 'text-slate-600 hover:bg-slate-50'
-                            }`}
-                        >
-                            Incorrect ({stats.incorrect})
-                        </button>
-                        <button
-                            onClick={() => setFilter('unanswered')}
-                            className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'unanswered'
-                            ? 'bg-slate-300 text-slate-700 font-medium'
-                            : 'text-slate-600 hover:bg-slate-50'
-                            }`}
-                        >
-                            Skipped ({stats.unanswered})
-                        </button>
+                            <button
+                                onClick={() => setFilter('all')}
+                                className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'all'
+                                    ? 'bg-white shadow-sm text-slate-800 font-medium'
+                                    : 'text-slate-600 hover:bg-slate-50'
+                                    }`}
+                            >
+                                All ({questions.length})
+                            </button>
+                            <button
+                                onClick={() => setFilter('correct')}
+                                className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'correct'
+                                    ? 'bg-emerald-100 text-emerald-700 font-medium'
+                                    : 'text-slate-600 hover:bg-slate-50'
+                                    }`}
+                            >
+                                Correct ({stats.correct})
+                            </button>
+                            <button
+                                onClick={() => setFilter('incorrect')}
+                                className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'incorrect'
+                                    ? 'bg-red-100 text-red-700 font-medium'
+                                    : 'text-slate-600 hover:bg-slate-50'
+                                    }`}
+                            >
+                                Incorrect ({stats.incorrect})
+                            </button>
+                            <button
+                                onClick={() => setFilter('unanswered')}
+                                className={`touch-target whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-colors ${filter === 'unanswered'
+                                    ? 'bg-slate-300 text-slate-700 font-medium'
+                                    : 'text-slate-600 hover:bg-slate-50'
+                                    }`}
+                            >
+                                Skipped ({stats.unanswered})
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -377,6 +521,13 @@ export function QuestionAnalysis({
                                     : getMaskedStyle();
                                 const isBookmarked = Boolean(bookmarkedQuestions[question.id]);
                                 const selectedReason = analysisReasons[question.id] ?? null;
+                                const questionNote = noteByQuestion[question.id] ?? '';
+                                const noteWordCount = getWordCount(questionNote);
+                                const isSavingNote = Boolean(savingNoteByQuestion[question.id]);
+                                const noteError = noteErrorByQuestion[question.id] ?? null;
+                                const noteSaved = Boolean(savedNoteByQuestion[question.id]);
+                                const isNoteExpanded = Boolean(expandedNoteByQuestion[question.id]);
+                                const noteLimitReached = Boolean(noteLimitReachedByQuestion[question.id]);
                                 const isIncorrect = hasAnswer && isCorrect === false;
                                 const isSkipped = !hasAnswer;
                                 const showReasonPicker = isIncorrect || isSkipped;
@@ -509,295 +660,376 @@ export function QuestionAnalysis({
 
                                         {/* Expanded Content */}
                                         {isExpanded && (
-                                        <div className="space-y-4 border-t border-slate-200 bg-white p-4">
-                                            {/* Shared Context */}
-                                            {hasContext && (
-                                                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                                                    <h4 className="mb-2 text-sm font-medium text-slate-600">
-                                                        {question.context_title?.trim() || 'Shared Context'}
-                                                    </h4>
-                                                    {question.context_image_url && (
+                                            <div className="space-y-4 border-t border-slate-200 bg-white p-4">
+                                                {/* Shared Context */}
+                                                {hasContext && (
+                                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                                                        <h4 className="mb-2 text-sm font-medium text-slate-600">
+                                                            {question.context_title?.trim() || 'Shared Context'}
+                                                        </h4>
+                                                        {question.context_image_url && (
+                                                            <img
+                                                                src={question.context_image_url}
+                                                                alt={question.context_title?.trim()
+                                                                    ? `${question.context_title} diagram`
+                                                                    : `Context for question ${question.question_number}`}
+                                                                className="mb-3 max-h-96 max-w-full rounded-lg border border-slate-200 object-contain"
+                                                            />
+                                                        )}
+                                                        {question.context_body?.trim() && (
+                                                            <div className="prose prose-sm max-w-none text-slate-700">
+                                                                <MathText text={question.context_body} />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {/* Question Image */}
+                                                {question.question_image_url && (
+                                                    <div className="mb-4">
                                                         <img
-                                                            src={question.context_image_url}
-                                                            alt={question.context_title?.trim()
-                                                                ? `${question.context_title} diagram`
-                                                                : `Context for question ${question.question_number}`}
-                                                            className="mb-3 max-h-96 max-w-full rounded-lg border border-slate-200 object-contain"
+                                                            src={question.question_image_url}
+                                                            alt={`Question ${question.question_number} diagram`}
+                                                            className="max-h-96 max-w-full rounded-lg border border-slate-200 object-contain"
                                                         />
-                                                    )}
-                                                    {question.context_body?.trim() && (
-                                                        <div className="prose prose-sm max-w-none text-slate-700">
-                                                            <MathText text={question.context_body} />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
+                                                    </div>
+                                                )}
 
-                                            {/* Question Image */}
-                                            {question.question_image_url && (
-                                                <div className="mb-4">
-                                                    <img
-                                                        src={question.question_image_url}
-                                                        alt={`Question ${question.question_number} diagram`}
-                                                        className="max-h-96 max-w-full rounded-lg border border-slate-200 object-contain"
-                                                    />
-                                                </div>
-                                            )}
-
-                                            {/* Full Question Text */}
-                                            <div>
-                                                <h4 className="mb-2 text-sm font-medium text-slate-500">Question</h4>
-                                                <div className="prose prose-sm max-w-none text-slate-800">
-                                                    <MathText text={question.question_text} />
-                                                </div>
-                                            </div>
-
-                                            {/* Response Analytics */}
-                                            <div className="grid grid-cols-1 gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                                                {/* Full Question Text */}
                                                 <div>
-                                                    <span className="block text-xs text-slate-500">Time Spent</span>
-                                                    <span className="font-semibold text-slate-800">
-                                                        {formatDuration(response?.time_spent_seconds)}
-                                                    </span>
+                                                    <h4 className="mb-2 text-sm font-medium text-slate-500">Question</h4>
+                                                    <div className="prose prose-sm max-w-none text-slate-800">
+                                                        <MathText text={question.question_text} />
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <span className="block text-xs text-slate-500">Visits</span>
-                                                    <span className="font-semibold text-slate-800">
-                                                        {response?.visit_count ?? 0}
-                                                    </span>
-                                                </div>
-                                            </div>
 
-                                            {showReasonPicker && (
-                                                <div className="rounded-lg border border-amber-100 bg-amber-50/70 p-3">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-xs font-semibold text-amber-700">Reason for Performance</span>
-                                                        <span className="text-[10px] uppercase tracking-wide text-amber-600">
-                                                            {isSkipped ? 'Skipped' : 'Incorrect'}
+                                                {/* Response Analytics */}
+                                                <div className="grid grid-cols-1 gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                                                    <div>
+                                                        <span className="block text-xs text-slate-500">Time Spent</span>
+                                                        <span className="font-semibold text-slate-800">
+                                                            {formatDuration(response?.time_spent_seconds)}
                                                         </span>
                                                     </div>
-                                                    <div className="mt-2 flex flex-wrap gap-2">
-                                                        {REASON_OPTIONS.map((option) => {
-                                                            const isActive = selectedReason === option.value;
-                                                            return (
+                                                    <div>
+                                                        <span className="block text-xs text-slate-500">Visits</span>
+                                                        <span className="font-semibold text-slate-800">
+                                                            {response?.visit_count ?? 0}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {showReasonPicker && (
+                                                    <div className="rounded-lg border border-amber-100 bg-amber-50/70 p-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-xs font-semibold text-amber-700">Reason for Performance</span>
+                                                            <span className="text-[10px] uppercase tracking-wide text-amber-600">
+                                                                {isSkipped ? 'Skipped' : 'Incorrect'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="mt-2 flex flex-wrap gap-2">
+                                                            {REASON_OPTIONS.map((option) => {
+                                                                const isActive = selectedReason === option.value;
+                                                                return (
+                                                                    <button
+                                                                        key={option.value}
+                                                                        type="button"
+                                                                        onClick={() => setAnalysisReason(question.id, isActive ? null : option.value)}
+                                                                        className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${isActive
+                                                                            ? 'bg-amber-500 text-white border-amber-500'
+                                                                            : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-100'
+                                                                            }`}
+                                                                    >
+                                                                        {option.label}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <p className="mt-2 text-[10px] text-amber-600">
+                                                            Tap again to clear a selection.
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                                <div className="rounded-lg border border-blue-100 bg-blue-50/70 p-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-xs font-semibold text-blue-700">Add Notes</span>
+                                                        <div className="flex items-center gap-2">
+                                                            {noteWordCount > 0 && (
                                                                 <button
-                                                                    key={option.value}
                                                                     type="button"
-                                                                    onClick={() => setAnalysisReason(question.id, isActive ? null : option.value)}
-                                                                    className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${isActive
-                                                                        ? 'bg-amber-500 text-white border-amber-500'
-                                                                        : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-100'
-                                                                        }`}
+                                                                    onClick={() => toggleNoteExpansion(question.id)}
+                                                                    className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-700 transition-colors hover:bg-blue-50"
+                                                                    aria-expanded={isNoteExpanded}
                                                                 >
-                                                                    {option.label}
+                                                                    {isNoteExpanded ? 'Collapse note' : 'Expand note'}
                                                                 </button>
-                                                            );
-                                                        })}
+                                                            )}
+                                                            <span className="text-[10px] text-blue-600">{noteWordCount}/{MAX_NOTE_WORDS} words</span>
+                                                        </div>
                                                     </div>
-                                                    <p className="mt-2 text-[10px] text-amber-600">
-                                                        Tap again to clear a selection.
-                                                    </p>
+                                                    <textarea
+                                                        value={questionNote}
+                                                        onChange={(event) => updateQuestionNote(question.id, event.target.value)}
+                                                        placeholder="Add your personal note for this question..."
+                                                        rows={isNoteExpanded ? 8 : 4}
+                                                        className={`mt-2 w-full rounded-md border border-blue-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none ring-0 placeholder:text-slate-400 focus:border-blue-400 ${isNoteExpanded ? 'min-h-40' : 'min-h-20'}`}
+                                                    />
+                                                    {noteLimitReached && (
+                                                        <p className="mt-1 text-[11px] text-amber-700">
+                                                            50-word limit reached. Extra words were removed.
+                                                        </p>
+                                                    )}
+                                                    <div className="mt-2 flex items-center justify-between gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => saveQuestionNote(question.id)}
+                                                            disabled={isSavingNote}
+                                                            className={`rounded-md px-3 py-1.5 text-xs font-semibold text-white ${isSavingNote
+                                                                ? 'bg-blue-300'
+                                                                : 'bg-blue-600 hover:bg-blue-700'
+                                                                }`}
+                                                        >
+                                                            {isSavingNote ? 'Saving...' : 'Save Note'}
+                                                        </button>
+                                                        {noteSaved && !noteError && (
+                                                            <span className="text-[11px] text-emerald-600">Saved</span>
+                                                        )}
+                                                    </div>
+                                                    {noteError && (
+                                                        <p className="mt-1 text-[11px] text-rose-600">{noteError}</p>
+                                                    )}
                                                 </div>
-                                            )}
 
-                                            {/* Options (for MCQ) with Masked Review Mode */}
-                                            {question.question_type === 'MCQ' && question.options && (
-                                                <div>
-                                                    <h4 className="mb-2 text-sm font-medium text-slate-500">Options</h4>
-                                                    <div className="space-y-2">
-                                                        {question.options.map((option, idx) => {
-                                                            const optionLabel = getOptionLabel(idx);
-                                                            const isUserAnswer = response?.answer === optionLabel;
-                                                            const isCorrectAnswer = question.correct_answer === optionLabel;
-                                                            const peerPercent = isRevealed ? getOptionPercentage(question.id, optionLabel) : null;
+                                                {/* Options (for MCQ) with Masked Review Mode */}
+                                                {question.question_type === 'MCQ' && question.options && (
+                                                    <div>
+                                                        <h4 className="mb-2 text-sm font-medium text-slate-500">Options</h4>
+                                                        <div className="space-y-2">
+                                                            {question.options.map((option, idx) => {
+                                                                const optionLabel = getOptionLabel(idx);
+                                                                const isUserAnswer = response?.answer === optionLabel;
+                                                                const isCorrectAnswer = question.correct_answer === optionLabel;
+                                                                const peerPercent = isRevealed ? getOptionPercentage(question.id, optionLabel) : null;
 
-                                                            // Masked mode: only show user's answer (neutral), no correct/incorrect
-                                                            let optionBgClass = 'bg-gray-50';
-                                                            let optionBorderClass = '';
-                                                            let badgeClass = 'bg-gray-200 text-gray-600';
+                                                                // Masked mode: only show user's answer (neutral), no correct/incorrect
+                                                                let optionBgClass = 'bg-gray-50';
+                                                                let optionBorderClass = '';
+                                                                let badgeClass = 'bg-gray-200 text-gray-600';
 
-                                                            if (isRevealed) {
-                                                                // Revealed: show correct/incorrect highlighting
-                                                                if (isCorrectAnswer) {
-                                                                    optionBgClass = 'bg-green-100';
-                                                                    optionBorderClass = 'border border-green-300';
-                                                                    badgeClass = 'bg-green-500 text-white';
-                                                                } else if (isUserAnswer) {
-                                                                    optionBgClass = 'bg-red-100';
-                                                                    optionBorderClass = 'border border-red-300';
-                                                                    badgeClass = 'bg-red-500 text-white';
+                                                                if (isRevealed) {
+                                                                    // Revealed: show correct/incorrect highlighting
+                                                                    if (isCorrectAnswer) {
+                                                                        optionBgClass = 'bg-green-100';
+                                                                        optionBorderClass = 'border border-green-300';
+                                                                        badgeClass = 'bg-green-500 text-white';
+                                                                    } else if (isUserAnswer) {
+                                                                        optionBgClass = 'bg-red-100';
+                                                                        optionBorderClass = 'border border-red-300';
+                                                                        badgeClass = 'bg-red-500 text-white';
+                                                                    }
+                                                                } else {
+                                                                    // Masked: only highlight user's selection neutrally
+                                                                    if (isUserAnswer) {
+                                                                        optionBgClass = 'bg-blue-50';
+                                                                        optionBorderClass = 'border border-blue-200';
+                                                                        badgeClass = 'bg-blue-500 text-white';
+                                                                    }
                                                                 }
-                                                            } else {
-                                                                // Masked: only highlight user's selection neutrally
-                                                                if (isUserAnswer) {
-                                                                    optionBgClass = 'bg-blue-50';
-                                                                    optionBorderClass = 'border border-blue-200';
-                                                                    badgeClass = 'bg-blue-500 text-white';
-                                                                }
-                                                            }
 
-                                                            return (
-                                                                <div
-                                                                    key={idx}
-                                                                    className={`flex items-start gap-3 p-2 rounded-lg ${optionBgClass} ${optionBorderClass}`}
-                                                                >
-                                                                    <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${badgeClass}`}>
-                                                                        {optionLabel}
-                                                                    </span>
-                                                                    <span className="flex-1 text-sm text-slate-700">
-                                                                        <MathText text={option} />
-                                                                    </span>
+                                                                return (
+                                                                    <div
+                                                                        key={idx}
+                                                                        className={`flex items-start gap-3 p-2 rounded-lg ${optionBgClass} ${optionBorderClass}`}
+                                                                    >
+                                                                        <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${badgeClass}`}>
+                                                                            {optionLabel}
+                                                                        </span>
+                                                                        <span className="flex-1 text-sm text-slate-700">
+                                                                            <MathText text={option} />
+                                                                        </span>
 
-                                                                    {/* Peer Stats Overlay - only after reveal */}
-                                                                    {isRevealed && peerPercent !== null && (
-                                                                        <div className="flex items-center gap-2 ml-auto">
-                                                                            <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                                                                <div
-                                                                                    className={`h-full rounded-full ${isCorrectAnswer ? 'bg-green-400' : 'bg-gray-400'}`}
-                                                                                    style={{ width: `${peerPercent}%` }}
-                                                                                />
+                                                                        {/* Peer Stats Overlay - only after reveal */}
+                                                                        {isRevealed && peerPercent !== null && (
+                                                                            <div className="flex items-center gap-2 ml-auto">
+                                                                                <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                                                    <div
+                                                                                        className={`h-full rounded-full ${isCorrectAnswer ? 'bg-green-400' : 'bg-gray-400'}`}
+                                                                                        style={{ width: `${peerPercent}%` }}
+                                                                                    />
+                                                                                </div>
+                                                                                <span className="text-xs text-slate-500 w-8">{peerPercent}%</span>
                                                                             </div>
-                                                                            <span className="text-xs text-slate-500 w-8">{peerPercent}%</span>
-                                                                        </div>
-                                                                    )}
+                                                                        )}
 
-                                                                    {/* Labels */}
-                                                                    {isRevealed && isCorrectAnswer && (
-                                                                        <span className="text-xs text-green-600 font-medium whitespace-nowrap">
-                                                                            Correct
-                                                                        </span>
-                                                                    )}
-                                                                    {isRevealed && isUserAnswer && !isCorrectAnswer && (
-                                                                        <span className="text-xs text-red-600 font-medium whitespace-nowrap">
-                                                                            Your answer
-                                                                        </span>
-                                                                    )}
-                                                                    {!isRevealed && isUserAnswer && (
-                                                                        <span className="text-xs text-blue-600 font-medium whitespace-nowrap">
-                                                                            Your answer
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })}
+                                                                        {/* Labels */}
+                                                                        {isRevealed && isCorrectAnswer && (
+                                                                            <span className="text-xs text-green-600 font-medium whitespace-nowrap">
+                                                                                Correct
+                                                                            </span>
+                                                                        )}
+                                                                        {isRevealed && isUserAnswer && !isCorrectAnswer && (
+                                                                            <span className="text-xs text-red-600 font-medium whitespace-nowrap">
+                                                                                Your answer
+                                                                            </span>
+                                                                        )}
+                                                                        {!isRevealed && isUserAnswer && (
+                                                                            <span className="text-xs text-blue-600 font-medium whitespace-nowrap">
+                                                                                Your answer
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            )}
+                                                )}
 
-                                            {/* TITA Answer - Masked Review Mode */}
-                                            {question.question_type === 'TITA' && (
-                                                <div className="flex gap-6">
-                                                    {isRevealed ? (
-                                                        <>
-                                                            <div>
-                                                                <h4 className="text-sm font-medium text-slate-500 mb-1">Correct Answer</h4>
-                                                                <MathText
-                                                                    text={question.correct_answer}
-                                                                    className="text-lg font-bold text-green-600 [&_p]:my-0"
-                                                                />
-                                                            </div>
+                                                {/* TITA Answer - Masked Review Mode */}
+                                                {question.question_type === 'TITA' && (
+                                                    <div className="flex gap-6">
+                                                        {isRevealed ? (
+                                                            <>
+                                                                <div>
+                                                                    <h4 className="text-sm font-medium text-slate-500 mb-1">Correct Answer</h4>
+                                                                    <MathText
+                                                                        text={question.correct_answer}
+                                                                        className="text-lg font-bold text-green-600 [&_p]:my-0"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <h4 className="text-sm font-medium text-slate-500 mb-1">Your Answer</h4>
+                                                                    <MathText
+                                                                        text={response?.answer || '(Not answered)'}
+                                                                        className={`text-lg font-bold ${isCorrect === true ? 'text-green-600' : isCorrect === false ? 'text-red-600' : 'text-gray-500'} [&_p]:my-0`}
+                                                                    />
+                                                                </div>
+                                                            </>
+                                                        ) : (
                                                             <div>
                                                                 <h4 className="text-sm font-medium text-slate-500 mb-1">Your Answer</h4>
                                                                 <MathText
                                                                     text={response?.answer || '(Not answered)'}
-                                                                    className={`text-lg font-bold ${isCorrect === true ? 'text-green-600' : isCorrect === false ? 'text-red-600' : 'text-gray-500'} [&_p]:my-0`}
+                                                                    className="text-lg font-bold text-blue-600 [&_p]:my-0"
                                                                 />
                                                             </div>
-                                                        </>
-                                                    ) : (
-                                                        <div>
-                                                            <h4 className="text-sm font-medium text-slate-500 mb-1">Your Answer</h4>
-                                                            <MathText
-                                                                text={response?.answer || '(Not answered)'}
-                                                                className="text-lg font-bold text-blue-600 [&_p]:my-0"
-                                                            />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
+                                                        )}
+                                                    </div>
+                                                )}
 
-                                            {/* Check Answer Button - Masked Review Mode */}
-                                            {!isRevealed && (
-                                                <div className="pt-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => revealAnswer(question.id)}
-                                                        className="rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8]"
-                                                    >
-                                                        Check Answer and Show Solution
-                                                    </button>
-                                                </div>
-                                            )}
-
-                                            {/* Solution - only after reveal */}
-                                            {isRevealed && question.solution_text && (
-                                                <div>
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <h4 className="text-sm font-medium text-slate-500">Solution</h4>
+                                                {/* Check Answer Button - Masked Review Mode */}
+                                                {!isRevealed && (
+                                                    <div className="pt-2">
                                                         <button
                                                             type="button"
-                                                            onClick={() => toggleSolution(question.id)}
-                                                            className="text-sm text-[#2563EB] hover:underline"
-                                                            aria-expanded={isSolutionVisible}
+                                                            onClick={() => revealAnswer(question.id)}
+                                                            className="rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#1D4ED8]"
                                                         >
-                                                            {isSolutionVisible ? 'Hide Solution' : 'View Solution'}
+                                                            Check Answer and Show Solutions
                                                         </button>
                                                     </div>
-                                                    <div
-                                                        className={`transition-all duration-200 ${isSolutionVisible ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}
-                                                    >
-                                                        <div className="prose prose-sm max-w-none rounded-lg bg-blue-50 p-4 text-slate-700">
-                                                            <MathText text={question.solution_text ?? ''} />
+                                                )}
+
+                                                {/* Solutions - only after reveal */}
+                                                {(() => {
+                                                    const normalizedTextbookSolution = normalizeSolutionText(question.solution_text);
+                                                    const normalizedToppersApproach = normalizeSolutionText(question.toppers_approach);
+                                                    const hasDistinctToppersApproach =
+                                                        normalizedToppersApproach.length > 0 &&
+                                                        normalizedToppersApproach !== normalizedTextbookSolution;
+
+                                                    if (!isRevealed || (!question.solution_text && !hasDistinctToppersApproach)) {
+                                                        return null;
+                                                    }
+
+                                                    return (
+                                                        <div>
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <h4 className="text-sm font-medium text-slate-500">Solutions</h4>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => toggleSolution(question.id)}
+                                                                    className="text-sm text-[#2563EB] hover:underline"
+                                                                    aria-expanded={isSolutionVisible}
+                                                                >
+                                                                    {isSolutionVisible ? 'Hide Solutions' : 'View Solutions'}
+                                                                </button>
+                                                            </div>
+                                                            <div
+                                                                className={`transition-all duration-200 ${isSolutionVisible ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}
+                                                            >
+                                                                <div className="space-y-3">
+                                                                    {question.solution_text && (
+                                                                        <div className="rounded-lg bg-blue-50 p-4">
+                                                                            <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                                                                                Textbook Solution
+                                                                            </h5>
+                                                                            <div className="prose prose-sm max-w-none whitespace-pre-wrap text-slate-700">
+                                                                                <MathText text={question.solution_text} />
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                    {hasDistinctToppersApproach && (
+                                                                        <div className="rounded-lg bg-amber-50 p-4">
+                                                                            <h5 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                                                Toppers Approach
+                                                                            </h5>
+                                                                            <div className="prose prose-sm max-w-none whitespace-pre-wrap text-slate-700">
+                                                                                <MathText text={question.toppers_approach} />
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+
+                    {/* Topic Navigator */}
+                    <aside className="lg:col-span-1">
+                        <div className="space-y-3 lg:sticky lg:top-4">
+                            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]">
+                                <h3 className="text-sm font-semibold text-slate-800 mb-3">Topics</h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveTopic('all')}
+                                    className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${activeTopic === 'all'
+                                        ? 'bg-[#EFF6FF] text-[#2563EB]'
+                                        : 'text-slate-600 hover:bg-slate-50'
+                                        }`}
+                                >
+                                    All Topics ({baseFilteredQuestions.length})
+                                </button>
+                                <div className="mt-2 space-y-1">
+                                    {topics.length === 0 ? (
+                                        <div className="text-xs text-slate-400">No topics available.</div>
+                                    ) : (
+                                        topics.map((topic) => (
+                                            <button
+                                                key={topic.name}
+                                                type="button"
+                                                onClick={() => setActiveTopic(topic.name)}
+                                                className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${activeTopic === topic.name
+                                                    ? 'bg-[#EFF6FF] text-[#2563EB]'
+                                                    : 'text-slate-600 hover:bg-slate-50'
+                                                    }`}
+                                            >
+                                                {topic.name} ({topic.count})
+                                            </button>
+                                        ))
                                     )}
                                 </div>
-                            );
-                        })
-                    )}
-                </div>
-
-                {/* Topic Navigator */}
-                <aside className="lg:col-span-1">
-                    <div className="space-y-3 lg:sticky lg:top-4">
-                        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]">
-                            <h3 className="text-sm font-semibold text-slate-800 mb-3">Topics</h3>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTopic('all')}
-                                className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${activeTopic === 'all'
-                                    ? 'bg-[#EFF6FF] text-[#2563EB]'
-                                    : 'text-slate-600 hover:bg-slate-50'
-                                    }`}
-                            >
-                                All Topics ({baseFilteredQuestions.length})
-                            </button>
-                            <div className="mt-2 space-y-1">
-                                {topics.length === 0 ? (
-                                    <div className="text-xs text-slate-400">No topics available.</div>
-                                ) : (
-                                    topics.map((topic) => (
-                                        <button
-                                            key={topic.name}
-                                            type="button"
-                                            onClick={() => setActiveTopic(topic.name)}
-                                            className={`w-full text-left text-sm px-2 py-1.5 rounded transition-colors ${activeTopic === topic.name
-                                                ? 'bg-[#EFF6FF] text-[#2563EB]'
-                                                : 'text-slate-600 hover:bg-slate-50'
-                                                }`}
-                                        >
-                                            {topic.name} ({topic.count})
-                                        </button>
-                                    ))
-                                )}
                             </div>
                         </div>
-                    </div>
-                </aside>
-            </div>
+                    </aside>
+                </div>
             )}
 
         </div>

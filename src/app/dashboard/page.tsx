@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { sbSSR } from '@/lib/supabase/server';
+import { DashboardBookmarks } from '@/components/DashboardBookmarks';
 
 type Attempt = {
     id: string;
@@ -217,6 +218,11 @@ export default async function DashboardPage({
                     </div>
                 </div>
             )}
+
+            {/* Bookmarks Section */}
+            <div className="mb-8">
+                <DashboardBookmarks />
+            </div>
 
             <h2 className="mb-4 text-xl font-semibold text-slate-900">My Attempts</h2>
 

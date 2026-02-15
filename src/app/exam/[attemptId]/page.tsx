@@ -93,11 +93,77 @@ export default async function ExamPage({ params }: PageProps) {
         redirect(`/auth/sign-in?redirect_to=${encodeURIComponent(`/exam/${attemptId}`)}`);
     }
 
-    // Get attempt with paper details
-    const { data: attemptData, error: attemptError } = await supabase
+    const attemptSelect = `
+            id, user_id, paper_id, status, started_at, submitted_at, completed_at,
+            attempt_mode, sectional_section, current_section, current_question, time_remaining,
+            total_score, correct_count, incorrect_count, unanswered_count,
+            section_scores, percentile, rank, created_at, updated_at,
+            papers (
+                id, slug, title, description, year,
+                total_questions, total_marks, duration_minutes, sections,
+                default_positive_marks, default_negative_marks,
+                published, available_from, available_until,
+                difficulty_level, is_free, attempt_limit, allow_pause,
+                created_at, updated_at
+            )
+        `;
+    const initialAttemptResult = await supabase
         .from('attempts')
-        .select(
-            `
+        .select(attemptSelect)
+        .eq('id', attemptId)
+        .single();
+
+    let attemptData: ({
+        id: string;
+        user_id: string;
+        paper_id: string;
+        status: string;
+        started_at: string;
+        submitted_at: string | null;
+        completed_at: string | null;
+        attempt_mode?: string | null;
+        sectional_section?: string | null;
+        current_section: string;
+        current_question: number | null;
+        time_remaining: unknown;
+        total_score: number | null;
+        correct_count: number | null;
+        incorrect_count: number | null;
+        unanswered_count: number | null;
+        section_scores: unknown;
+        percentile: number | null;
+        rank: number | null;
+        created_at: string;
+        updated_at: string;
+        papers: unknown;
+    } | null) = initialAttemptResult.data as unknown as {
+        id: string;
+        user_id: string;
+        paper_id: string;
+        status: string;
+        started_at: string;
+        submitted_at: string | null;
+        completed_at: string | null;
+        attempt_mode?: string | null;
+        sectional_section?: string | null;
+        current_section: string;
+        current_question: number | null;
+        time_remaining: unknown;
+        total_score: number | null;
+        correct_count: number | null;
+        incorrect_count: number | null;
+        unanswered_count: number | null;
+        section_scores: unknown;
+        percentile: number | null;
+        rank: number | null;
+        created_at: string;
+        updated_at: string;
+        papers: unknown;
+    } | null;
+    let attemptError = initialAttemptResult.error;
+
+    if (initialAttemptResult.error?.code === '42703') {
+        const fallbackSelect = `
             id, user_id, paper_id, status, started_at, submitted_at, completed_at,
             current_section, current_question, time_remaining,
             total_score, correct_count, incorrect_count, unanswered_count,
@@ -110,10 +176,17 @@ export default async function ExamPage({ params }: PageProps) {
                 difficulty_level, is_free, attempt_limit, allow_pause,
                 created_at, updated_at
             )
-        `
-        )
-        .eq('id', attemptId)
-        .single();
+        `;
+        const fallback = await supabase
+            .from('attempts')
+            .select(fallbackSelect)
+            .eq('id', attemptId)
+            .single();
+        attemptData = fallback.data
+            ? { ...fallback.data, attempt_mode: 'full', sectional_section: null }
+            : null;
+        attemptError = fallback.error;
+    }
 
     if (attemptError || !attemptData) {
         return (
@@ -211,6 +284,14 @@ export default async function ExamPage({ params }: PageProps) {
         updated_at: paperData.updated_at,
     };
 
+    const attemptMode = (attemptData.attempt_mode as Attempt['attempt_mode']) ?? 'full';
+    const sectionalAttemptSection = (attemptData.sectional_section as Attempt['sectional_section']) ?? null;
+    const sectionalFilterSection: SectionName | null =
+        attemptMode === 'sectional' &&
+        (sectionalAttemptSection === 'VARC' || sectionalAttemptSection === 'DILR' || sectionalAttemptSection === 'QA')
+            ? sectionalAttemptSection
+            : null;
+
     const attempt: Attempt = {
         id: attemptData.id,
         user_id: attemptData.user_id,
@@ -219,7 +300,9 @@ export default async function ExamPage({ params }: PageProps) {
         submitted_at: attemptData.submitted_at ?? undefined,
         completed_at: attemptData.completed_at ?? undefined,
         status: attemptData.status as Attempt['status'],
-        current_section: attemptData.current_section as Attempt['current_section'],
+        attempt_mode: attemptMode,
+        sectional_section: sectionalAttemptSection,
+        current_section: (sectionalFilterSection ?? attemptData.current_section) as Attempt['current_section'],
         current_question: attemptData.current_question ?? 1,
         time_remaining: attemptData.time_remaining as Attempt['time_remaining'],
         total_score: attemptData.total_score ?? undefined,
@@ -268,10 +351,14 @@ export default async function ExamPage({ params }: PageProps) {
     };
 
     // Prefer set-aware view when available
-    const { data: questionSetRows, error: questionSetError } = await supabase
+    let questionSetsQuery = supabase
         .from('question_sets_with_questions')
         .select('*')
         .eq('paper_id', attemptData.paper_id);
+    if (sectionalFilterSection) {
+        questionSetsQuery = questionSetsQuery.eq('section', sectionalFilterSection);
+    }
+    const { data: questionSetRows, error: questionSetError } = await questionSetsQuery;
 
     if (questionSetError) {
         logger?.warn?.('Failed to fetch question_sets_with_questions', questionSetError, {
@@ -334,12 +421,16 @@ export default async function ExamPage({ params }: PageProps) {
 
     // Fallback to legacy assembly if set view not available / empty
     if (questionSets.length === 0) {
-        const { data: questionsData, error: questionsError } = await supabase
+        let questionsQuery = supabase
             .from('questions_exam')
             .select('*')
             .eq('paper_id', attemptData.paper_id)
             .eq('is_active', true)
             .order('question_number');
+        if (sectionalFilterSection) {
+            questionsQuery = questionsQuery.eq('section', sectionalFilterSection);
+        }
+        const { data: questionsData, error: questionsError } = await questionsQuery;
 
         if (questionsError || !questionsData) {
             return (

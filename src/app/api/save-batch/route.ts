@@ -113,11 +113,23 @@ export async function POST(req: NextRequest) {
         }
 
         const adminClient = getServiceRoleClient();
-        const { data: attempt, error: attemptError } = await adminClient
+        let { data: attempt, error: attemptError } = await adminClient
             .from('attempts')
-            .select('id, user_id, status, started_at, paper_id, submitted_at')
+            .select('id, user_id, status, started_at, paper_id, submitted_at, attempt_mode, sectional_section')
             .eq('id', attemptId)
             .maybeSingle();
+
+        if (attemptError?.code === '42703') {
+            const retry = await adminClient
+                .from('attempts')
+                .select('id, user_id, status, started_at, paper_id, submitted_at')
+                .eq('id', attemptId)
+                .maybeSingle();
+            attempt = retry.data
+                ? { ...retry.data, attempt_mode: 'full', sectional_section: null }
+                : attempt;
+            attemptError = retry.error ?? null;
+        }
 
         if (attemptError || !attempt) {
             return NextResponse.json({ error: 'Failed to fetch attempt' }, { status: 500 });
@@ -142,6 +154,34 @@ export async function POST(req: NextRequest) {
                 submitted_at: attempt.submitted_at,
             });
             return NextResponse.json({ error: 'Attempt is not in progress' }, { status: 400 });
+        }
+
+        const questionIds = Array.from(
+            new Set(
+                (responses as BatchItem[])
+                    .map((item) => item?.questionId)
+                    .filter((questionId): questionId is string => isNonEmptyString(questionId))
+            )
+        );
+        if (questionIds.length > 0) {
+            let scopedQuestionsQuery = supabase
+                .from('questions_exam')
+                .select('id')
+                .eq('paper_id', attempt.paper_id)
+                .eq('is_active', true)
+                .in('id', questionIds);
+            if (attempt.attempt_mode === 'sectional' && attempt.sectional_section) {
+                scopedQuestionsQuery = scopedQuestionsQuery.eq('section', attempt.sectional_section);
+            }
+            const { data: scopedQuestions, error: scopedQuestionsError } = await scopedQuestionsQuery;
+            if (scopedQuestionsError) {
+                return NextResponse.json({ error: 'Failed to validate questions for this attempt' }, { status: 500 });
+            }
+            const validQuestionIdSet = new Set((scopedQuestions ?? []).map((question) => question.id));
+            const invalidQuestionIds = questionIds.filter((questionId) => !validQuestionIdSet.has(questionId));
+            if (invalidQuestionIds.length > 0) {
+                return NextResponse.json({ error: 'Invalid question ids for this attempt' }, { status: 400 });
+            }
         }
 
         if (!sessionToken) {

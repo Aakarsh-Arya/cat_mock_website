@@ -1161,6 +1161,8 @@ interface AnalysisStoreState {
 interface AnalysisStoreActions {
     setReason: (questionId: string, reason: PerformanceReason | null) => void;
     toggleBookmark: (questionId: string) => void;
+    setBookmark: (questionId: string, value: boolean) => void;
+    setBookmarks: (questionIds: string[]) => void;
     clearReason: (questionId: string) => void;
     resetAnalysis: () => void;
 }
@@ -1194,6 +1196,26 @@ const createAnalysisStore = (attemptId: string) => {
                         }
                         return { bookmarks: next };
                     });
+                },
+                setBookmark: (questionId, value) => {
+                    set((state) => {
+                        const next = { ...state.bookmarks };
+                        if (value) {
+                            next[questionId] = true;
+                        } else {
+                            delete next[questionId];
+                        }
+                        return { bookmarks: next };
+                    });
+                },
+                setBookmarks: (questionIds) => {
+                    const next: Record<string, boolean> = {};
+                    questionIds.forEach((questionId) => {
+                        if (typeof questionId === 'string' && questionId.trim().length > 0) {
+                            next[questionId] = true;
+                        }
+                    });
+                    set({ bookmarks: next });
                 },
                 clearReason: (questionId) => {
                     set((state) => {

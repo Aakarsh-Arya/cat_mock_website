@@ -42,6 +42,14 @@ interface SectionScore {
     unanswered: number;
 }
 
+function parseSectionName(value?: string | null): SectionName | null {
+    const normalized = (value ?? '').toUpperCase().trim();
+    if (normalized === 'VARC' || normalized === 'DILR' || normalized === 'QA') {
+        return normalized as SectionName;
+    }
+    return null;
+}
+
 // Error UI component for consistent error display
 function ErrorState({ title, message, linkHref, linkText, icon }: {
     title: string;
@@ -137,6 +145,11 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
 
     const { attempt, questions, responses } = result.data!;
+    const sectionalSection =
+        attempt.attempt_mode === 'sectional'
+            ? parseSectionName(attempt.sectional_section ?? null)
+            : null;
+    const visibleSections: SectionName[] = sectionalSection ? [sectionalSection] : ['VARC', 'DILR', 'QA'];
 
     const responsesForScoring: ResponseForScoring[] = responses.map((r) => ({
         question_id: r.question_id,
@@ -169,6 +182,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
             q.id,
             {
                 solution_text: q.solution_text ?? null,
+                toppers_approach: q.toppers_approach ?? null,
                 solution_image_url: q.solution_image_url ?? null,
                 video_solution_url: q.video_solution_url ?? null,
             },
@@ -183,6 +197,9 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                 updated_at: r.updated_at ?? null,
             },
         ])
+    );
+    const responseNoteMap = Object.fromEntries(
+        normalizedResponses.map((r) => [r.question_id, r.user_note ?? ''])
     );
     const responseStatusMap = Object.fromEntries(normalizedResponses.map((r) => [r.question_id, r.status]));
 
@@ -208,7 +225,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
     const { data: paper } = await supabase
         .from('papers')
-        .select('title, total_marks, total_questions')
+        .select('title, total_marks, total_questions, sections')
         .eq('id', attempt.paper_id)
         .single();
 
@@ -256,10 +273,14 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
         }>;
     };
 
-    const { data: questionSetRows, error: questionSetError } = await supabase
+    let questionSetsQuery = supabase
         .from('question_sets_with_questions')
         .select('*')
         .eq('paper_id', attempt.paper_id);
+    if (sectionalSection) {
+        questionSetsQuery = questionSetsQuery.eq('section', sectionalSection);
+    }
+    const { data: questionSetRows, error: questionSetError } = await questionSetsQuery;
 
     if (questionSetError) {
         console.warn('[ResultPage] Failed to fetch question_sets_with_questions', questionSetError);
@@ -381,7 +402,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
         if (normalized === 'VARC' || normalized === 'DILR' || normalized === 'QA') {
             return normalized as SectionName;
         }
-        return value as SectionName;
+        return sectionalSection ?? 'VARC';
     };
 
     const questionSectionMap = new Map<string, SectionName>();
@@ -403,6 +424,26 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
     }
 
     const sectionScores = (derivedScore?.section_scores || attempt.section_scores || {}) as Record<string, SectionScore>;
+    const sectionConfigFromPaper = Array.isArray(paper?.sections)
+        ? Object.fromEntries(
+            paper.sections
+                .map((section) => {
+                    if (!section || typeof section !== 'object') return null;
+                    const name = parseSectionName((section as { name?: string }).name ?? null);
+                    if (!name) return null;
+                    const maxMarksRaw = (section as { marks?: unknown }).marks;
+                    const totalQuestionsRaw = (section as { questions?: unknown }).questions;
+                    const totalQuestions = typeof totalQuestionsRaw === 'number' && Number.isFinite(totalQuestionsRaw)
+                        ? totalQuestionsRaw
+                        : 0;
+                    const maxMarks = typeof maxMarksRaw === 'number' && Number.isFinite(maxMarksRaw)
+                        ? maxMarksRaw
+                        : totalQuestions * 3;
+                    return [name, { maxMarks, totalQuestions }];
+                })
+                .filter((entry): entry is [SectionName, { maxMarks: number; totalQuestions: number }] => Boolean(entry))
+        )
+        : undefined;
     const nexaiDemoMarkdown = await loadNexaiDemoMarkdown();
     const hasNexAIInsight = typeof attempt.ai_analysis_result_text === 'string' && attempt.ai_analysis_result_text.trim().length > 0;
     const nexaiMarkdown = hasNexAIInsight ? attempt.ai_analysis_result_text?.trim() : nexaiDemoMarkdown;
@@ -465,6 +506,8 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                                     unanswered: number;
                                     timeTakenSeconds?: number;
                                 }>}
+                                sections={visibleSections}
+                                sectionConfig={sectionConfigFromPaper}
                             />
 
                             {questions && questions.length > 0 && (
@@ -485,6 +528,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                                         options: q.options as string[] | null,
                                         correct_answer: q.correct_answer,
                                         solution_text: q.solution_text ?? null,
+                                        toppers_approach: q.toppers_approach ?? null,
                                         question_image_url: q.question_image_url ?? null,
                                         topic: q.topic ?? null,
                                         subtopic: q.subtopic ?? null,
@@ -495,6 +539,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                                     attemptSequenceLabel={attemptSequenceLabel}
                                     attemptId={attempt.id}
                                     showHeader={false}
+                                    responseNoteMap={responseNoteMap}
                                 />
                             )}
 
@@ -524,6 +569,7 @@ export default async function ResultPage({ params }: { params: Promise<Record<st
                             solutionMap={solutionMap}
                             responseMetaMap={responseMetaMap}
                             responseStatusMap={responseStatusMap}
+                            responseNoteMap={responseNoteMap}
                             attemptId={attempt.id}
                         />
                     ) : null}

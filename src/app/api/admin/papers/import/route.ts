@@ -24,6 +24,8 @@ interface PaperData {
     published?: boolean;
     allow_pause?: boolean;
     attempt_limit?: number;
+    allow_sectional_attempts?: boolean;
+    sectional_allowed_sections?: string[];
     paper_key?: string;
 }
 
@@ -62,6 +64,7 @@ interface Question {
     topic?: string;
     subtopic?: string;
     solution_text?: string;
+    toppers_approach?: string;
     solution_image_url?: string;
     video_solution_url?: string;
 }
@@ -304,6 +307,12 @@ export async function POST(request: NextRequest) {
             published: publish,
             allow_pause: data.paper.allow_pause ?? true,
             attempt_limit: data.paper.attempt_limit ?? 0,
+            allow_sectional_attempts: data.paper.allow_sectional_attempts ?? false,
+            sectional_allowed_sections: Array.isArray(data.paper.sectional_allowed_sections)
+                ? data.paper.sectional_allowed_sections
+                    .map((section) => String(section).toUpperCase().trim())
+                    .filter((section) => VALID_SECTIONS.includes(section))
+                : ['VARC', 'DILR', 'QA'],
         };
 
         let paper;
@@ -411,6 +420,7 @@ export async function POST(request: NextRequest) {
                 topic: q.topic || null,
                 subtopic: q.subtopic || null,
                 solution_text: q.solution_text || null,
+                toppers_approach: q.toppers_approach || null,
                 solution_image_url: q.solution_image_url || null,
                 video_solution_url: q.video_solution_url || null,
                 set_id: setId,
@@ -420,7 +430,20 @@ export async function POST(request: NextRequest) {
             };
         });
 
-        const { error: questionsError } = await adminClient.from('questions').insert(questionsToInsert);
+        let { error: questionsError } = await adminClient.from('questions').insert(questionsToInsert);
+
+        // Backward compatibility: if migration for toppers_approach is not applied yet,
+        // retry without the column so import still works.
+        if (questionsError?.code === '42703') {
+            const fallbackQuestions = questionsToInsert.map((question) => {
+                const copy = { ...question } as Record<string, unknown>;
+                delete copy.toppers_approach;
+                return copy;
+            });
+            const fallbackResult = await adminClient.from('questions').insert(fallbackQuestions);
+            questionsError = fallbackResult.error;
+        }
+
         if (questionsError) throw questionsError;
 
         // 7. Create ingest run

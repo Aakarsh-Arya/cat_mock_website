@@ -34,7 +34,6 @@ export function ResultTabsClient({
     const hasNexAI = hasNexAIProp ?? Boolean(nexai);
     const initialTab: TabId = hasReview ? 'review' : 'analytics';
     const [activeTab, setActiveTab] = useState<TabId>(initialTab);
-    const [isMounted, setIsMounted] = useState(false);
     const [isReady, setIsReady] = useState(false);
     const scrollPositions = useRef<Record<TabId, number>>({ review: 0, analytics: 0, nexai: 0 });
 
@@ -45,10 +44,6 @@ export function ResultTabsClient({
         if (hasNexAI) tabs.push('nexai');
         return tabs;
     }, [hasNexAI, hasReview]);
-
-    useEffect(() => {
-        setIsMounted(true);
-    }, []);
 
     const syncFromHash = useCallback(() => {
         if (typeof window === 'undefined') return;
@@ -67,7 +62,7 @@ export function ResultTabsClient({
     }, [hasNexAI, hasReview]);
 
     useEffect(() => {
-        if (!isMounted || typeof window === 'undefined') return;
+        if (typeof window === 'undefined') return;
 
         const storageKey = `result-active-tab:${window.location.pathname}`;
         const hash = window.location.hash;
@@ -91,7 +86,7 @@ export function ResultTabsClient({
 
         window.addEventListener('hashchange', syncFromHash);
         return () => window.removeEventListener('hashchange', syncFromHash);
-    }, [hasNexAI, hasReview, initialTab, isMounted, syncFromHash]);
+    }, [hasNexAI, hasReview, initialTab, syncFromHash]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -115,17 +110,6 @@ export function ResultTabsClient({
         }
         setActiveTab(tab);
     };
-
-    if (!isMounted) {
-        return (
-            <div className="space-y-6">
-                <div className="h-12 rounded-xl border border-slate-200 bg-white shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]" aria-hidden />
-                <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)]">
-                    Loading result views...
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="space-y-6">
